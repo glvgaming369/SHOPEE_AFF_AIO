@@ -1,0 +1,667 @@
+"""Local HTTP server - cau noi giua Tampermonkey (chay trong tung Chrome profile, tu goi
+API affiliate.shopee.* that qua fetch() cua trang, co san cookie dang nhap) va SQLite
+(shopee_db.py). Ly do can server rieng: Tampermonkey/trinh duyet khong doc/ghi SQLite truc
+tiep duoc; nhieu Chrome profile chay SONG SONG (nhieu tai khoan) can 1 noi TRUNG TAM giu
+tinh nguyen tu khi gan item vao group (try_assign_verified) de khong bi 2 profile gianh
+trung 1 san pham cho 2 group khac nhau.
+
+Chi bind 127.0.0.1 (khong 0.0.0.0) - server nay khong danh cho truy cap tu may khac.
+Tampermonkey goi qua GM_xmlhttpRequest (khong phai fetch() thuong cua trang) de ne CORS
+hoan toan - server KHONG can bat CORS.
+
+Chay:
+    python scripts/affiliate_scrape_server.py
+    python scripts/affiliate_scrape_server.py --port 8877 --db-path artifacts/db/shopee.db
+"""
+import argparse
+import io
+import os
+from datetime import datetime
+
+from flask import Flask, Response, abort, jsonify, render_template, request
+from openpyxl import Workbook
+
+import chrome_launcher
+import dongvanfb_client
+import shopee_db
+import videoai_client
+
+app = Flask(__name__)
+DB_PATH = shopee_db.DB_PATH_DEFAULT  # ghi de qua --db-path luc khoi dong, xem main()
+LAUNCH_URL_DEFAULT = "https://affiliate.shopee.ph/offer/product_offer"
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+USERSCRIPTS_DIR = os.path.join(SCRIPTS_DIR, "userscripts")
+
+# Nguon chan ly DUY NHAT cho moi thu lien quan userscript - dashboard (index.html) doc
+# qua GET /api/userscripts thay vi hardcode ten/mo ta rieng, tranh 2 noi bi lech nhau.
+# Cung la danh sach trang cho /userscripts/<file> (KHONG phuc vu file ngoai danh sach nay,
+# du server chi bind 127.0.0.1).
+USERSCRIPTS = [
+    {
+        "file": "tampermonkey_affiliate_group_scraper.user.js",
+        "title": "Affiliate Offer Group Scraper",
+        "description": "Script CHINH: chay tren affiliate.shopee.* de gom du 60 san pham/group (BFS qua san pham tuong tu). Can cho MOI tai khoan/profile dang dung de cao.",
+    },
+    {
+        "file": "shopee_collector.user.js",
+        "title": "Shopee Product Link Collector",
+        "description": "Chay tren trang Shopee thuong (khong phai affiliate) - cuon trang tu dong thu thap link san pham, day thang lam root vao DB hoac xuat TXT/JSON/CSV.",
+    },
+    {
+        "file": "tampermonkey_flashsale_scraper.user.js",
+        "title": "Shopee Flash Sale Link Scraper",
+        "description": "Cao link san pham tu trang Flash Sale Shopee - tinh nang rieng, cu hon, khong thuoc pipeline affiliate offer/group.",
+    },
+    {
+        "file": "shopee_ph_phone_checker.user.js",
+        "title": "Shopee PH Phone Checker (SMSPool + 5sim + dongvanfb Mail)",
+        "description": "1 script, 2 vai tro theo domain dang mo: tren bat ky trang nao cua shopee.ph - lay so PH tu SMSPool/5sim qua API key hoac dongvanfb mail, kiem tra check_phone_exist, tu huy so da ton tai; tren 5sim.net - mua/huy so bang chinh session trinh duyet (khong qua API key, ne rate limit rieng), gui yeu cau check sang tab shopee.ph qua GM_addValueChangeListener (cung 1 script, khong can server trung gian) roi tu quyet dinh huy/giu.",
+    },
+]
+USERSCRIPT_ALLOWLIST = {u["file"] for u in USERSCRIPTS}
+
+
+@app.route("/", methods=["GET"])
+def index():
+    return render_template("index.html")
+
+
+@app.route("/api/userscripts", methods=["GET"])
+def list_userscripts():
+    return jsonify({"userscripts": USERSCRIPTS})
+
+
+@app.route("/userscripts/<name>", methods=["GET"])
+def userscript(name):
+    """Phuc vu file .user.js THAT tu thu muc scripts/userscripts/ - dat @updateURL/
+    @downloadURL trong header script tro ve day de Tampermonkey TU phat hien ban moi (so
+    @version) va hien man hinh "Update" - khong can copy/dan tay nua. Content-Type dung
+    de Tampermonkey/trinh duyet nhan dien day la userscript."""
+    if name not in USERSCRIPT_ALLOWLIST:
+        abort(404)
+    path = os.path.join(USERSCRIPTS_DIR, name)
+    with open(path, "r", encoding="utf-8") as f:
+        content = f.read()
+    return Response(content, content_type="text/javascript; charset=utf-8")
+
+
+def _bad_request(msg):
+    return jsonify({"error": msg}), 400
+
+
+@app.errorhandler(Exception)
+def _handle_error(e):
+    # Khong de loi tran ra thanh HTML mac dinh cua Flask - Tampermonkey/dashboard doc
+    # JSON. QUAN TRONG: HTTPException (vd tu abort(404)) da co san status code dung -
+    # phai giu nguyen, khong de tat ca roi xuong 500 (da gap bug that: abort(404) o
+    # /userscripts/<name> bi handler nay de thanh 500).
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return jsonify({"error": e.description}), e.code
+    return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/roots/import", methods=["POST"])
+def import_roots():
+    body = request.get_json(force=True, silent=True) or {}
+    links = body.get("links")
+    if not isinstance(links, list) or not links:
+        return _bad_request("thieu 'links' (danh sach string)")
+    added = shopee_db.import_roots_as_pending(DB_PATH, links)
+    return jsonify({"added": added})
+
+
+@app.route("/api/roots/claim", methods=["POST"])
+def claim_root():
+    body = request.get_json(force=True, silent=True) or {}
+    device_key = body.get("device_key")
+    if not device_key:
+        return _bad_request("thieu 'device_key' (ten tai khoan/profile dang claim)")
+    row = shopee_db.claim_root(DB_PATH, device_key)
+    return jsonify({"root": row})
+
+
+@app.route("/api/roots/<itemid>/assign", methods=["POST"])
+def assign_root(itemid):
+    body = request.get_json(force=True, silent=True) or {}
+    device_key = body.get("device_key")
+    if not device_key:
+        return _bad_request("thieu 'device_key'")
+    result = shopee_db.assign_root_to_worker(DB_PATH, itemid, device_key)
+    return jsonify(result), (200 if result["ok"] else 409)
+
+
+@app.route("/api/workers/<device_key>/assigned_root", methods=["GET"])
+def assigned_root(device_key):
+    root = shopee_db.get_assigned_root_for_worker(DB_PATH, device_key)
+    return jsonify({"root": root})
+
+
+@app.route("/api/workers/heartbeat", methods=["POST"])
+def workers_heartbeat():
+    body = request.get_json(force=True, silent=True) or {}
+    device_key = body.get("device_key")
+    status = body.get("status")
+    if not device_key or not status:
+        return _bad_request("thieu 'device_key' hoac 'status'")
+    shopee_db.worker_heartbeat(DB_PATH, device_key, status, body.get("current_root"))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/workers", methods=["GET"])
+def workers_list():
+    return jsonify({"workers": shopee_db.list_workers(DB_PATH)})
+
+
+@app.route("/api/roots/<itemid>/reset", methods=["POST"])
+def reset_root(itemid):
+    ok = shopee_db.reset_root_to_pending(DB_PATH, itemid)
+    if not ok:
+        return _bad_request(f"khong tim thay root '{itemid}'")
+    return jsonify({"ok": True})
+
+
+@app.route("/api/roots/<itemid>/fail", methods=["POST"])
+def fail_root(itemid):
+    """Worker goi khi API tra loi that su cho chinh root (vd 'invalid item id') - nha
+    claim + chuyen status_link='fail' de KHONG bi nhan lai vo han lan sau."""
+    body = request.get_json(force=True, silent=True) or {}
+    reason = body.get("reason") or "unknown_error"
+    shopee_db.mark_root_failed(DB_PATH, itemid, reason)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/roots/<itemid>/recompute_merged", methods=["POST"])
+def recompute_merged(itemid):
+    """Tinh lai merged_link thu cong - dung cho group da 'done' TU TRUOC KHI co tinh nang
+    nay (finish_root() tu dong lam viec nay cho group hoan tat SAU nay)."""
+    total = shopee_db.compute_merged_links(DB_PATH, itemid)
+    return jsonify({"ok": True, "total_links": total})
+
+
+@app.route("/api/roots/recompute_merged_all", methods=["POST"])
+def recompute_merged_all():
+    result = shopee_db.recompute_all_merged_links(DB_PATH)
+    return jsonify(result)
+
+
+@app.route("/api/roots/reset_insufficient_all", methods=["POST"])
+def reset_insufficient_all():
+    result = shopee_db.reset_all_insufficient_roots(DB_PATH)
+    return jsonify(result)
+
+
+@app.route("/api/roots/finish", methods=["POST"])
+def finish_root():
+    body = request.get_json(force=True, silent=True) or {}
+    itemid = body.get("itemid")
+    if not itemid:
+        return _bad_request("thieu 'itemid'")
+    shopee_db.finish_root(DB_PATH, itemid)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/candidates/seed", methods=["POST"])
+def seed_candidates():
+    """items: nguyen si similar_product_offers.list[] tu response Shopee. Tra ve
+    'claimed_item_ids' - CHI cac item_id nhom nay thuc su duoc giu (moi hoac da la cua
+    minh tu truoc); item da bi nhom khac giu se KHONG co trong danh sach - BFS phia goi
+    dung danh sach nay de biet item nao dang duoc xep vao hang doi cua chinh minh."""
+    body = request.get_json(force=True, silent=True) or {}
+    groupid = body.get("groupid")
+    items = body.get("items")
+    if not groupid or not isinstance(items, list):
+        return _bad_request("thieu 'groupid' hoac 'items' (danh sach)")
+    claimed = shopee_db.seed_and_claim_candidates(DB_PATH, groupid, items)
+    return jsonify({"claimed_item_ids": claimed})
+
+
+@app.route("/api/roots/verify", methods=["POST"])
+def verify_root():
+    """offer_data: nguyen si response.data tu goi that offer/product?item_id=<root>. Chi
+    cap nhat metrics that cho dong root (KHONG doi status_link/claim). Tra ve 'passes' de
+    BFS quyet dinh root co tinh vao 60 hay khong (updatelogic.txt diem 4)."""
+    body = request.get_json(force=True, silent=True) or {}
+    offer_data = body.get("offer_data")
+    if not isinstance(offer_data, dict):
+        return _bad_request("thieu 'offer_data' (object)")
+    result = shopee_db.verify_root(DB_PATH, offer_data)
+    return jsonify(result)
+
+
+@app.route("/api/items/verify", methods=["POST"])
+def verify_item():
+    """offer_data: nguyen si response.data tu goi that offer/product?item_id=<candidate> -
+    tuc DA ton 1 request that toi Shopee cho item nay. Server tinh tieu chi + gan group
+    (nguyen tu, an toan khi nhieu profile goi song song)."""
+    body = request.get_json(force=True, silent=True) or {}
+    groupid = body.get("groupid")
+    offer_data = body.get("offer_data")
+    if not groupid or not isinstance(offer_data, dict):
+        return _bad_request("thieu 'groupid' hoac 'offer_data' (object)")
+    row = shopee_db.map_v2_data_to_row(offer_data, link_type="related", groupid=groupid)
+    if not row.get("itemid"):
+        return _bad_request("offer_data khong co item_id hop le")
+    result = shopee_db.try_assign_verified(DB_PATH, row, groupid)
+    return jsonify(result)
+
+
+@app.route("/api/items/filter_new", methods=["POST"])
+def filter_new():
+    body = request.get_json(force=True, silent=True) or {}
+    itemids = body.get("itemids")
+    if not isinstance(itemids, list):
+        return _bad_request("thieu 'itemids' (danh sach)")
+    new_ids = shopee_db.filter_new_itemids(DB_PATH, itemids)
+    return jsonify({"new_itemids": new_ids})
+
+
+@app.route("/api/items/list", methods=["GET"])
+def list_items():
+    """Danh sach san pham da cao (tab 'San pham' tren dashboard) - loc theo
+    link_type/status_link/search (khop ten cot itemid/name/shop_name), gioi han so dong."""
+    link_type = request.args.get("link_type") or None
+    status_link = request.args.get("status_link") or None
+    search = request.args.get("search") or None
+    limit = request.args.get("limit", 200, type=int)
+    items = shopee_db.fetch_all_items(
+        DB_PATH, link_type=link_type, status_link=status_link, search=search, limit=limit
+    )
+    return jsonify({"items": items})
+
+
+@app.route("/api/items/<itemid>", methods=["DELETE"])
+def delete_item(itemid):
+    ok = shopee_db.delete_item(DB_PATH, itemid)
+    if not ok:
+        return _bad_request(f"khong tim thay item '{itemid}'")
+    return jsonify({"ok": True})
+
+
+@app.route("/api/groups/<groupid>/count", methods=["GET"])
+def group_count(groupid):
+    count = shopee_db.count_group_members(DB_PATH, groupid)
+    return jsonify({"groupid": groupid, "member_count": count})
+
+
+@app.route("/api/roots/list", methods=["GET"])
+def list_roots():
+    return jsonify({"roots": shopee_db.list_roots_with_counts(DB_PATH)})
+
+
+@app.route("/api/roots/<groupid>/members", methods=["GET"])
+def root_members(groupid):
+    return jsonify({"members": shopee_db.list_group_members(DB_PATH, groupid)})
+
+
+@app.route("/api/accounts", methods=["GET"])
+def list_accounts():
+    return jsonify({"accounts": shopee_db.list_devices(DB_PATH)})
+
+
+@app.route("/api/accounts", methods=["POST"])
+def add_account():
+    body = request.get_json(force=True, silent=True) or {}
+    name = body.get("name")
+    profile_path = body.get("profile_path")
+    if not name or not profile_path:
+        return _bad_request("thieu 'name' hoac 'profile_path'")
+    shopee_db.add_device(DB_PATH, name, profile_path)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/accounts/<path:profile_path>", methods=["DELETE"])
+def remove_account(profile_path):
+    shopee_db.remove_device(DB_PATH, profile_path)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/accounts/<name>/launch", methods=["POST"])
+def launch_account(name):
+    accounts = shopee_db.list_devices(DB_PATH)
+    match = next((a for a in accounts if a["name"] == name), None)
+    if not match:
+        return _bad_request(f"khong tim thay tai khoan '{name}'")
+    body = request.get_json(force=True, silent=True) or {}
+    url = body.get("url") or LAUNCH_URL_DEFAULT
+    try:
+        proc = chrome_launcher.launch_profile(match["serial"], url)
+    except (RuntimeError, ValueError) as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"ok": True, "pid": proc.pid})
+
+
+@app.route("/api/settings", methods=["GET"])
+def get_settings():
+    return jsonify(shopee_db.get_settings(DB_PATH))
+
+
+@app.route("/api/settings", methods=["POST"])
+def update_settings():
+    body = request.get_json(force=True, silent=True) or {}
+    result = shopee_db.update_settings(
+        DB_PATH,
+        promoted_7d_max=body.get("promoted_7d_max"),
+        sold_min=body.get("sold_min"),
+        seller_commission_vnd_min=body.get("seller_commission_vnd_min"),
+        auto_assign=body.get("auto_assign"),
+        dongvanfb_api_key=body.get("dongvanfb_api_key"),
+    )
+    return jsonify(result)
+
+
+@app.route("/api/video_machines", methods=["GET"])
+def list_video_machines():
+    return jsonify({"machines": shopee_db.list_video_machines(DB_PATH)})
+
+
+@app.route("/api/video_machines", methods=["POST"])
+def add_video_machine():
+    body = request.get_json(force=True, silent=True) or {}
+    name = (body.get("name") or "").strip()
+    api_key = (body.get("api_key") or "").strip()
+    tag = (body.get("tag") or "").strip()
+    pool = (body.get("pool") or "selfhostPool").strip()
+    if not name or not api_key or not tag:
+        return _bad_request("thieu 'name', 'api_key' hoac 'tag'")
+    shopee_db.add_video_machine(DB_PATH, name, api_key, tag, pool)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/video_machines/<int:machine_id>", methods=["DELETE"])
+def remove_video_machine(machine_id):
+    ok = shopee_db.remove_video_machine(DB_PATH, machine_id)
+    if not ok:
+        return _bad_request(f"khong tim thay may id={machine_id}")
+    return jsonify({"ok": True})
+
+
+@app.route("/api/video_machines/<int:machine_id>/toggle", methods=["POST"])
+def toggle_video_machine(machine_id):
+    body = request.get_json(force=True, silent=True) or {}
+    enabled = body.get("enabled")
+    if enabled is None:
+        return _bad_request("thieu 'enabled' (true/false)")
+    ok = shopee_db.set_video_machine_enabled(DB_PATH, machine_id, enabled)
+    if not ok:
+        return _bad_request(f"khong tim thay may id={machine_id}")
+    return jsonify({"ok": True})
+
+
+@app.route("/api/videos/stats", methods=["GET"])
+def video_stats():
+    return jsonify(shopee_db.count_video_push_stats(DB_PATH))
+
+
+@app.route("/api/videos/export.xlsx", methods=["GET"])
+def export_videos_xlsx():
+    """Xuat toan bo san pham DA TAO VIDEO (job_id khong null) ra .xlsx, cot A|B|C =
+    itemId|Ten san pham|Link gop - dung cho nut 'Xuat Excel' tren tab 'Tao video'."""
+    items = shopee_db.list_video_created_items(DB_PATH)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Da tao video"
+    ws.append(["itemId", "Ten san pham", "Link gop"])
+    for it in items:
+        ws.append([it["itemid"], it["name"], it["merged_link"]])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"shopee_video_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return Response(
+        buf.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.route("/api/videos/push", methods=["POST"])
+def push_videos():
+    """1 lo (toi da 200, gioi han cua chinh VideoAI): day cache (cho dong chua
+    cache_uploaded) + tao task video (cho dong da/vua co cache) cho toi da 'limit' san pham
+    dang cho (list_video_push_candidates), dung API key/tag/pool cua 1 may tao video cu the
+    (machine_id, xem quan ly may o tab 'Tao video'). Dashboard tu goi lap lai endpoint nay
+    (xem runVideoPush() trong index.html) toi khi 'done'=0 de xu ly het hang doi - moi lan
+    goi CHI xu ly 1 lo, giu request nhanh + co progress ro rang thay vi 1 request khong lo
+    cho hang nghin san pham."""
+    body = request.get_json(force=True, silent=True) or {}
+    limit = min(max(1, int(body.get("limit") or 200)), videoai_client.BATCH_LIMIT)
+    machine_id = body.get("machine_id")
+    if not machine_id:
+        return _bad_request("thieu 'machine_id' - chon 1 may tao video truoc khi chay.")
+
+    machine = shopee_db.get_video_machine(DB_PATH, machine_id)
+    if not machine:
+        return _bad_request(f"khong tim thay may id={machine_id}")
+    if not machine.get("enabled"):
+        return _bad_request(f"may '{machine['name']}' dang tat - bat len truoc khi dung.")
+    api_key = machine["api_key"]
+    tag = machine["tag"]
+    pool = machine["pool"] or "selfhostPool"
+
+    candidates = shopee_db.list_video_push_candidates(DB_PATH, limit)
+    if not candidates:
+        return jsonify({"done": 0, "pushed": 0, "created": 0, "errors": []})
+
+    # Gom theo market THAT (suy tu domain link, khong dung cot 'market' - xem
+    # videoai_client.market_from_link()) vi language/prefix anh phu thuoc market, va API
+    # tao task chi nhan 1 'language' chung cho ca lo.
+    by_market = {}
+    for row in candidates:
+        m = videoai_client.market_from_link(row.get("product_link"))
+        by_market.setdefault(m, []).append(row)
+
+    total_pushed = 0
+    total_created = 0
+    errors = []
+
+    for market, rows in by_market.items():
+        language = videoai_client.language_for_market(market)
+        url_to_itemid = {r["product_link"]: r["itemid"] for r in rows}
+        ready_urls = [r["product_link"] for r in rows if r.get("cache_uploaded")]
+        need_cache_rows = [r for r in rows if not r.get("cache_uploaded")]
+
+        if need_cache_rows:
+            items = []
+            for r in need_cache_rows:
+                item = videoai_client.build_cache_item(r, market)
+                if item is None:
+                    errors.append({"itemid": r["itemid"], "reason": "thieu du lieu bat buoc (ten/link)"})
+                    continue
+                items.append(item)
+            if items:
+                try:
+                    result = videoai_client.push_cache_batch(items, api_key)
+                except Exception as e:
+                    errors.append({"reason": f"loi day cache ({market}): {e}"})
+                else:
+                    failed_urls = {e.get("url") for e in (result.get("errors") or [])}
+                    ok_itemids = []
+                    for it in items:
+                        if it["url"] in failed_urls:
+                            errors.append({"itemid": url_to_itemid.get(it["url"]), "reason": "day cache that bai"})
+                            continue
+                        ok_itemids.append(url_to_itemid[it["url"]])
+                        ready_urls.append(it["url"])
+                    if ok_itemids:
+                        shopee_db.mark_cache_uploaded(DB_PATH, ok_itemids)
+                        total_pushed += len(ok_itemids)
+
+        if ready_urls:
+            try:
+                task_results = videoai_client.create_video_batch(
+                    ready_urls, api_key, tag=tag, pool=pool, language=language
+                )
+            except Exception as e:
+                errors.append({"reason": f"loi tao video ({market}): {e}"})
+            else:
+                job_updates = []
+                for it in task_results:
+                    itemid = url_to_itemid.get(it.get("url"))
+                    if not itemid:
+                        continue
+                    if it.get("jobId"):
+                        job_updates.append((itemid, it["jobId"]))
+                        total_created += 1
+                    else:
+                        errors.append({"itemid": itemid, "reason": it.get("error") or "tao video that bai"})
+                if job_updates:
+                    shopee_db.mark_video_jobs(DB_PATH, job_updates)
+
+    return jsonify({
+        "done": len(candidates),
+        "pushed": total_pushed,
+        "created": total_created,
+        "errors": errors,
+    })
+
+
+# ---- Tab "Tao tai khoan Shopee" (mua mail dongvanfb + doc code) ----
+
+@app.route("/api/mail_accounts/account_types", methods=["GET"])
+def mail_account_types():
+    return jsonify({"account_types": dongvanfb_client.ACCOUNT_TYPES})
+
+
+@app.route("/api/mail_accounts/balance", methods=["GET"])
+def mail_accounts_balance():
+    api_key = (shopee_db.get_settings(DB_PATH).get("dongvanfb_api_key") or "").strip()
+    if not api_key:
+        return _bad_request("chua cau hinh dongvanfb API key (o tab 'Tao tai khoan Shopee').")
+    balance = dongvanfb_client.get_balance(api_key)
+    return jsonify({"balance": balance})
+
+
+@app.route("/api/mail_accounts/buy", methods=["POST"])
+def mail_accounts_buy():
+    api_key = (shopee_db.get_settings(DB_PATH).get("dongvanfb_api_key") or "").strip()
+    if not api_key:
+        return _bad_request("chua cau hinh dongvanfb API key (o tab 'Tao tai khoan Shopee').")
+    body = request.get_json(force=True, silent=True) or {}
+    account_type = str(body.get("account_type") or "")
+    quantity = max(1, int(body.get("quantity") or 1))
+    if not account_type:
+        return _bad_request("thieu 'account_type'")
+    result = dongvanfb_client.buy_mail(api_key, account_type, quantity)
+    if not result or not result.get("status"):
+        return _bad_request("Mua mail that bai: " + str(result.get("message") if result else "khong ro loi"))
+    data = result.get("data") or {}
+    lines = data.get("list_data") or []
+    added = shopee_db.add_mail_accounts_from_buy(DB_PATH, lines, account_type, data.get("order_code"))
+    return jsonify({
+        "ok": True, "added": added,
+        "total_amount": data.get("total_amount"), "balance": data.get("balance"),
+    })
+
+
+@app.route("/api/mail_accounts/list", methods=["GET"])
+def mail_accounts_list():
+    market = request.args.get("market") or None
+    slot = request.args.get("slot") or None
+    search = request.args.get("search") or None
+    limit = request.args.get("limit", 500, type=int)
+    rows = shopee_db.list_mail_accounts(DB_PATH, market=market, slot=slot, search=search, limit=limit)
+    return jsonify({"accounts": rows})
+
+
+@app.route("/api/mail_accounts/export.xlsx", methods=["GET"])
+def export_mail_accounts_xlsx():
+    """Xuat cac mail DA dung de tao tai khoan Shopee (co shopee_id) ra .xlsx - dung cho nut
+    'Xuat Excel' tren tab 'Tao tai khoan Shopee'."""
+    accounts = shopee_db.list_created_mail_accounts(DB_PATH)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Tai khoan Shopee"
+    ws.append(["Full info", "Email", "PassEmail", "Shopee_id", "Device", "Slot", "Market", "Shopee_code", "Thoi gian tao"])
+    for a in accounts:
+        ws.append([
+            a["full_info"], a["email"], a["password"], a["shopee_id"],
+            a["device"], a["slot"], a["market"], a["shopee_code"], a["created_at"],
+        ])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"shopee_accounts_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return Response(
+        buf.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.route("/api/mail_accounts/<int:account_id>", methods=["POST"])
+def mail_accounts_update(account_id):
+    body = request.get_json(force=True, silent=True) or {}
+    row = shopee_db.update_mail_account_fields(
+        DB_PATH, account_id,
+        shopee_id=body.get("shopee_id"), device=body.get("device"),
+        slot=body.get("slot"), market=body.get("market"),
+    )
+    if row is None:
+        return _bad_request(f"khong tim thay mail id={account_id}")
+    return jsonify({"account": row})
+
+
+@app.route("/api/mail_accounts/<int:account_id>", methods=["DELETE"])
+def mail_accounts_delete(account_id):
+    ok = shopee_db.delete_mail_account(DB_PATH, account_id)
+    if not ok:
+        return _bad_request(f"khong tim thay mail id={account_id}")
+    return jsonify({"ok": True})
+
+
+@app.route("/api/mail_accounts/clear", methods=["POST"])
+def mail_accounts_clear():
+    deleted = shopee_db.clear_mail_accounts(DB_PATH)
+    return jsonify({"ok": True, "deleted": deleted})
+
+
+@app.route("/api/mail_accounts/<int:account_id>/get_code", methods=["POST"])
+def mail_accounts_get_code(account_id):
+    row = shopee_db.get_mail_account(DB_PATH, account_id)
+    if not row:
+        return _bad_request(f"khong tim thay mail id={account_id}")
+    code, note = dongvanfb_client.fetch_shopee_code(row["email"], row["refresh_token"], row["client_id"])
+    shopee_db.set_mail_account_code(DB_PATH, account_id, code)
+    return jsonify({"code": code, "note": note})
+
+
+@app.route("/api/reset", methods=["POST"])
+def reset_all():
+    """Xoa toan bo du lieu san pham (khong dong tai khoan/profile) - dung cho nut "Xoa
+    toan bo du lieu" tren UI."""
+    deleted = shopee_db.clear_all_items(DB_PATH)
+    return jsonify({"ok": True, "deleted": deleted})
+
+
+@app.route("/api/stats", methods=["GET"])
+def stats():
+    return jsonify({
+        "root": {
+            "pending": shopee_db.count_status(DB_PATH, link_type="root", status_link="pending"),
+            "done": shopee_db.count_status(DB_PATH, link_type="root", status_link="done"),
+            "fail": shopee_db.count_status(DB_PATH, link_type="root", status_link="fail"),
+        },
+        "related": {
+            "pending": shopee_db.count_status(DB_PATH, link_type="related", status_link="pending"),
+            "member": shopee_db.count_status(DB_PATH, link_type="related", status_link="member"),
+            "cached": shopee_db.count_status(DB_PATH, link_type="related", status_link="cached"),
+        },
+        "total_items": shopee_db.count_items(DB_PATH),
+    })
+
+
+def main():
+    global DB_PATH
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--port", type=int, default=8877)
+    ap.add_argument("--db-path", default=shopee_db.DB_PATH_DEFAULT)
+    args = ap.parse_args()
+    DB_PATH = args.db_path
+    shopee_db.init_db(DB_PATH)  # dam bao bang/cot ton tai truoc khi nhan request dau tien
+    print(f"[affiliate_scrape_server] DB: {DB_PATH} | http://127.0.0.1:{args.port}")
+    app.run(host="127.0.0.1", port=args.port, debug=False)
+
+
+if __name__ == "__main__":
+    main()

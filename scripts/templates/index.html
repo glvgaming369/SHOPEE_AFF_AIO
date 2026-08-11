@@ -1,0 +1,969 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>Shopee Affiliate Offer Scraper</title>
+<style>
+  :root { --accent: #ee4d2d; --border: #ddd; --bg-soft: #f7f7f7; }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; background: #fafafa; color: #222; }
+  header { background: var(--accent); color: #fff; padding: 14px 20px; display: flex; align-items: baseline; gap: 10px; }
+  header h1 { margin: 0; font-size: 18px; }
+  header .version { font-size: 12px; opacity: .85; background: rgba(255,255,255,.2); padding: 2px 8px; border-radius: 10px; }
+  main { max-width: 1100px; margin: 20px auto; padding: 0 16px; }
+  .tab-nav { display: flex; gap: 4px; background: #fff; border-bottom: 1px solid var(--border); padding: 0 20px; }
+  .tab-btn { padding: 10px 16px; border: none; background: none; cursor: pointer; font: inherit; border-bottom: 3px solid transparent; color: #666; }
+  .tab-btn.active { border-bottom-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: grid; gap: 20px; }
+  .ellipsis { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+  section { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  section h2 { margin: 0 0 12px; font-size: 15px; color: var(--accent); }
+  .stats-bar { display: flex; gap: 24px; flex-wrap: wrap; }
+  .stats-bar div { background: var(--bg-soft); border-radius: 6px; padding: 8px 14px; }
+  .stats-bar b { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th { background: var(--bg-soft); }
+  th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+  th.sortable:hover { background: var(--border); }
+  input, textarea, button { font: inherit; }
+  input[type=text] { padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; width: 100%; }
+  textarea { width: 100%; height: 90px; padding: 8px; border: 1px solid var(--border); border-radius: 4px; }
+  button { padding: 6px 12px; border: none; border-radius: 4px; background: var(--accent); color: #fff; cursor: pointer; }
+  button.secondary { background: var(--bg-soft); color: #222; border: 1px solid var(--border); }
+  button.danger { background: #c0392b; }
+  button:hover { opacity: .9; }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .row input { flex: 1; }
+  .muted { color: #888; font-size: 12px; }
+  .members-box { background: var(--bg-soft); border-radius: 6px; padding: 8px; margin-top: 6px; font-size: 12px; max-height: 200px; overflow: auto; }
+  a { color: var(--accent); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; color: #fff; }
+  .badge.idle { background: #7f8c8d; }
+  .badge.working { background: #27ae60; }
+  .badge.blocked { background: #c0392b; }
+  .badge.offline { background: #bbb; }
+  .badge.pending { background: #2980b9; }
+  .badge.insufficient { background: #e67e22; }
+  .badge.fail { background: #c0392b; }
+  select { padding: 5px 6px; border: 1px solid var(--border); border-radius: 4px; font: inherit; }
+</style>
+</head>
+<body>
+<header><h1>Shopee Affiliate Offer Scraper - Bang dieu khien</h1><span class="version">v2.5</span></header>
+<nav class="tab-nav">
+  <button class="tab-btn active" id="tabbtn-operations" onclick="switchTab('operations')">Van hanh</button>
+  <button class="tab-btn" id="tabbtn-products" onclick="switchTab('products')">San pham da cao</button>
+  <button class="tab-btn" id="tabbtn-video" onclick="switchTab('video')">Tao video</button>
+  <button class="tab-btn" id="tabbtn-mailacc" onclick="switchTab('mailacc')">Tao tai khoan Shopee</button>
+</nav>
+<main>
+
+<div id="tab-operations" class="tab-panel active">
+
+  <section>
+    <h2>Tong quan</h2>
+    <div class="stats-bar" id="stats-bar">Dang tai...</div>
+    <div style="margin-top:12px;">
+      <button class="danger" onclick="resetAll()">Xoa toan bo du lieu</button>
+      <span class="muted">(chi xoa root/related da cao - KHONG xoa danh sach tai khoan/profile)</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Tai khoan / Chrome profile</h2>
+    <div class="row">
+      <input type="text" id="acc-name" placeholder="Ten tai khoan (vd: shop_ph_01)">
+      <input type="text" id="acc-path" placeholder="Duong dan thu muc Chrome profile (vd: C:\Users\...\Chrome\User Data\Profile 7)">
+      <button onclick="addAccount(this)">Them</button>
+    </div>
+    <div class="muted" style="margin-bottom:8px;">
+      Sau khi "Launch", Chrome se mo den <code>https://affiliate.shopee.ph/offer/product_offer</code> -
+      cai san Tampermonkey + script <code>tampermonkey_affiliate_group_scraper.user.js</code> trong dung
+      profile do truoc, nhap "Device key" = ten tai khoan nay trong panel cua script.
+    </div>
+    <table>
+      <thead><tr><th>Ten</th><th>Duong dan profile</th><th></th></tr></thead>
+      <tbody id="accounts-tbody"></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Cai dat / Cap nhat script</h2>
+    <div class="muted" style="margin-bottom:8px;">
+      Bam link o dung Chrome profile can cai/cap nhat - Tampermonkey se tu hien man hinh
+      "Cai dat"/"Cap nhat" (so sanh @version, khong ghi de neu ban dang cung ban). Sau khi
+      cai lan dau, lan sau chi can vao Tampermonkey Dashboard bam "Check for Userscript
+      Updates" hoac bam lai link nay.
+    </div>
+    <div id="userscripts-list">Dang tai...</div>
+  </section>
+
+  <section>
+    <h2>Worker (tab Tampermonkey dang chay)</h2>
+    <div class="muted" style="margin-bottom:8px;">
+      Tab tu bao trang thai ve day sau khi bam Start trong panel cua script. "Offline" =
+      qua 15s khong thay bao gi (co the tab da dong/mat mang).
+    </div>
+    <table>
+      <thead><tr><th>Device key</th><th>Trang thai</th><th>Root dang lam</th><th>Lan cuoi bao</th></tr></thead>
+      <tbody id="workers-tbody"></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Dieu kien loc</h2>
+    <div class="muted" style="margin-bottom:8px;">Ap dung cho MOI lan verify tu day tro di (khong hoi to nhung item da cao truoc do - dung nut "Cham lai diem" o duoi neu can).</div>
+    <div class="row">
+      <label style="min-width:230px;">affiliate_promoted_last_7days &lt;</label>
+      <input type="text" id="set-promoted7d" placeholder="1000">
+    </div>
+    <div class="row">
+      <label style="min-width:230px;">sold &gt;</label>
+      <input type="text" id="set-sold" placeholder="100">
+    </div>
+    <div class="row">
+      <label style="min-width:230px;">seller_commission (tien te goc, vd PHP=peso) &gt;</label>
+      <input type="text" id="set-commission" placeholder="1000">
+    </div>
+    <div class="row">
+      <button onclick="saveSettings()">Luu dieu kien loc</button>
+      <span class="muted" id="settings-result"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Nap link goc (root)</h2>
+    <textarea id="root-links" placeholder="Moi dong 1 link san pham Shopee, vd: https://shopee.ph/product/1161500024/26103037343"></textarea>
+    <div class="row" style="margin-top:8px;">
+      <button onclick="importRoots()">Nap vao DB</button>
+      <span class="muted" id="import-result"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Danh sach root</h2>
+    <div class="row">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="checkbox" id="auto-assign-toggle" onchange="toggleAutoAssign()">
+        Tu dong giao viec (worker ranh se tu nhan root pending ke tiep, khong can chon tay)
+      </label>
+    </div>
+    <div class="row">
+      <button class="secondary" onclick="loadRoots()">Lam moi</button>
+      <button class="secondary" onclick="recomputeMergedAll()">Gop link cho TAT CA root</button>
+      <button class="secondary" onclick="resetInsufficientAll()">Dat lai TAT CA root thieu</button>
+    </div>
+    <table>
+      <thead><tr><th>item_id</th><th>Trang thai</th><th>Thanh vien</th><th>Giao cho</th><th>Link</th><th></th></tr></thead>
+      <tbody id="roots-tbody"></tbody>
+    </table>
+    <div id="members-panel"></div>
+  </section>
+
+</div>
+
+<div id="tab-products" class="tab-panel">
+
+  <section>
+    <h2>San pham da cao</h2>
+    <div class="row">
+      <select id="item-filter-linktype" onchange="loadItems()">
+        <option value="">-- Loai: tat ca --</option>
+        <option value="root">root</option>
+        <option value="related">related</option>
+      </select>
+      <select id="item-filter-status" onchange="loadItems()">
+        <option value="">-- Trang thai: tat ca --</option>
+        <option value="pending">pending</option>
+        <option value="member">member</option>
+        <option value="cached">cached</option>
+        <option value="done">done</option>
+        <option value="fail">fail</option>
+      </select>
+      <input type="text" id="item-filter-search" placeholder="Tim theo itemid/ten/shop..." onkeydown="if(event.key==='Enter') loadItems()">
+      <button class="secondary" onclick="loadItems()">Loc</button>
+    </div>
+    <div class="muted" style="margin-bottom:8px;" id="items-count"></div>
+    <table>
+      <thead><tr><th>item_id</th><th>Ten</th><th>Sold</th><th>Aff 7d</th><th>Seller comm</th><th>Loai</th><th>Trang thai</th><th>Nhom</th><th>Gop link</th><th></th></tr></thead>
+      <tbody id="items-tbody"></tbody>
+    </table>
+  </section>
+
+</div>
+
+<div id="tab-video" class="tab-panel">
+
+  <section>
+    <h2>May tao video</h2>
+    <div class="muted" style="margin-bottom:8px;">
+      Goi thang toi <code>videoai-api.devappnow.com</code> (khong qua Postgres cua 2-tao-video).
+      Moi may 1 API key + 1 thu muc (Tag) + Pool rieng - dung khi co nhieu tai khoan/may VideoAI.
+    </div>
+    <table>
+      <thead><tr><th>Ten may</th><th>API key</th><th>Thu muc (Tag)</th><th>Pool</th><th>Trang thai</th><th></th></tr></thead>
+      <tbody id="video-machines-tbody"></tbody>
+    </table>
+    <div class="row" style="margin-top:10px;">
+      <input type="text" id="vm-name" placeholder="Ten may (vd: May 1)">
+      <input type="text" id="vm-apikey" placeholder="VideoAI API key (vd: api_xxxxxxxx)">
+      <input type="text" id="vm-tag" placeholder="Thu muc/Tag (vd: batch-01)">
+      <select id="vm-pool" style="max-width:160px;">
+        <option value="selfhostPool">selfhostPool</option>
+        <option value="adminPool">adminPool</option>
+      </select>
+      <button onclick="addVideoMachine(this)">Them may</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Tao video (day cache + tao task hang loat)</h2>
+    <div class="muted" style="margin-bottom:8px;">
+      Dieu kien du de day: san pham da co "Gop link" (thuoc 1 nhom da gom du/hoan tat va dat
+      tieu chi loc). Moi lan chay xu ly theo lo toi da 200 (gioi han cua VideoAI), tu lap
+      lai toi khi het hang doi hoac bam Dung.
+    </div>
+    <div class="stats-bar" id="video-stats-bar">Dang tai...</div>
+    <div class="row" style="margin-top:12px;">
+      <select id="video-machine-sel" style="min-width:200px;"></select>
+      <label style="white-space:nowrap;">So luong video can tao</label>
+      <input type="number" id="video-target" min="1" value="200" style="max-width:100px;">
+      <button id="video-start-btn" onclick="runVideoPush()">Day + Tao video</button>
+      <button id="video-stop-btn" class="secondary" onclick="stopVideoPush()" disabled>Dung</button>
+      <button class="secondary" onclick="loadVideoStats()">Lam moi thong ke</button>
+      <button class="secondary" onclick="exportVideosXlsx()">Xuat Excel (da tao video)</button>
+    </div>
+    <pre id="video-log" style="margin-top:12px; max-height:280px; overflow:auto; background:var(--bg-soft); padding:10px; border-radius:6px; font-size:12px; white-space:pre-wrap;"></pre>
+  </section>
+
+</div>
+
+<div id="tab-mailacc" class="tab-panel">
+
+  <section>
+    <h2>Cai dat dongvanfb</h2>
+    <div class="muted" style="margin-bottom:8px;">
+      Dung chung cho ca mua mail va lay ma Shopee tren tab nay - lay API key tai
+      <a href="https://docs.dongvanfb.net/" target="_blank">docs.dongvanfb.net</a>.
+    </div>
+    <div class="row">
+      <input type="password" id="mailacc-apikey" placeholder="dongvanfb API key" style="max-width:340px;">
+      <button onclick="saveDongvanfbKey(this)">Luu key</button>
+      <span class="muted">So du: <b id="mailacc-balance">--</b></span>
+      <button class="secondary" onclick="loadMailBalance()">Lam moi so du</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Mua mail</h2>
+    <div class="row">
+      <select id="mailacc-type" style="max-width:280px;"></select>
+      <label style="white-space:nowrap;">So luong</label>
+      <input type="number" id="mailacc-qty" min="1" value="1" style="max-width:80px;">
+      <button onclick="buyMailAccounts(this)">Mua mail</button>
+      <span class="muted" id="mailacc-buy-result"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Danh sach mail / tai khoan Shopee</h2>
+    <div class="row">
+      <select id="mailacc-filter-market" onchange="loadMailAccounts()" style="max-width:160px;">
+        <option value="">-- Market: tat ca --</option>
+        <option value="PH">PH</option>
+        <option value="TH">TH</option>
+        <option value="MS">MS</option>
+      </select>
+      <select id="mailacc-filter-slot" onchange="loadMailAccounts()" style="max-width:160px;">
+        <option value="">-- Slot: tat ca --</option>
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+      </select>
+      <input type="text" id="mailacc-filter-search" placeholder="Tim theo email/shopee_id/device..." onkeydown="if(event.key==='Enter') loadMailAccounts()">
+      <button class="secondary" onclick="loadMailAccounts()">Loc</button>
+      <button class="secondary" onclick="exportMailAccountsXlsx()">Xuat Excel (tai khoan da tao)</button>
+      <button class="danger" onclick="clearMailAccounts()">Xoa tat ca</button>
+    </div>
+    <div class="muted" style="margin-bottom:8px;" id="mailacc-count"></div>
+    <table>
+      <thead>
+        <tr id="mailacc-thead-row">
+          <th>Full info</th><th>Email</th><th>PassEmail</th><th>Shopee_id</th>
+          <th>Device</th><th>Slot</th><th>Market</th><th>Shopee_code</th><th></th><th>Thoi gian</th>
+        </tr>
+      </thead>
+      <tbody id="mailacc-tbody"></tbody>
+    </table>
+  </section>
+
+</div>
+
+</main>
+
+<script>
+function switchTab(name) {
+  document.querySelectorAll('.tab-panel').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  document.getElementById('tabbtn-' + name).classList.add('active');
+  if (name === 'products') loadItems();
+  if (name === 'video') { loadVideoMachines(); loadVideoStats(); }
+  if (name === 'mailacc') {
+    document.getElementById('mailacc-apikey').value = (currentSettings && currentSettings.dongvanfb_api_key) || '';
+    loadMailAccountTypes();
+    loadMailBalance();
+    loadMailAccounts();
+  }
+}
+async function withBusy(btn, fn) {
+  // Vo hieu hoa + doi chu nut trong luc cho server tra loi - phan hoi tuc thi cho nguoi
+  // dung biet click da an, tranh cam giac "cham" (va tranh bam trung khi dang cho).
+  if (!btn) { await fn(); return; }
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Dang xu ly...';
+  try {
+    await fn();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+async function api(method, path, body) {
+  const resp = await fetch(path, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json = await resp.json();
+  if (!resp.ok) throw new Error(json.error || 'Loi khong ro');
+  return json;
+}
+
+let currentSettings = null; // dung de to mau dat/khong dat o tab San pham da cao
+
+async function loadUserscripts() {
+  const { userscripts } = await api('GET', '/api/userscripts');
+  document.getElementById('userscripts-list').innerHTML = userscripts.map(u => `
+    <div class="row" style="align-items:flex-start;">
+      <div style="flex:1;">
+        <div><a href="/userscripts/${u.file}" target="_blank"><b>${u.title}</b></a></div>
+        <div class="muted">${u.description}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function loadSettings() {
+  const s = await api('GET', '/api/settings');
+  currentSettings = s;
+  document.getElementById('set-promoted7d').value = s.promoted_7d_max;
+  document.getElementById('set-sold').value = s.sold_min;
+  document.getElementById('set-commission').value = s.seller_commission_vnd_min;
+  document.getElementById('auto-assign-toggle').checked = !!s.auto_assign;
+}
+
+async function saveSettings() {
+  const promoted_7d_max = parseInt(document.getElementById('set-promoted7d').value, 10);
+  const sold_min = parseInt(document.getElementById('set-sold').value, 10);
+  // parseFloat (khong phai parseInt) - seller_commission gio la so tien te thuc, thi
+  // truong PH co phan thap phan that (vd 13.86), khong lam tron duoc.
+  const seller_commission_vnd_min = parseFloat(document.getElementById('set-commission').value);
+  if ([promoted_7d_max, sold_min, seller_commission_vnd_min].some(Number.isNaN)) {
+    alert('Ca 3 o phai la so hop le.');
+    return;
+  }
+  await api('POST', '/api/settings', { promoted_7d_max, sold_min, seller_commission_vnd_min });
+  document.getElementById('settings-result').textContent = 'Da luu.';
+  setTimeout(() => { document.getElementById('settings-result').textContent = ''; }, 3000);
+}
+
+async function resetAll() {
+  if (!confirm('Xoa TOAN BO du lieu root/related da cao? Khong the hoan tac. Danh sach tai khoan/profile van giu nguyen.')) return;
+  const { deleted } = await api('POST', '/api/reset');
+  alert(`Da xoa ${deleted} dong.`);
+  refreshAll();
+}
+
+async function loadStats() {
+  const s = await api('GET', '/api/stats');
+  document.getElementById('stats-bar').innerHTML = `
+    <div>Root: <b>${s.root.pending}</b> pending / <b>${s.root.done}</b> done / <b>${s.root.fail}</b> fail</div>
+    <div>Related: <b>${s.related.pending}</b> pending / <b>${s.related.member}</b> member / <b>${s.related.cached}</b> cached</div>
+    <div>Tong item trong DB: <b>${s.total_items}</b></div>
+  `;
+}
+
+let knownAccounts = [];
+let lastItemsList = [];
+
+function copyMergedLink(idx) {
+  const val = lastItemsList[idx] && lastItemsList[idx].merged_link;
+  if (!val) return;
+  navigator.clipboard.writeText(val).then(
+    () => { /* im lang, khong lam phien bang alert cho thao tac hay dung */ },
+    () => alert('Khong copy duoc (trinh duyet chan clipboard) - tu bam chon va Ctrl+C o o "Gop link".')
+  );
+}
+
+async function loadAccounts() {
+  const { accounts } = await api('GET', '/api/accounts');
+  knownAccounts = accounts;
+  const tbody = document.getElementById('accounts-tbody');
+  tbody.innerHTML = accounts.map(a => `
+    <tr>
+      <td>${a.name}</td>
+      <td><code>${a.serial}</code></td>
+      <td>
+        <button onclick="launchAccount('${a.name}')">Launch</button>
+        <button class="secondary" onclick="removeAccount('${a.serial}')">Xoa</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="3" class="muted">Chua co tai khoan nao.</td></tr>';
+}
+
+async function toggleAutoAssign() {
+  const checked = document.getElementById('auto-assign-toggle').checked;
+  await api('POST', '/api/settings', { auto_assign: checked });
+}
+
+async function addAccount(btn) {
+  const name = document.getElementById('acc-name').value.trim();
+  const path = document.getElementById('acc-path').value.trim();
+  if (!name || !path) { alert('Nhap du ten va duong dan profile.'); return; }
+  await withBusy(btn, async () => {
+    await api('POST', '/api/accounts', { name, profile_path: path });
+    document.getElementById('acc-name').value = '';
+    document.getElementById('acc-path').value = '';
+    await loadAccounts();
+  });
+}
+
+async function removeAccount(profilePath) {
+  await api('DELETE', '/api/accounts/' + encodeURIComponent(profilePath));
+  loadAccounts();
+}
+
+async function launchAccount(name) {
+  try {
+    await api('POST', `/api/accounts/${encodeURIComponent(name)}/launch`);
+  } catch (e) {
+    alert('Khong launch duoc: ' + e.message);
+  }
+}
+
+function timeAgoSeconds(isoLike) {
+  // SQLite CURRENT_TIMESTAMP tra ve "YYYY-MM-DD HH:MM:SS" (UTC, khong co 'Z') - them 'Z'
+  // de Date parse dung la UTC thay vi bi hieu nham la gio local.
+  const d = new Date(isoLike.replace(' ', 'T') + 'Z');
+  return (Date.now() - d.getTime()) / 1000;
+}
+
+async function loadWorkers() {
+  const { workers } = await api('GET', '/api/workers');
+  const tbody = document.getElementById('workers-tbody');
+  tbody.innerHTML = workers.map(w => {
+    const ageSec = timeAgoSeconds(w.last_heartbeat);
+    const status = ageSec > 15 ? 'offline' : w.status;
+    return `
+    <tr>
+      <td>${w.device_key}</td>
+      <td><span class="badge ${status}">${status}</span></td>
+      <td>${w.current_root || '-'}</td>
+      <td>${Math.round(ageSec)}s truoc</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="4" class="muted">Chua co worker nao bao ve (chua bam Start o tab nao).</td></tr>';
+}
+
+async function assignRoot(itemid) {
+  const sel = document.getElementById('assign-sel-' + itemid);
+  const deviceKey = sel.value;
+  if (!deviceKey) { alert('Chon 1 tai khoan de giao viec.'); return; }
+  try {
+    await api('POST', `/api/roots/${encodeURIComponent(itemid)}/assign`, { device_key: deviceKey });
+    loadRoots();
+  } catch (e) {
+    alert('Khong giao duoc: ' + e.message);
+  }
+}
+
+async function importRoots() {
+  const raw = document.getElementById('root-links').value;
+  const links = raw.split('\n').map(s => s.trim()).filter(Boolean);
+  if (!links.length) { alert('Dan it nhat 1 link.'); return; }
+  const { added } = await api('POST', '/api/roots/import', { links });
+  document.getElementById('import-result').textContent = `Da them ${added} root moi (${links.length - added} da co san/khong hop le).`;
+  document.getElementById('root-links').value = '';
+  loadRoots();
+  loadStats();
+}
+
+function accountOptions(selected) {
+  return knownAccounts.map(a =>
+    `<option value="${a.name}" ${a.name === selected ? 'selected' : ''}>${a.name}</option>`
+  ).join('');
+}
+
+function rootStatusBadge(r) {
+  if (r.status_link === 'pending') return '<span class="badge pending">dang cho</span>';
+  if (r.status_link === 'fail') return '<span class="badge fail">loi</span>';
+  if (r.status_link === 'done') {
+    if (r.member_count >= 60) return '<span class="badge working">du 60/60</span>';
+    return `<span class="badge insufficient">THIEU (${r.member_count}/60)</span>`;
+  }
+  return r.status_link;
+}
+
+async function loadRoots() {
+  const { roots } = await api('GET', '/api/roots/list');
+  const tbody = document.getElementById('roots-tbody');
+  tbody.innerHTML = roots.map(r => `
+    <tr>
+      <td>${r.itemid}</td>
+      <td>${rootStatusBadge(r)}</td>
+      <td>${r.member_count}/60</td>
+      <td>${r.assigned_key || '-'}</td>
+      <td><a href="${r.product_link || '#'}" target="_blank">link</a></td>
+      <td>
+        ${r.status_link === 'pending' ? `
+          <select id="assign-sel-${r.itemid}"><option value="">-- chon tai khoan --</option>${accountOptions(r.assigned_key)}</select>
+          <button class="secondary" onclick="assignRoot('${r.itemid}')">Giao viec</button>
+        ` : `
+          <button class="secondary" onclick="resetRoot('${r.itemid}')" title="Dua ve pending de giao lai">Dat lai</button>
+          <button class="secondary" onclick="recomputeMerged('${r.itemid}')" title="Tinh lai cot Gop link">Gop link</button>
+        `}
+        <button class="secondary" onclick="showMembers('${r.itemid}')">Xem</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="6" class="muted">Chua co root nao.</td></tr>';
+}
+
+async function recomputeMerged(itemid) {
+  try {
+    const { total_links } = await api('POST', `/api/roots/${encodeURIComponent(itemid)}/recompute_merged`);
+    alert(`Da gop xong ${total_links} link cua nhom ${itemid} - xem cot "Gop link" o tab San pham da cao.`);
+  } catch (e) {
+    alert('Loi: ' + e.message);
+  }
+}
+
+async function recomputeMergedAll() {
+  try {
+    const { roots_processed, total_links } = await api('POST', '/api/roots/recompute_merged_all');
+    alert(`Da gop lai cho ${roots_processed} root (tong ${total_links} link) - xem tab San pham da cao.`);
+  } catch (e) {
+    alert('Loi: ' + e.message);
+  }
+}
+
+async function resetInsufficientAll() {
+  if (!confirm('Dua VE "pending" toan bo root da done nhung chua du 60/60 de giao lai? (khong xoa cac san pham da gom truoc do)')) return;
+  try {
+    const { reset_count } = await api('POST', '/api/roots/reset_insufficient_all');
+    alert(`Da dat lai ${reset_count} root thieu ve "pending".`);
+    loadRoots();
+  } catch (e) {
+    alert('Loi: ' + e.message);
+  }
+}
+
+async function resetRoot(itemid) {
+  if (!confirm(`Dua root ${itemid} ve 'pending' de giao lai? (cac san pham tuong tu da gom truoc do van giu nguyen, khong mat)`)) return;
+  try {
+    await api('POST', `/api/roots/${encodeURIComponent(itemid)}/reset`);
+    loadRoots();
+  } catch (e) {
+    alert('Loi: ' + e.message);
+  }
+}
+
+async function showMembers(groupid) {
+  const { members } = await api('GET', `/api/roots/${encodeURIComponent(groupid)}/members`);
+  const box = document.getElementById('members-panel');
+  box.innerHTML = `<div class="members-box"><b>Thanh vien nhom ${groupid} (${members.length}):</b><br>` +
+    members.map(m => `${m.itemid} - sold=${m.sold} - aff7d=${m.affiliate_promoted_last_7days} - <a href="${m.product_link}" target="_blank">link</a>`).join('<br>') +
+    '</div>';
+}
+
+async function loadItems() {
+  const params = new URLSearchParams();
+  const linkType = document.getElementById('item-filter-linktype').value;
+  const status = document.getElementById('item-filter-status').value;
+  const search = document.getElementById('item-filter-search').value.trim();
+  if (linkType) params.set('link_type', linkType);
+  if (status) params.set('status_link', status);
+  if (search) params.set('search', search);
+  params.set('limit', '200');
+  const { items } = await api('GET', '/api/items/list?' + params.toString());
+  lastItemsList = items; // dung cho copyMergedLink() tra cuu lai gia tri day du, tranh phai nhoi chuoi dai (nhieu dau |, ") vao onclick inline
+  document.getElementById('items-count').textContent = `Hien thi ${items.length} dong (toi da 200 - loc them de thu hep).`;
+  const tbody = document.getElementById('items-tbody');
+
+  function metricCell(value, passes) {
+    if (value == null) return '<span class="muted">-</span>';
+    if (passes == null) return value; // chua tai duoc settings de so sanh
+    return `<span style="color:${passes ? '#27ae60' : '#c0392b'};font-weight:600;">${value}</span>`;
+  }
+
+  tbody.innerHTML = items.map((it, idx) => {
+    const s = currentSettings;
+    const soldPasses = s && it.sold != null ? it.sold > s.sold_min : null;
+    const aff7dPasses = s && it.affiliate_promoted_last_7days != null ? it.affiliate_promoted_last_7days < s.promoted_7d_max : null;
+    const commPasses = s && it.seller_commission != null ? it.seller_commission > s.seller_commission_vnd_min : null;
+    return `
+    <tr>
+      <td>${it.itemid}</td>
+      <td><span class="ellipsis" title="${(it.name || '').replace(/"/g, '&quot;')}">${it.name || '-'}</span></td>
+      <td>${metricCell(it.sold, soldPasses)}</td>
+      <td>${metricCell(it.affiliate_promoted_last_7days, aff7dPasses)}</td>
+      <td>${metricCell(it.seller_commission, commPasses)}</td>
+      <td>${it.link_type || '-'}</td>
+      <td>${it.status_link || '-'}</td>
+      <td>${it.groupid || '-'}</td>
+      <td>
+        ${it.merged_link
+          ? `<span class="ellipsis" style="max-width:160px;" title="${it.merged_link.replace(/"/g, '&quot;')}">${it.merged_link}</span>
+             <button class="secondary" onclick="copyMergedLink(${idx})">Copy</button>`
+          : '-'}
+      </td>
+      <td>
+        <a href="${it.product_link || '#'}" target="_blank">link</a>
+        <button class="secondary" onclick="deleteItem('${it.itemid}')">Xoa</button>
+      </td>
+    </tr>
+  `;
+  }).join('') || '<tr><td colspan="10" class="muted">Khong co san pham nao khop bo loc.</td></tr>';
+}
+
+async function deleteItem(itemid) {
+  if (!confirm(`Xoa han item ${itemid} khoi DB?`)) return;
+  try {
+    await api('DELETE', `/api/items/${encodeURIComponent(itemid)}`);
+    loadItems();
+  } catch (e) {
+    alert('Loi: ' + e.message);
+  }
+}
+
+let videoRunning = false;
+let videoStop = false;
+let videoMachines = [];
+
+function maskApiKey(k) {
+  if (!k) return '';
+  if (k.length <= 10) return '****';
+  return `${k.slice(0, 6)}...${k.slice(-4)}`;
+}
+
+async function loadVideoMachines() {
+  const { machines } = await api('GET', '/api/video_machines');
+  videoMachines = machines;
+  const tbody = document.getElementById('video-machines-tbody');
+  tbody.innerHTML = machines.map(m => `
+    <tr>
+      <td>${m.name}</td>
+      <td class="ellipsis" title="${m.api_key}">${maskApiKey(m.api_key)}</td>
+      <td>${m.tag}</td>
+      <td>${m.pool}</td>
+      <td><span class="badge ${m.enabled ? 'working' : 'offline'}">${m.enabled ? 'Bat' : 'Tat'}</span></td>
+      <td>
+        <button class="secondary" onclick="toggleVideoMachine(${m.id}, ${m.enabled ? 'false' : 'true'})">${m.enabled ? 'Tat' : 'Bat'}</button>
+        <button class="secondary" onclick="removeVideoMachine(${m.id})">Xoa</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="6" class="muted">Chua co may nao - them o duoi.</td></tr>';
+
+  const sel = document.getElementById('video-machine-sel');
+  const enabledMachines = machines.filter(m => m.enabled);
+  sel.innerHTML = enabledMachines.length
+    ? enabledMachines.map(m => `<option value="${m.id}">${m.name} (${m.tag})</option>`).join('')
+    : '<option value="">-- chua co may nao dang bat --</option>';
+}
+
+async function addVideoMachine(btn) {
+  const name = document.getElementById('vm-name').value.trim();
+  const api_key = document.getElementById('vm-apikey').value.trim();
+  const tag = document.getElementById('vm-tag').value.trim();
+  const pool = document.getElementById('vm-pool').value;
+  if (!name || !api_key || !tag) { alert('Nhap du Ten may, API key va Thu muc (Tag).'); return; }
+  await withBusy(btn, async () => {
+    await api('POST', '/api/video_machines', { name, api_key, tag, pool });
+    document.getElementById('vm-name').value = '';
+    document.getElementById('vm-apikey').value = '';
+    document.getElementById('vm-tag').value = '';
+    await loadVideoMachines();
+  });
+}
+
+async function removeVideoMachine(id) {
+  if (!confirm('Xoa may nay?')) return;
+  await api('DELETE', `/api/video_machines/${id}`);
+  loadVideoMachines();
+}
+
+async function toggleVideoMachine(id, enabled) {
+  await api('POST', `/api/video_machines/${id}/toggle`, { enabled });
+  loadVideoMachines();
+}
+
+async function loadVideoStats() {
+  const s = await api('GET', '/api/videos/stats');
+  document.getElementById('video-stats-bar').innerHTML = `
+    <div>Du dieu kien (co Gop link): <b>${s.eligible}</b></div>
+    <div>Da day cache: <b>${s.cache_uploaded}</b></div>
+    <div>Da tao video: <b>${s.job_created}</b></div>
+    <div>Con lai chua tao: <b>${s.eligible - s.job_created}</b></div>
+  `;
+}
+
+function exportVideosXlsx() {
+  window.location.href = '/api/videos/export.xlsx';
+}
+
+function videoLog(msg) {
+  const box = document.getElementById('video-log');
+  box.textContent = `[${new Date().toLocaleTimeString('vi-VN')}] ${msg}\n` + box.textContent;
+}
+
+async function runVideoPush() {
+  if (videoRunning) return;
+  const machineId = document.getElementById('video-machine-sel').value;
+  if (!machineId) { alert('Chon 1 may tao video (dang Bat) truoc khi chay.'); return; }
+  const target = Math.max(1, parseInt(document.getElementById('video-target').value, 10) || 200);
+  videoRunning = true;
+  videoStop = false;
+  document.getElementById('video-start-btn').disabled = true;
+  document.getElementById('video-stop-btn').disabled = false;
+  videoLog(`Bat dau - muc tieu ${target} video...`);
+  let totalDone = 0, totalPushed = 0, totalCreated = 0, totalErrors = 0;
+  try {
+    while (!videoStop && totalDone < target) {
+      const want = Math.min(200, target - totalDone);
+      let data;
+      try {
+        data = await api('POST', '/api/videos/push', { limit: want, machine_id: Number(machineId) });
+      } catch (e) {
+        videoLog('Loi: ' + e.message);
+        break;
+      }
+      if (!data.done) { videoLog(`Het hang doi (da xu ly tong ${totalDone}/${target}).`); break; }
+      totalDone += data.done;
+      totalPushed += data.pushed;
+      totalCreated += data.created;
+      totalErrors += (data.errors || []).length;
+      videoLog(`Lo ${data.done}: day cache ${data.pushed}, tao video ${data.created}, loi ${(data.errors || []).length} - tong da xu ly ${totalDone}/${target}.`);
+      (data.errors || []).slice(0, 5).forEach(e => videoLog(`  loi: ${e.itemid || ''} ${e.reason || ''}`));
+      loadVideoStats();
+    }
+    if (totalDone >= target) videoLog(`Da dat muc tieu ${target} video.`);
+  } finally {
+    videoRunning = false;
+    document.getElementById('video-start-btn').disabled = false;
+    document.getElementById('video-stop-btn').disabled = true;
+    videoLog(`XONG (hoac da dung). Tong: xu ly ${totalDone}, day cache ${totalPushed}, tao video ${totalCreated}, loi ${totalErrors}.`);
+    loadVideoStats();
+  }
+}
+
+function stopVideoPush() { videoStop = true; }
+
+// ---- Tab "Tao tai khoan Shopee" (mua mail dongvanfb + doc code) ----
+
+let mailAccountTypes = [];
+let lastMailAccountsList = [];
+const MAIL_MARKET_OPTIONS = ['PH', 'TH', 'MS'];
+const MAILACC_COLUMNS = [
+  { field: 'full_info', label: 'Full info' },
+  { field: 'email', label: 'Email' },
+  { field: 'password', label: 'PassEmail' },
+  { field: 'shopee_id', label: 'Shopee_id' },
+  { field: 'device', label: 'Device' },
+  { field: 'slot', label: 'Slot' },
+  { field: 'market', label: 'Market' },
+  { field: 'shopee_code', label: 'Shopee_code' },
+  { field: null, label: '' },
+  { field: 'created_at', label: 'Thoi gian' },
+];
+let mailAccSort = { field: null, dir: 1 }; // dir: 1 = A-Z, -1 = Z-A
+
+function sortMailAccounts(field) {
+  if (mailAccSort.field === field) {
+    mailAccSort.dir = -mailAccSort.dir;
+  } else {
+    mailAccSort.field = field;
+    mailAccSort.dir = 1;
+  }
+  renderMailAccounts();
+}
+
+function compareMailAccVal(va, vb) {
+  return String(va || '').localeCompare(String(vb || ''), 'vi', { numeric: true, sensitivity: 'base' });
+}
+
+function renderMailAccHeader() {
+  const tr = document.getElementById('mailacc-thead-row');
+  if (!tr) return;
+  tr.innerHTML = MAILACC_COLUMNS.map(c => {
+    if (!c.field) return '<th></th>';
+    const arrow = mailAccSort.field === c.field ? (mailAccSort.dir === 1 ? ' ▲' : ' ▼') : '';
+    return `<th class="sortable" onclick="sortMailAccounts('${c.field}')" title="Sap xep A-Z">${c.label}${arrow}</th>`;
+  }).join('');
+}
+
+async function saveDongvanfbKey(btn) {
+  const key = document.getElementById('mailacc-apikey').value.trim();
+  await withBusy(btn, async () => {
+    const s = await api('POST', '/api/settings', { dongvanfb_api_key: key });
+    currentSettings = s;
+    loadMailBalance();
+  });
+}
+
+async function loadMailBalance() {
+  const el = document.getElementById('mailacc-balance');
+  try {
+    const { balance } = await api('GET', '/api/mail_accounts/balance');
+    el.textContent = balance == null ? 'loi' : balance;
+  } catch (e) {
+    el.textContent = 'chua co key hop le';
+  }
+}
+
+async function loadMailAccountTypes() {
+  if (mailAccountTypes.length) return; // danh sach tinh, khong doi giua cac lan mo tab
+  const { account_types } = await api('GET', '/api/mail_accounts/account_types');
+  mailAccountTypes = account_types;
+  document.getElementById('mailacc-type').innerHTML = account_types.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+}
+
+async function buyMailAccounts(btn) {
+  const account_type = document.getElementById('mailacc-type').value;
+  const quantity = Math.max(1, parseInt(document.getElementById('mailacc-qty').value, 10) || 1);
+  await withBusy(btn, async () => {
+    try {
+      const r = await api('POST', '/api/mail_accounts/buy', { account_type, quantity });
+      document.getElementById('mailacc-buy-result').textContent =
+        `Da mua ${r.added} mail (het ${r.total_amount}, so du con ${r.balance}).`;
+      await loadMailAccounts();
+      loadMailBalance();
+    } catch (e) {
+      alert('Loi mua mail: ' + e.message);
+    }
+  });
+}
+
+async function loadMailAccounts() {
+  const params = new URLSearchParams();
+  const market = document.getElementById('mailacc-filter-market').value;
+  const slot = document.getElementById('mailacc-filter-slot').value;
+  const search = document.getElementById('mailacc-filter-search').value.trim();
+  if (market) params.set('market', market);
+  if (slot) params.set('slot', slot);
+  if (search) params.set('search', search);
+  params.set('limit', '300');
+  const { accounts } = await api('GET', '/api/mail_accounts/list?' + params.toString());
+  lastMailAccountsList = accounts; // dung cho cac nut Copy tra cuu lai gia tri day du, tranh nhoi chuoi dai (nhieu ky tu dac biet trong refresh_token) vao onclick inline
+  renderMailAccounts();
+}
+
+function renderMailAccounts() {
+  renderMailAccHeader();
+  if (mailAccSort.field) {
+    // Sap xep ngay tren lastMailAccountsList de idx dung voi cac nut Copy ben duoi.
+    lastMailAccountsList.sort((a, b) => mailAccSort.dir * compareMailAccVal(a[mailAccSort.field], b[mailAccSort.field]));
+  }
+  const accounts = lastMailAccountsList;
+  document.getElementById('mailacc-count').textContent = `Hien thi ${accounts.length} dong (toi da 300 - loc them de thu hep).`;
+  const tbody = document.getElementById('mailacc-tbody');
+  tbody.innerHTML = accounts.map((a, idx) => `
+    <tr>
+      <td><span class="ellipsis" style="max-width:120px;" title="${(a.full_info || '').replace(/"/g, '&quot;')}">${a.full_info}</span>
+        <button class="secondary" onclick="copyMailField(${idx}, 'full_info')">Copy</button></td>
+      <td>${a.email}
+        <button class="secondary" onclick="copyMailField(${idx}, 'email')">Copy</button></td>
+      <td>${a.password || '-'}</td>
+      <td><input type="text" value="${(a.shopee_id || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'shopee_id', this.value)" style="width:100px;"></td>
+      <td><input type="text" value="${(a.device || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'device', this.value)" style="width:100px;"></td>
+      <td><input type="text" value="${(a.slot || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'slot', this.value)" style="width:100px;"></td>
+      <td>
+        <select onchange="updateMailAccountField(${a.id}, 'market', this.value)">
+          ${MAIL_MARKET_OPTIONS.map(m => `<option value="${m}" ${a.market === m ? 'selected' : ''}>${m}</option>`).join('')}
+        </select>
+      </td>
+      <td>${a.shopee_code ? `<b style="color:#27ae60;">${a.shopee_code}</b>` : (a.checked_at ? '<span class="muted">chua co</span>' : '-')}</td>
+      <td style="white-space:nowrap;">
+        <button onclick="getMailCode(this, ${a.id})">Get code</button>
+        <button class="secondary" onclick="deleteMailAccount(${a.id})">Xoa</button>
+      </td>
+      <td class="muted" style="white-space:nowrap;">${a.created_at || '-'}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="10" class="muted">Chua mua mail nao.</td></tr>';
+}
+
+function copyMailField(idx, field) {
+  const val = lastMailAccountsList[idx] && lastMailAccountsList[idx][field];
+  if (!val) return;
+  navigator.clipboard.writeText(val).then(
+    () => { /* im lang, khong lam phien bang alert cho thao tac hay dung */ },
+    () => alert('Khong copy tu dong duoc (trinh duyet chan clipboard) - tu bam chon va Ctrl+C.')
+  );
+}
+
+async function updateMailAccountField(id, field, value) {
+  try {
+    await api('POST', `/api/mail_accounts/${id}`, { [field]: value });
+  } catch (e) {
+    alert('Loi luu: ' + e.message);
+  }
+}
+
+const MAILACC_CODE_CELL_INDEX = 7; // vi tri cot Shopee_code trong <tr>, xem MAILACC_COLUMNS
+
+async function getMailCode(btn, id) {
+  // Moi nut doc lap - vo hieu hoa CHI nut nay trong luc cho (withBusy), cac nut Get code
+  // khac tren cac dong con lai van bam duoc binh thuong, khong bi khoa theo.
+  // Xoa ngay ma cu tren giao dien luc bam, tranh nham lan voi ma moi trong luc cho ket qua.
+  const codeCell = btn.closest('tr').children[MAILACC_CODE_CELL_INDEX];
+  codeCell.innerHTML = '<span class="muted">Dang lay ma...</span>';
+  await withBusy(btn, async () => {
+    try {
+      const { code, note } = await api('POST', `/api/mail_accounts/${id}/get_code`);
+      await loadMailAccounts();
+      if (!code) alert('Chua lay duoc ma Shopee.\n' + (note || ''));
+    } catch (e) {
+      alert('Loi lay ma: ' + e.message);
+      await loadMailAccounts(); // dong bo lai giao dien voi trang thai that tren server, tranh ke ket qua bi ket o "Dang lay ma..."
+    }
+  });
+}
+
+async function deleteMailAccount(id) {
+  if (!confirm('Xoa dong mail nay?')) return;
+  await api('DELETE', `/api/mail_accounts/${id}`);
+  loadMailAccounts();
+}
+
+function exportMailAccountsXlsx() {
+  window.location.href = '/api/mail_accounts/export.xlsx';
+}
+
+async function clearMailAccounts() {
+  if (!confirm('Xoa TOAN BO danh sach mail da mua? Khong the hoan tac.')) return;
+  const { deleted } = await api('POST', '/api/mail_accounts/clear');
+  alert(`Da xoa ${deleted} dong.`);
+  loadMailAccounts();
+}
+
+async function refreshAll() {
+  await loadAccounts(); // loadRoots can duoc du lieu tai khoan de ve select "Giao cho"
+  await Promise.all([loadStats(), loadRoots(), loadSettings(), loadWorkers(), loadUserscripts()]);
+}
+refreshAll();
+setInterval(() => { loadStats(); loadRoots(); loadWorkers(); }, 5000);
+</script>
+</body>
+</html>
