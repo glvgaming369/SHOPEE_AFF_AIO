@@ -54,11 +54,6 @@ USERSCRIPTS = [
         "description": "Chay tren trang Shopee thuong (khong phai affiliate) - cuon trang tu dong thu thap link san pham, day thang lam root vao DB hoac xuat TXT/JSON/CSV.",
     },
     {
-        "file": "tampermonkey_flashsale_scraper.user.js",
-        "title": "Shopee Flash Sale Link Scraper",
-        "description": "Cao link san pham tu trang Flash Sale Shopee - tinh nang rieng, cu hon, khong thuoc pipeline affiliate offer/group.",
-    },
-    {
         "file": "shopee_ph_phone_checker.user.js",
         "title": "Shopee PH Phone Checker (SMSPool + 5sim + dongvanfb Mail)",
         "description": "1 script, 2 vai tro theo domain dang mo: tren bat ky trang nao cua shopee.ph - lay so PH tu SMSPool/5sim qua API key hoac dongvanfb mail, kiem tra check_phone_exist, tu huy so da ton tai; tren 5sim.net - mua/huy so bang chinh session trinh duyet (khong qua API key, ne rate limit rieng), gui yeu cau check sang tab shopee.ph qua GM_addValueChangeListener (cung 1 script, khong can server trung gian) roi tu quyet dinh huy/giu.",
