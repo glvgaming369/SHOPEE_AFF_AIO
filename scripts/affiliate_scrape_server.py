@@ -46,17 +46,17 @@ USERSCRIPTS = [
     {
         "file": "tampermonkey_affiliate_group_scraper.user.js",
         "title": "Affiliate Offer Group Scraper",
-        "description": "Script CHINH: chay tren affiliate.shopee.* de gom du 60 san pham/group (BFS qua san pham tuong tu). Can cho MOI tai khoan/profile dang dung de cao.",
+        "description": "Script CHÍNH: Chạy trên affiliate.shopee.* để gom đủ 60 sản phẩm/group (BFS qua sản phẩm tương tự). Cần cho MỖI tài khoản/profile đang dùng để cào.",
     },
     {
         "file": "shopee_collector.user.js",
         "title": "Shopee Product Link Collector",
-        "description": "Chay tren trang Shopee thuong (khong phai affiliate) - cuon trang tu dong thu thap link san pham, day thang lam root vao DB hoac xuat TXT/JSON/CSV.",
+        "description": "Chạy trên trang Shopee thường (không phải affiliate) - cuộn trang tự động thu thập link sản phẩm, đẩy thẳng làm root vào DB hoặc xuất TXT/JSON/CSV.",
     },
     {
         "file": "shopee_ph_phone_checker.user.js",
         "title": "Shopee PH Phone Checker (SMSPool + 5sim + dongvanfb Mail)",
-        "description": "1 script, 2 vai tro theo domain dang mo: tren bat ky trang nao cua shopee.ph - lay so PH tu SMSPool/5sim qua API key hoac dongvanfb mail, kiem tra check_phone_exist, tu huy so da ton tai; tren 5sim.net - mua/huy so bang chinh session trinh duyet (khong qua API key, ne rate limit rieng), gui yeu cau check sang tab shopee.ph qua GM_addValueChangeListener (cung 1 script, khong can server trung gian) roi tu quyet dinh huy/giu.",
+        "description": "1 script, 2 vai trò theo domain đang mở: Trên bất kỳ trang nào của shopee.ph - lấy số PH từ SMSPool/5sim qua API key hoặc dongvanfb mail, kiểm tra check_phone_exist, tự hủy số đã tồn tại; Trên 5sim.net - mua/hủy số bằng chính session trình duyệt (không qua API key, né rate limit riêng), gửi yêu cầu check sang tab shopee.ph qua GM_addValueChangeListener rồi tự quyết định hủy/giữ.",
     },
 ]
 USERSCRIPT_ALLOWLIST = {u["file"] for u in USERSCRIPTS}

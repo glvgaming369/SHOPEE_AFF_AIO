@@ -2,16 +2,21 @@
 <html lang="vi">
 <head>
 <meta charset="utf-8">
-<title>Shopee Affiliate Offer Scraper</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shopee Affiliate Offer Scraper - Bảng Điều Khiển Vận Hành</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    /* Ten bien --accent/--border/--bg-soft GIU NGUYEN (tri gia tri moi) vi con vai noi
-       dung inline style="...var(--bg-soft)..." trong cac <pre> log (video-log/update-log)
-       tham chieu truc tiep - doi ten se lam trong rong nhung cho do. */
-    --accent: #ea580c;
-    --accent-dark: #c2410c;
-    --accent-soft: #fff7ed;
-    --accent-ring: rgba(234,88,12,.16);
+    /* Đặt bảng màu chuẩn cho ứng dụng hiện đại */
+    --accent: #ee4d2d;
+    --accent-dark: #d03e1f;
+    --accent-light: #ff6600;
+    --accent-soft: #fff5f2;
+    --accent-ring: rgba(238, 77, 45, 0.2);
+
+    /* Giữ nguyên các biến CSS legacy cho pre log */
     --border: #e2e8f0;
     --border-strong: #cbd5e1;
     --bg-soft: #f8fafc;
@@ -23,12 +28,16 @@
     --surface-2: #f8fafc;
     --bg: #f1f5f9;
 
-    --radius-sm: 6px;
-    --radius: 10px;
-    --radius-lg: 14px;
-    --shadow-sm: 0 1px 2px rgba(15,23,42,.06);
-    --shadow: 0 1px 3px rgba(15,23,42,.08), 0 1px 2px rgba(15,23,42,.04);
-    --shadow-md: 0 6px 16px rgba(15,23,42,.10);
+    --radius-sm: 8px;
+    --radius: 12px;
+    --radius-lg: 16px;
+
+    --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.05);
+    --shadow: 0 4px 12px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+    --shadow-md: 0 10px 25px -5px rgba(15, 23, 42, 0.1), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
+
+    --font-sans: 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
 
     --info: #2563eb; --info-bg: #eff6ff; --info-text: #1d4ed8;
     --violet: #7c3aed; --violet-bg: #f5f3ff; --violet-text: #6d28d9;
@@ -38,125 +47,191 @@
     --warning: #d97706; --warning-bg: #fffbeb; --warning-text: #b45309;
     --neutral-bg: #f1f5f9; --neutral-text: #475569;
   }
+
   * { box-sizing: border-box; }
   body {
-    font: 14px/1.55 -apple-system, "Segoe UI", system-ui, sans-serif;
-    margin: 0; background: var(--bg); color: var(--ink); -webkit-font-smoothing: antialiased;
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.6;
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
   }
 
+  /* Header */
   header {
-    background: var(--surface); color: var(--ink); border-bottom: 1px solid var(--border);
-    padding: 14px 24px; display: flex; align-items: center; gap: 12px;
-    position: sticky; top: 0; z-index: 30;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: var(--ink);
+    border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+    padding: 14px 28px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.02);
   }
   header .logo-mark {
-    width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
-    background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+    width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+    background: linear-gradient(135deg, var(--accent-light), var(--accent-dark));
     color: #fff; display: flex; align-items: center; justify-content: center;
-    font-weight: 700; font-size: 14px; box-shadow: var(--shadow-sm);
+    font-weight: 800; font-size: 18px; box-shadow: 0 4px 10px rgba(238, 77, 45, 0.3);
   }
-  header h1 { margin: 0; font-size: 15.5px; font-weight: 700; letter-spacing: -.01em; }
-  header .subtitle { margin-top: 1px; font-size: 12px; color: var(--ink-faint); }
+  header h1 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.02em; color: var(--ink); }
+  header .subtitle { margin-top: 1px; font-size: 12px; color: var(--ink-soft); font-weight: 400; }
+  header .header-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
   header .version {
-    margin-left: auto; font-size: 11px; font-weight: 700; color: var(--accent-dark);
-    background: var(--accent-soft); border: 1px solid #fed7aa; padding: 3px 10px; border-radius: 20px;
+    font-size: 11px; font-weight: 700; color: var(--accent-dark);
+    background: var(--accent-soft); border: 1px solid rgba(238, 77, 45, 0.2);
+    padding: 4px 12px; border-radius: 20px;
   }
 
-  main { max-width: 1180px; margin: 24px auto 60px; padding: 0 20px; }
-
-  .tab-nav { display: flex; gap: 2px; background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 20px; overflow-x: auto; }
+  /* Navigation Tabs */
+  .nav-container {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 65px;
+    z-index: 40;
+    box-shadow: var(--shadow-sm);
+  }
+  .tab-nav {
+    max-width: 1240px; margin: 0 auto;
+    display: flex; gap: 4px; padding: 0 24px; overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tab-nav::-webkit-scrollbar { display: none; }
   .tab-btn {
-    display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
-    padding: 13px 15px; border: none; background: none; cursor: pointer; font: inherit; font-size: 13px;
-    font-weight: 500; color: var(--ink-soft); border-bottom: 2px solid transparent;
-    transition: color .15s ease, border-color .15s ease;
+    display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+    padding: 14px 18px; border: none; background: none; cursor: pointer;
+    font-family: var(--font-sans); font-size: 13.5px; font-weight: 500;
+    color: var(--ink-soft); border-bottom: 3px solid transparent;
+    transition: all 0.2s ease;
   }
-  .tab-btn:hover { color: var(--ink); background: none; box-shadow: none; transform: none; }
-  .tab-btn.active { border-bottom-color: var(--accent); color: var(--accent-dark); font-weight: 600; }
-  .tab-icon { display: inline-flex; opacity: .7; }
-  .tab-btn.active .tab-icon { opacity: 1; }
+  .tab-btn:hover { color: var(--ink); background: var(--surface-2); border-radius: 8px 8px 0 0; }
+  .tab-btn.active { border-bottom-color: var(--accent); color: var(--accent-dark); font-weight: 700; }
+  .tab-icon { display: inline-flex; opacity: 0.75; transition: opacity 0.2s; }
+  .tab-btn.active .tab-icon { opacity: 1; color: var(--accent); }
 
+  /* Layout Container */
+  main { max-width: 1240px; margin: 24px auto 60px; padding: 0 24px; }
   .tab-panel { display: none; }
-  .tab-panel.active { display: grid; gap: 20px; margin-top: 22px; }
+  .tab-panel.active { display: grid; gap: 24px; animation: fadeIn 0.25s ease-out; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
 
   .ellipsis { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
 
+  /* Card Sections */
   section {
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
-    padding: 20px 22px; box-shadow: var(--shadow-sm);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 22px 26px;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.2s ease;
   }
+  section:hover { box-shadow: var(--shadow); }
   section h2 {
-    margin: 0 0 14px; font-size: 14px; font-weight: 700; color: var(--ink);
-    display: flex; align-items: center; gap: 9px; letter-spacing: -.01em;
+    margin: 0 0 16px; font-size: 15px; font-weight: 700; color: var(--ink);
+    display: flex; align-items: center; gap: 10px; letter-spacing: -0.01em;
   }
-  section h2::before { content: ""; width: 4px; height: 15px; border-radius: 2px; background: var(--accent); flex-shrink: 0; }
+  section h2::before {
+    content: ""; width: 4px; height: 16px; border-radius: 4px;
+    background: linear-gradient(to bottom, var(--accent-light), var(--accent));
+    flex-shrink: 0;
+  }
 
-  .stats-bar { display: flex; gap: 10px; flex-wrap: wrap; }
+  /* Stats Bar */
+  .stats-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
   .stats-bar > div {
     background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 9px 14px; font-size: 12.5px; color: var(--ink-soft); line-height: 1.7;
+    padding: 12px 16px; font-size: 13px; color: var(--ink-soft); line-height: 1.6;
+    display: flex; flex-direction: column; justify-content: center;
   }
-  .stats-bar b { color: var(--accent-dark); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stats-bar b { color: var(--accent-dark); font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
 
-  .table-wrap { overflow-x: auto; border-radius: var(--radius); }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  /* Tables */
+  .table-wrap {
+    overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--surface); }
   thead th {
-    text-align: left; padding: 9px 10px; background: var(--surface-2); color: var(--ink-soft);
-    font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    text-align: left; padding: 11px 14px; background: var(--surface-2); color: var(--ink-soft);
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
     border-bottom: 1px solid var(--border-strong); white-space: nowrap;
   }
-  tbody td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tbody td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
   tbody tr:last-child td { border-bottom: none; }
-  tbody tr:hover { background: var(--surface-2); }
-  th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
-  th.sortable:hover { color: var(--ink); background: var(--border); }
+  tbody tr:hover { background: rgba(248, 250, 252, 0.8); }
+  th.sortable { cursor: pointer; user-select: none; white-space: nowrap; transition: color 0.15s; }
+  th.sortable:hover { color: var(--accent-dark); background: var(--border); }
 
-  input, textarea, button, select { font: inherit; }
+  /* Form Elements */
+  input, textarea, button, select { font-family: var(--font-sans); font-size: 13.5px; }
   input[type=text], input[type=number], input[type=password] {
-    padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
-    width: 100%; background: var(--surface); color: var(--ink); transition: border-color .12s ease, box-shadow .12s ease;
+    padding: 9px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+    width: 100%; background: var(--surface); color: var(--ink);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
   textarea {
-    width: 100%; height: 90px; padding: 10px; border: 1px solid var(--border-strong);
+    width: 100%; height: 100px; padding: 12px; border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); resize: vertical;
-    transition: border-color .12s ease, box-shadow .12s ease;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease; line-height: 1.5;
   }
   select {
-    padding: 7px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
-    font: inherit; background: var(--surface); color: var(--ink);
+    padding: 8px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+    background: var(--surface); color: var(--ink); cursor: pointer;
   }
   input[type=text]:focus, input[type=number]:focus, input[type=password]:focus, textarea:focus, select:focus {
     outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring);
   }
 
+  /* Buttons */
   button {
-    padding: 8px 14px; border: none; border-radius: var(--radius-sm); background: var(--accent);
-    color: #fff; cursor: pointer; font-weight: 600; font-size: 13px; box-shadow: var(--shadow-sm);
-    transition: transform .12s ease, box-shadow .12s ease, background .12s ease, opacity .12s ease;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 9px 16px; border: none; border-radius: var(--radius-sm); background: var(--accent);
+    color: #fff; cursor: pointer; font-weight: 600; font-size: 13px; box-shadow: 0 1px 2px rgba(238,77,45,0.2);
+    transition: all 0.15s ease; white-space: nowrap;
   }
-  button:hover { background: var(--accent-dark); box-shadow: var(--shadow); transform: translateY(-1px); }
+  button:hover { background: var(--accent-dark); box-shadow: 0 4px 10px rgba(238,77,45,0.3); transform: translateY(-1px); }
   button:active { transform: translateY(0); }
-  button:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
-  button.secondary { background: var(--surface); color: var(--ink-soft); border: 1px solid var(--border-strong); box-shadow: none; }
-  button.secondary:hover { background: var(--surface-2); color: var(--ink); border-color: var(--ink-faint); box-shadow: none; }
-  button.danger { background: var(--danger); }
-  button.danger:hover { background: var(--danger-text); }
+  button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; box-shadow: none; }
+  button.secondary {
+    background: var(--surface); color: var(--ink-soft); border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-sm);
+  }
+  button.secondary:hover { background: var(--surface-2); color: var(--ink); border-color: var(--ink-faint); box-shadow: var(--shadow); }
+  button.danger { background: var(--danger); box-shadow: 0 1px 2px rgba(220,38,38,0.2); }
+  button.danger:hover { background: var(--danger-text); box-shadow: 0 4px 10px rgba(220,38,38,0.3); }
 
-  .row { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
-  .row input { flex: 1; }
-  .muted { color: var(--ink-faint); font-size: 12px; }
+  .row { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .row input { flex: 1; min-width: 200px; }
+  .muted { color: var(--ink-faint); font-size: 12.5px; line-height: 1.5; }
   .members-box {
     background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 10px; margin-top: 8px; font-size: 12px; max-height: 200px; overflow: auto;
+    padding: 14px; margin-top: 12px; font-size: 12.5px; max-height: 220px; overflow: auto;
   }
-  a { color: var(--accent-dark); text-decoration: none; }
+  a { color: var(--accent-dark); text-decoration: none; font-weight: 500; }
   a:hover { text-decoration: underline; }
   code {
-    font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px;
-    background: var(--surface-2); border: 1px solid var(--border); padding: 1px 6px; border-radius: 4px; color: var(--ink);
+    font-family: var(--font-mono); font-size: 12px;
+    background: var(--surface-2); border: 1px solid var(--border); padding: 2px 7px; border-radius: 5px; color: var(--ink);
   }
 
-  .badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+  /* Status Badges */
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+    border-radius: 20px; font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  }
   .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
   .badge.idle, .badge.offline { background: var(--neutral-bg); color: var(--neutral-text); }
   .badge.working, .badge.done { background: var(--success-bg); color: var(--success-text); }
@@ -165,169 +240,186 @@
   .badge.member { background: var(--violet-bg); color: var(--violet-text); }
   .badge.cached { background: var(--cyan-bg); color: var(--cyan-text); }
   .badge.insufficient { background: var(--warning-bg); color: var(--warning-text); }
+
+  /* Log Pre Console */
+  pre.console-log {
+    margin-top: 12px; max-height: 240px; overflow: auto;
+    background: #0f172a; color: #f8fafc; padding: 14px;
+    border-radius: var(--radius); font-family: var(--font-mono); font-size: 12px;
+    white-space: pre-wrap; line-height: 1.6; border: 1px solid #1e293b;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+  }
 </style>
 </head>
 <body>
+
 <header>
   <div class="logo-mark">S</div>
   <div>
     <h1>Shopee Affiliate Offer Scraper</h1>
-    <div class="subtitle">Bang dieu khien van hanh</div>
+    <div class="subtitle">Bảng điều khiển vận hành & tự động hóa hệ thống</div>
   </div>
-  <span class="version">v2.5</span>
+  <div class="header-right">
+    <span class="version">v2.5</span>
+  </div>
 </header>
-<nav class="tab-nav">
-  <button class="tab-btn" id="tabbtn-setup" onclick="switchTab('setup')">
-    <span class="tab-icon"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><circle cx="9" cy="6" r="2" fill="currentColor" stroke="none"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="7" cy="18" r="2" fill="currentColor" stroke="none"/></svg></span>
-    Tai khoan & Script
-  </button>
-  <button class="tab-btn active" id="tabbtn-operations" onclick="switchTab('operations')">
-    <span class="tab-icon"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,12 8,12 10,6 14,18 16,12 21,12"/></svg></span>
-    Van hanh
-  </button>
-  <button class="tab-btn" id="tabbtn-products" onclick="switchTab('products')">
-    <span class="tab-icon"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="14" rx="1"/><path d="M3 7l9-4 9 4"/><line x1="12" y1="7" x2="12" y2="21"/></svg></span>
-    San pham da cao
-  </button>
-  <button class="tab-btn" id="tabbtn-video" onclick="switchTab('video')">
-    <span class="tab-icon"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="M16 9l6-3v12l-6-3z"/></svg></span>
-    Tao video
-  </button>
-  <button class="tab-btn" id="tabbtn-mailacc" onclick="switchTab('mailacc')">
-    <span class="tab-icon"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 6l10 7 10-7"/></svg></span>
-    Tao tai khoan Shopee
-  </button>
-</nav>
+
+<div class="nav-container">
+  <nav class="tab-nav">
+    <button class="tab-btn" id="tabbtn-setup" onclick="switchTab('setup')">
+      <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><circle cx="9" cy="6" r="2" fill="currentColor" stroke="none"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="7" cy="18" r="2" fill="currentColor" stroke="none"/></svg></span>
+      Tài khoản & Script
+    </button>
+    <button class="tab-btn active" id="tabbtn-operations" onclick="switchTab('operations')">
+      <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,12 8,12 10,6 14,18 16,12 21,12"/></svg></span>
+      Vận hành
+    </button>
+    <button class="tab-btn" id="tabbtn-products" onclick="switchTab('products')">
+      <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="14" rx="1"/><path d="M3 7l9-4 9 4"/><line x1="12" y1="7" x2="12" y2="21"/></svg></span>
+      Sản phẩm đã cào
+    </button>
+    <button class="tab-btn" id="tabbtn-video" onclick="switchTab('video')">
+      <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="M16 9l6-3v12l-6-3z"/></svg></span>
+      Tạo Video
+    </button>
+    <button class="tab-btn" id="tabbtn-mailacc" onclick="switchTab('mailacc')">
+      <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 6l10 7 10-7"/></svg></span>
+      Tạo tài khoản Shopee
+    </button>
+  </nav>
+</div>
+
 <main>
 
+<!-- Tab 1: Setup -->
 <div id="tab-setup" class="tab-panel">
 
   <section>
-    <h2>Cap nhat dashboard</h2>
+    <h2>Cập nhật Dashboard</h2>
     <div class="row">
-      <button class="secondary" onclick="checkForUpdate()">Kiem tra cap nhat</button>
-      <button id="update-apply-btn" onclick="applyUpdate()" disabled>Cap nhat ngay</button>
-      <span class="muted" id="update-status">Chua kiem tra.</span>
+      <button class="secondary" onclick="checkForUpdate()">Kiểm tra cập nhật</button>
+      <button id="update-apply-btn" onclick="applyUpdate()" disabled>Cập nhật ngay</button>
+      <span class="muted" id="update-status">Chưa kiểm tra.</span>
     </div>
-    <pre id="update-log" style="margin-top:10px; max-height:160px; overflow:auto; background:var(--bg-soft); padding:10px; border-radius:6px; font-size:12px; white-space:pre-wrap; display:none;"></pre>
+    <pre id="update-log" class="console-log" style="display:none;"></pre>
   </section>
 
   <section>
-    <h2>Tai khoan / Chrome profile</h2>
+    <h2>Tài khoản / Chrome Profile</h2>
     <div class="row">
-      <input type="text" id="acc-name" placeholder="Ten tai khoan (vd: shop_ph_01)">
-      <input type="text" id="acc-path" placeholder="Duong dan thu muc Chrome profile (vd: C:\Users\...\Chrome\User Data\Profile 7)">
-      <button onclick="addAccount(this)">Them</button>
+      <input type="text" id="acc-name" placeholder="Tên tài khoản (Ví dụ: shop_ph_01)">
+      <input type="text" id="acc-path" placeholder="Đường dẫn thư mục Chrome profile (Ví dụ: C:\Users\...\User Data\Profile 7)">
+      <button onclick="addAccount(this)">Thêm tài khoản</button>
     </div>
-    <div class="muted" style="margin-bottom:8px;">
-      Sau khi "Launch", Chrome se mo den <code>https://affiliate.shopee.ph/offer/product_offer</code> -
-      cai san Tampermonkey + script <code>tampermonkey_affiliate_group_scraper.user.js</code> trong dung
-      profile do truoc, nhap "Device key" = ten tai khoan nay trong panel cua script.
+    <div class="muted" style="margin-bottom:12px;">
+      Sau khi bấm <b>Launch</b>, Chrome sẽ mở trang <code>https://affiliate.shopee.ph/offer/product_offer</code> -
+      Cài sẵn Tampermonkey + script <code>tampermonkey_affiliate_group_scraper.user.js</code> trong đúng Profile đó trước,
+      sau đó nhập "Device key" = tên tài khoản này trong panel điều khiển của script.
     </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Ten</th><th>Duong dan profile</th><th></th></tr></thead>
+      <thead><tr><th>Tên tài khoản</th><th>Đường dẫn Profile</th><th>Thao tác</th></tr></thead>
       <tbody id="accounts-tbody"></tbody>
     </table></div>
   </section>
 
   <section>
-    <h2>Cai dat / Cap nhat script</h2>
-    <div class="muted" style="margin-bottom:8px;">
-      Bam link o dung Chrome profile can cai/cap nhat - Tampermonkey se tu hien man hinh
-      "Cai dat"/"Cap nhat" (so sanh @version, khong ghi de neu ban dang cung ban). Sau khi
-      cai lan dau, lan sau chi can vao Tampermonkey Dashboard bam "Check for Userscript
-      Updates" hoac bam lai link nay.
+    <h2>Cài đặt / Cập nhật Script (Userscripts)</h2>
+    <div class="muted" style="margin-bottom:12px;">
+      Bấm liên kết ở đúng Chrome Profile cần cài đặt hoặc cập nhật - Tampermonkey sẽ tự động hiển thị màn hình
+      "Cài đặt" / "Cập nhật" (so sánh @version, không ghi đè nếu trùng phiên bản). Sau khi cài lần đầu, lần sau chỉ cần vào Tampermonkey Dashboard chọn "Check for Userscript Updates" hoặc bấm lại liên kết này.
     </div>
-    <div id="userscripts-list">Dang tai...</div>
+    <div id="userscripts-list">Đang tải danh sách script...</div>
   </section>
 
 </div>
 
+<!-- Tab 2: Operations -->
 <div id="tab-operations" class="tab-panel active">
 
   <section>
-    <h2>Tong quan</h2>
-    <div class="stats-bar" id="stats-bar">Dang tai...</div>
-    <div style="margin-top:12px;">
-      <button class="danger" onclick="resetAll()">Xoa toan bo du lieu</button>
-      <span class="muted">(chi xoa root/related da cao - KHONG xoa danh sach tai khoan/profile)</span>
+    <h2>Tổng quan hệ thống</h2>
+    <div class="stats-bar" id="stats-bar">Đang tải dữ liệu...</div>
+    <div style="margin-top:14px;">
+      <button class="danger" onclick="resetAll()">Xóa toàn bộ dữ liệu cào</button>
+      <span class="muted">(Chỉ xóa dữ liệu root/related đã cào - KHÔNG xóa danh sách tài khoản/profile)</span>
     </div>
   </section>
 
   <section>
-    <h2>Worker (tab Tampermonkey dang chay)</h2>
-    <div class="muted" style="margin-bottom:8px;">
-      Tab tu bao trang thai ve day sau khi bam Start trong panel cua script. "Offline" =
-      qua 15s khong thay bao gi (co the tab da dong/mat mang).
+    <h2>Worker (Tab Tampermonkey đang chạy)</h2>
+    <div class="muted" style="margin-bottom:10px;">
+      Tab tự gửi báo cáo trạng thái về đây sau khi bấm <b>Start</b> trong panel script. "Offline" =
+      quá 15 giây không có tín hiệu (có thể tab đã đóng hoặc mất kết nối mạng).
     </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Device key</th><th>Market</th><th>Trang thai</th><th>Root dang lam</th><th>Lan cuoi bao</th></tr></thead>
+      <thead><tr><th>Device Key</th><th>Thị trường</th><th>Trạng thái</th><th>Root đang xử lý</th><th>Lần cuối báo cáo</th></tr></thead>
       <tbody id="workers-tbody"></tbody>
     </table></div>
   </section>
 
   <section>
-    <h2>Dieu kien loc</h2>
-    <div class="muted" style="margin-bottom:8px;">Ap dung cho MOI lan verify tu day tro di (khong hoi to nhung item da cao truoc do - dung nut "Cham lai diem" o duoi neu can).</div>
+    <h2>Điều kiện lọc sản phẩm</h2>
+    <div class="muted" style="margin-bottom:12px;">Áp dụng cho MỌI lần xác minh từ đây trở đi (không ảnh hưởng tới các sản phẩm đã cào trước đó - dùng nút "Chấm lại điểm" nếu cần).</div>
     <div class="row">
-      <label style="min-width:230px;">affiliate_promoted_last_7days &lt;</label>
+      <label style="min-width:260px; font-weight:500;">Số lượng KOL quảng bá 7 ngày &lt;</label>
       <input type="text" id="set-promoted7d" placeholder="1000">
     </div>
     <div class="row">
-      <label style="min-width:230px;">sold &gt;</label>
+      <label style="min-width:260px; font-weight:500;">Số đã bán trong 30 ngày &gt;</label>
       <input type="text" id="set-sold" placeholder="100">
     </div>
     <div class="row">
-      <label style="min-width:230px;">seller_commission (tien te goc, vd PHP=peso) &gt;</label>
+      <label style="min-width:260px; font-weight:500;">Hoa hồng nhà bán hàng &gt;</label>
       <input type="text" id="set-commission" placeholder="1000">
     </div>
     <div class="row">
-      <button onclick="saveSettings()">Luu dieu kien loc</button>
-      <span class="muted" id="settings-result"></span>
+      <button onclick="saveSettings()">Lưu điều kiện lọc</button>
+      <span class="muted" id="settings-result" style="color:var(--success); font-weight:600;"></span>
     </div>
   </section>
 
   <section>
-    <h2>Nap link goc (root)</h2>
-    <textarea id="root-links" placeholder="Moi dong 1 link san pham Shopee, vd: https://shopee.ph/product/1161500024/26103037343"></textarea>
-    <div class="row" style="margin-top:8px;">
-      <button onclick="importRoots()">Nap vao DB</button>
+    <h2>Nạp liên kết gốc (Root Links)</h2>
+    <textarea id="root-links" placeholder="Mỗi dòng 1 liên kết sản phẩm Shopee&#10;Ví dụ: https://shopee.ph/product/1161500024/26103037343"></textarea>
+    <div class="row" style="margin-top:10px;">
+      <button onclick="importRoots()">Nạp vào Cơ sở dữ liệu</button>
       <span class="muted" id="import-result"></span>
     </div>
   </section>
 
   <section>
-    <h2>Root theo market</h2>
-    <div class="muted" style="margin-bottom:8px;">Tong hop so root cua TUNG thi truong - dang cho (chua ai giu) / dang lam (da giao, chua xong) / done / fail.</div>
+    <h2>Root theo thị trường (Market)</h2>
+    <div class="muted" style="margin-bottom:10px;">Tổng hợp số lượng Root của TỪNG thị trường - Đang chờ (chưa có worker giữ) / Đang làm (đã giao) / Hoàn tất / Thất bại.</div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Market</th><th>Tong</th><th>Dang cho</th><th>Dang lam</th><th>Done</th><th>Fail</th></tr></thead>
+      <thead><tr><th>Thị trường</th><th>Tổng số</th><th>Đang chờ</th><th>Đang làm</th><th>Hoàn tất</th><th>Thất bại</th></tr></thead>
       <tbody id="root-market-stats-tbody"></tbody>
     </table></div>
   </section>
 
   <section>
-    <h2>Danh sach root</h2>
-    <div class="row">
-      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+    <h2>Danh sách Root</h2>
+    <div class="row" style="background:var(--surface-2); padding:12px; border-radius:var(--radius-sm); border:1px solid var(--border);">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;">
         <input type="checkbox" id="auto-assign-toggle" onchange="toggleAutoAssign()">
-        Tu dong giao viec (worker ranh se tu nhan root pending ke tiep, khong can chon tay)
+        Tự động giao việc (Worker rảnh sẽ tự nhận Root pending tiếp theo)
       </label>
-      <label style="white-space:nowrap;">cho market:</label>
+      <span style="color:var(--border-strong);">|</span>
+      <label style="white-space:nowrap;font-weight:500;">Cho thị trường:</label>
       <select id="auto-assign-market-sel" onchange="toggleAutoAssign()" style="max-width:200px;">
-        <option value="">-- Tat ca market --</option>
+        <option value="">-- Tất cả thị trường --</option>
       </select>
     </div>
-    <div class="row">
-      <label style="white-space:nowrap;">Loc theo market:</label>
+    <div class="row" style="margin-top:10px;">
+      <label style="white-space:nowrap;font-weight:500;">Lọc theo thị trường:</label>
       <select id="root-filter-market" onchange="loadRoots()" style="max-width:200px;">
-        <option value="">-- Tat ca market --</option>
+        <option value="">-- Tất cả thị trường --</option>
       </select>
-      <button class="secondary" onclick="loadRoots()">Lam moi</button>
-      <button class="secondary" onclick="recomputeMergedAll()">Gop link cho TAT CA root</button>
-      <button class="secondary" onclick="resetInsufficientAll()">Dat lai TAT CA root thieu</button>
+      <button class="secondary" onclick="loadRoots()">Làm mới</button>
+      <button class="secondary" onclick="recomputeMergedAll()">Gộp link TẤT CẢ Root</button>
+      <button class="secondary" onclick="resetInsufficientAll()">Đặt lại TẤT CẢ Root thiếu</button>
     </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>item_id</th><th>Market</th><th>Trang thai</th><th>Thanh vien</th><th>Giao cho</th><th>Link</th><th></th></tr></thead>
+      <thead><tr><th>Mã SP (item_id)</th><th>Thị trường</th><th>Trạng thái</th><th>Thành viên</th><th>Giao cho</th><th>Liên kết</th><th>Thao tác</th></tr></thead>
       <tbody id="roots-tbody"></tbody>
     </table></div>
     <div id="members-panel"></div>
@@ -335,149 +427,151 @@
 
 </div>
 
+<!-- Tab 3: Products -->
 <div id="tab-products" class="tab-panel">
 
   <section>
-    <h2>San pham da cao</h2>
+    <h2>Sản phẩm đã cào</h2>
     <div class="row">
       <select id="item-filter-linktype" onchange="loadItems()">
-        <option value="">-- Loai: tat ca --</option>
-        <option value="root">root</option>
-        <option value="related">related</option>
+        <option value="">-- Loại: Tất cả --</option>
+        <option value="root">Root</option>
+        <option value="related">Related</option>
       </select>
       <select id="item-filter-status" onchange="loadItems()">
-        <option value="">-- Trang thai: tat ca --</option>
+        <option value="">-- Trạng thái: Tất cả --</option>
         <option value="pending">pending</option>
         <option value="member">member</option>
         <option value="cached">cached</option>
         <option value="done">done</option>
         <option value="fail">fail</option>
       </select>
-      <input type="text" id="item-filter-search" placeholder="Tim theo itemid/ten/shop..." onkeydown="if(event.key==='Enter') loadItems()">
-      <input type="text" id="item-filter-groupid" placeholder="Loc theo groupId..." onkeydown="if(event.key==='Enter') loadItems()">
-      <button class="secondary" onclick="loadItems()">Loc</button>
-      <button class="secondary" onclick="clearGroupFilter()">Bo loc nhom</button>
+      <input type="text" id="item-filter-search" placeholder="Tìm theo itemid / tên / shop..." onkeydown="if(event.key==='Enter') loadItems()">
+      <input type="text" id="item-filter-groupid" placeholder="Lọc theo groupId..." onkeydown="if(event.key==='Enter') loadItems()">
+      <button class="secondary" onclick="loadItems()">Lọc sản phẩm</button>
+      <button class="secondary" onclick="clearGroupFilter()">Bỏ lọc nhóm</button>
     </div>
-    <div class="muted" style="margin-bottom:8px;" id="items-count"></div>
+    <div class="muted" style="margin-bottom:10px;" id="items-count"></div>
     <div class="table-wrap"><table>
-      <thead><tr><th>item_id</th><th>Ten</th><th>Sold</th><th>Aff 7d</th><th>Seller comm</th><th>Loai</th><th>Trang thai</th><th>Nhom</th><th>Gop link</th><th></th></tr></thead>
+      <thead><tr><th>Mã SP (item_id)</th><th>Tên sản phẩm</th><th>Đã bán (30d)</th><th>KOL 7 ngày</th><th>Hoa hồng nhà bán</th><th>Loại</th><th>Trạng thái</th><th>Nhóm</th><th>Gộp link</th><th>Thao tác</th></tr></thead>
       <tbody id="items-tbody"></tbody>
     </table></div>
   </section>
 
 </div>
 
+<!-- Tab 4: Video -->
 <div id="tab-video" class="tab-panel">
 
   <section>
-    <h2>Video Machines</h2>
-    <div class="muted" style="margin-bottom:8px;">
-      Goi thang toi <code>videoai-api.devappnow.com</code> (khong qua Postgres cua 2-tao-video).
-      Moi may 1 API key + 1 thu muc (Tag) + Pool rieng - dung khi co nhieu tai khoan/may VideoAI.
+    <h2>Máy tạo Video (Video Machines)</h2>
+    <div class="muted" style="margin-bottom:10px;">
+      Gửi trực tiếp tới <code>videoai-api.devappnow.com</code>.
+      Mỗi máy cấu hình 1 API key + 1 Thư mục (Tag) + Pool riêng - sử dụng khi có nhiều tài khoản VideoAI.
     </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Name</th><th>API key</th><th>Tag</th><th>Pool</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Tên máy</th><th>API Key</th><th>Thẻ (Tag)</th><th>Pool</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
       <tbody id="video-machines-tbody"></tbody>
     </table></div>
-    <div class="row" style="margin-top:10px;">
-      <input type="text" id="vm-name" placeholder="Ten may (vd: May 1)">
-      <input type="text" id="vm-apikey" placeholder="VideoAI API key (vd: api_xxxxxxxx)">
-      <input type="text" id="vm-tag" placeholder="Thu muc/Tag (vd: batch-01)">
+    <div class="row" style="margin-top:14px;">
+      <input type="text" id="vm-name" placeholder="Tên máy (Ví dụ: Máy 1)">
+      <input type="text" id="vm-apikey" placeholder="VideoAI API Key (Ví dụ: api_xxxxxxxx)">
+      <input type="text" id="vm-tag" placeholder="Thư mục/Tag (Ví dụ: batch-01)">
       <select id="vm-pool" style="max-width:160px;">
         <option value="selfhostPool">selfhostPool</option>
         <option value="adminPool">adminPool</option>
       </select>
-      <button onclick="addVideoMachine(this)">Add Machine</button>
+      <button onclick="addVideoMachine(this)">Thêm máy</button>
     </div>
   </section>
 
   <section>
-    <h2>Create Videos</h2>
-    <div class="muted" style="margin-bottom:8px;">
-      Dieu kien du de day: san pham da co "Gop link" (thuoc 1 nhom da gom du/hoan tat va dat
-      tieu chi loc). Moi lan chay xu ly theo lo toi da 200 (gioi han cua VideoAI), tu lap
-      lai toi khi het hang doi hoac bam Stop.
+    <h2>Tạo Video Tự Động</h2>
+    <div class="muted" style="margin-bottom:10px;">
+      Điều kiện đủ để đẩy: Sản phẩm đã có "Gộp link" (thuộc 1 nhóm đã gom đủ/hoàn tất và đạt tiêu chí lọc).
+      Mỗi lần chạy xử lý theo lô tối đa 200 sản phẩm (giới hạn của VideoAI API), tự lặp lại cho tới khi hết hàng chờ hoặc bấm Dừng.
     </div>
-    <div class="stats-bar" id="video-stats-bar">Dang tai...</div>
-    <div class="table-wrap"><table style="margin-top:12px;">
-      <thead><tr><th>Market</th><th>Eligible</th><th>Cached</th><th>Created</th><th>Remaining</th></tr></thead>
+    <div class="stats-bar" id="video-stats-bar">Đang tải thống kê...</div>
+    <div class="table-wrap" style="margin-top:14px;"><table>
+      <thead><tr><th>Thị trường</th><th>Đủ điều kiện</th><th>Đã Cache</th><th>Đã tạo Video</th><th>Còn lại</th></tr></thead>
       <tbody id="video-market-stats-tbody"></tbody>
     </table></div>
 
-    <div class="row" style="margin-top:12px;">
-      <select id="video-machine-sel" style="min-width:180px;"></select>
-      <select id="video-market-sel" style="min-width:140px;">
-        <option value="">All markets</option>
+    <div class="row" style="margin-top:14px;">
+      <select id="video-machine-sel" style="min-width:200px;"></select>
+      <select id="video-market-sel" style="min-width:160px;">
+        <option value="">Tất cả thị trường</option>
       </select>
-      <label style="white-space:nowrap;">Quantity</label>
+      <label style="white-space:nowrap;font-weight:500;">Số lượng:</label>
       <input type="number" id="video-target" min="1" value="200" style="max-width:100px;">
-      <button id="video-start-btn" onclick="runVideoPush()">Push + Create</button>
-      <button id="video-stop-btn" class="secondary" onclick="stopVideoPush()" disabled>Stop</button>
+      <button id="video-start-btn" onclick="runVideoPush()">Đẩy Cache + Tạo Video</button>
+      <button id="video-stop-btn" class="secondary" onclick="stopVideoPush()" disabled>Dừng</button>
     </div>
-    <div class="row" style="margin-top:8px;">
-      <button class="secondary" onclick="loadVideoStats()">Refresh</button>
-      <button class="secondary" onclick="exportVideosXlsx()">Export Excel</button>
-      <button class="secondary" onclick="resetVideoJobs()">Reset Status</button>
+    <div class="row" style="margin-top:10px;">
+      <button class="secondary" onclick="loadVideoStats()">Làm mới</button>
+      <button class="secondary" onclick="exportVideosXlsx()">Xuất Excel (.xlsx)</button>
+      <button class="secondary" onclick="resetVideoJobs()">Đặt lại trạng thái</button>
     </div>
 
-    <pre id="video-log" style="margin-top:12px; max-height:280px; overflow:auto; background:var(--bg-soft); padding:10px; border-radius:6px; font-size:12px; white-space:pre-wrap;"></pre>
+    <pre id="video-log" class="console-log" style="max-height:280px;"></pre>
   </section>
 
 </div>
 
+<!-- Tab 5: Mail Accounts -->
 <div id="tab-mailacc" class="tab-panel">
 
   <section>
-    <h2>Cai dat dongvanfb</h2>
-    <div class="muted" style="margin-bottom:8px;">
-      Dung chung cho ca mua mail va lay ma Shopee tren tab nay - lay API key tai
+    <h2>Cấu hình dongvanfb API</h2>
+    <div class="muted" style="margin-bottom:10px;">
+      Dùng chung cho cả mua Email và lấy mã xác minh Shopee trên tab này - Lấy API key tại
       <a href="https://docs.dongvanfb.net/" target="_blank">docs.dongvanfb.net</a>.
     </div>
     <div class="row">
-      <input type="password" id="mailacc-apikey" placeholder="dongvanfb API key" style="max-width:340px;">
-      <button onclick="saveDongvanfbKey(this)">Luu key</button>
-      <span class="muted">So du: <b id="mailacc-balance">--</b></span>
-      <button class="secondary" onclick="loadMailBalance()">Lam moi so du</button>
+      <input type="password" id="mailacc-apikey" placeholder="dongvanfb API key" style="max-width:360px;">
+      <button onclick="saveDongvanfbKey(this)">Lưu API Key</button>
+      <span class="muted" style="margin-left:10px;">Số dư: <b id="mailacc-balance" style="color:var(--accent-dark);">--</b></span>
+      <button class="secondary" onclick="loadMailBalance()">Làm mới số dư</button>
     </div>
   </section>
 
   <section>
-    <h2>Mua mail</h2>
+    <h2>Mua Email</h2>
     <div class="row">
-      <select id="mailacc-type" style="max-width:280px;"></select>
-      <label style="white-space:nowrap;">So luong</label>
-      <input type="number" id="mailacc-qty" min="1" value="1" style="max-width:80px;">
-      <button onclick="buyMailAccounts(this)">Mua mail</button>
-      <span class="muted" id="mailacc-buy-result"></span>
+      <select id="mailacc-type" style="max-width:300px;"></select>
+      <label style="white-space:nowrap;font-weight:500;">Số lượng:</label>
+      <input type="number" id="mailacc-qty" min="1" value="1" style="max-width:90px;">
+      <button onclick="buyMailAccounts(this)">Mua Email</button>
+      <span class="muted" id="mailacc-buy-result" style="font-weight:600; color:var(--success-text);"></span>
     </div>
   </section>
 
   <section>
-    <h2>Danh sach mail / tai khoan Shopee</h2>
+    <h2>Danh sách Email / Tài khoản Shopee</h2>
     <div class="row">
-      <select id="mailacc-filter-market" onchange="loadMailAccounts()" style="max-width:160px;">
-        <option value="">-- Market: tat ca --</option>
-        <option value="PH">PH</option>
-        <option value="TH">TH</option>
-        <option value="MS">MS</option>
+      <select id="mailacc-filter-market" onchange="loadMailAccounts()" style="max-width:180px;">
+        <option value="">-- Thị trường: Tất cả --</option>
+        <option value="PH">PH (Philippines)</option>
+        <option value="TH">TH (Thailand)</option>
+        <option value="MS">MS (Malaysia)</option>
       </select>
       <select id="mailacc-filter-slot" onchange="loadMailAccounts()" style="max-width:160px;">
-        <option value="">-- Slot: tat ca --</option>
-        <option value="1">1</option>
-        <option value="2">2</option>
-        <option value="3">3</option>
+        <option value="">-- Slot: Tất cả --</option>
+        <option value="1">Slot 1</option>
+        <option value="2">Slot 2</option>
+        <option value="3">Slot 3</option>
       </select>
-      <input type="text" id="mailacc-filter-search" placeholder="Tim theo email/shopee_id/device..." onkeydown="if(event.key==='Enter') loadMailAccounts()">
-      <button class="secondary" onclick="loadMailAccounts()">Loc</button>
-      <button class="secondary" onclick="exportMailAccountsXlsx()">Xuat Excel (tai khoan da tao)</button>
-      <button class="danger" onclick="clearMailAccounts()">Xoa tat ca</button>
+      <input type="text" id="mailacc-filter-search" placeholder="Tìm theo email / shopee_id / device..." onkeydown="if(event.key==='Enter') loadMailAccounts()">
+      <button class="secondary" onclick="loadMailAccounts()">Lọc danh sách</button>
+      <button class="secondary" onclick="exportMailAccountsXlsx()">Xuất Excel (Tài khoản đã tạo)</button>
+      <button class="danger" onclick="clearMailAccounts()">Xóa tất cả</button>
     </div>
-    <div class="muted" style="margin-bottom:8px;" id="mailacc-count"></div>
+    <div class="muted" style="margin-bottom:10px;" id="mailacc-count"></div>
     <div class="table-wrap"><table>
       <thead>
         <tr id="mailacc-thead-row">
-          <th>Full info</th><th>Email</th><th>PassEmail</th><th>Shopee_id</th>
-          <th>Device</th><th>Slot</th><th>Market</th><th>Shopee_code</th><th></th><th>Thoi gian</th>
+          <th>Thông tin đầy đủ</th><th>Email</th><th>Mật khẩu Mail</th><th>Shopee ID</th>
+          <th>Thiết bị</th><th>Slot</th><th>Thị trường</th><th>Mã Shopee</th><th>Thao tác</th><th>Thời gian tạo</th>
         </tr>
       </thead>
       <tbody id="mailacc-tbody"></tbody>
@@ -503,13 +597,12 @@ function switchTab(name) {
     loadMailAccounts();
   }
 }
+
 async function withBusy(btn, fn) {
-  // Vo hieu hoa + doi chu nut trong luc cho server tra loi - phan hoi tuc thi cho nguoi
-  // dung biet click da an, tranh cam giac "cham" (va tranh bam trung khi dang cho).
   if (!btn) { await fn(); return; }
   const original = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Dang xu ly...';
+  btn.textContent = 'Đang xử lý...';
   try {
     await fn();
   } finally {
@@ -525,18 +618,18 @@ async function api(method, path, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const json = await resp.json();
-  if (!resp.ok) throw new Error(json.error || 'Loi khong ro');
+  if (!resp.ok) throw new Error(json.error || 'Lỗi không xác định từ máy chủ');
   return json;
 }
 
-let currentSettings = null; // dung de to mau dat/khong dat o tab San pham da cao
+let currentSettings = null;
 
 async function loadUserscripts() {
   const { userscripts } = await api('GET', '/api/userscripts');
   document.getElementById('userscripts-list').innerHTML = userscripts.map(u => `
-    <div class="row" style="align-items:flex-start;">
+    <div class="row" style="align-items:flex-start; padding:12px; background:var(--surface-2); border-radius:var(--radius-sm); border:1px solid var(--border); margin-bottom:10px;">
       <div style="flex:1;">
-        <div><a href="/userscripts/${u.file}" target="_blank"><b>${u.title}</b></a> ${u.version ? `<span class="muted">v${u.version}</span>` : ''}</div>
+        <div style="font-size:14px; margin-bottom:4px;"><a href="/userscripts/${u.file}" target="_blank"><b>${u.title}</b></a> ${u.version ? `<span class="version" style="margin-left:6px;">v${u.version}</span>` : ''}</div>
         <div class="muted">${u.description}</div>
       </div>
     </div>
@@ -548,39 +641,39 @@ let pendingUpdateCommits = 0;
 async function checkForUpdate() {
   const statusEl = document.getElementById('update-status');
   const applyBtn = document.getElementById('update-apply-btn');
-  statusEl.textContent = 'Dang kiem tra...';
+  statusEl.textContent = 'Đang kiểm tra...';
   applyBtn.disabled = true;
   try {
     const data = await api('GET', '/api/update/check');
     if (data.update_available) {
       pendingUpdateCommits = data.commits.length;
-      statusEl.textContent = `Co ban moi! ${data.local_commit} -> ${data.remote_commit} (${data.commits.length} commit moi).`;
+      statusEl.textContent = `Có bản mới! ${data.local_commit} -> ${data.remote_commit} (${data.commits.length} commit mới).`;
       applyBtn.disabled = false;
     } else {
-      statusEl.textContent = `Dang dung ban moi nhat (${data.local_commit}).`;
+      statusEl.textContent = `Bạn đang sử dụng phiên bản mới nhất (${data.local_commit}).`;
     }
   } catch (e) {
-    statusEl.textContent = 'Loi kiem tra: ' + e.message;
+    statusEl.textContent = 'Lỗi kiểm tra: ' + e.message;
   }
 }
 
 async function applyUpdate() {
-  if (!confirm(`Tai ${pendingUpdateCommits} commit moi va tu khoi dong lai server?`)) return;
+  if (!confirm(`Tải ${pendingUpdateCommits} commit mới và tự khởi động lại server?`)) return;
   const statusEl = document.getElementById('update-status');
   const logEl = document.getElementById('update-log');
   const applyBtn = document.getElementById('update-apply-btn');
   applyBtn.disabled = true;
-  statusEl.textContent = 'Dang cap nhat...';
+  statusEl.textContent = 'Đang cập nhật...';
   try {
     const data = await api('POST', '/api/update/apply');
     statusEl.textContent = data.message;
     logEl.style.display = 'block';
-    logEl.textContent = data.output || '(khong co output)';
+    logEl.textContent = data.output || '(Không có kết quả trả về)';
     setTimeout(() => {
-      statusEl.textContent = 'Server dang khoi dong lai - doi vai giay roi tai lai trang (F5).';
+      statusEl.textContent = 'Server đang khởi động lại - vui lòng đợi vài giây rồi tải lại trang (F5).';
     }, 1500);
   } catch (e) {
-    statusEl.textContent = 'Loi cap nhat: ' + e.message;
+    statusEl.textContent = 'Lỗi cập nhật: ' + e.message;
     applyBtn.disabled = false;
   }
 }
@@ -598,28 +691,24 @@ async function loadSettings() {
 async function saveSettings() {
   const promoted_7d_max = parseInt(document.getElementById('set-promoted7d').value, 10);
   const sold_min = parseInt(document.getElementById('set-sold').value, 10);
-  // parseFloat (khong phai parseInt) - seller_commission gio la so tien te thuc, thi
-  // truong PH co phan thap phan that (vd 13.86), khong lam tron duoc.
   const seller_commission_vnd_min = parseFloat(document.getElementById('set-commission').value);
   if ([promoted_7d_max, sold_min, seller_commission_vnd_min].some(Number.isNaN)) {
-    alert('Ca 3 o phai la so hop le.');
+    alert('Cả 3 ô dữ liệu phải là số hợp lệ.');
     return;
   }
   await api('POST', '/api/settings', { promoted_7d_max, sold_min, seller_commission_vnd_min });
-  document.getElementById('settings-result').textContent = 'Da luu.';
+  document.getElementById('settings-result').textContent = 'Đã lưu cài đặt.';
   setTimeout(() => { document.getElementById('settings-result').textContent = ''; }, 3000);
 }
 
 async function resetAll() {
-  if (!confirm('Xoa TOAN BO du lieu root/related da cao? Khong the hoan tac. Danh sach tai khoan/profile van giu nguyen.')) return;
+  if (!confirm('Xóa TOÀN BỘ dữ liệu root/related đã cào? Không thể hoàn tác. Danh sách tài khoản/profile vẫn được giữ nguyên.')) return;
   const { deleted } = await api('POST', '/api/reset');
-  alert(`Da xoa ${deleted} dong.`);
+  alert(`Đã xóa thành công ${deleted} bản ghi.`);
   refreshAll();
 }
 
 function fillMarketSelectOptions(selectEl, markets, allLabel) {
-  // Giu lua chon hien tai cua nguoi dung qua moi lan refresh dinh ky (setInterval) - chi
-  // rebuild <option>, khong reset ve "Tat ca" neu gia tri dang chon van con hop le.
   const current = selectEl.value;
   selectEl.innerHTML = `<option value="">${allLabel}</option>` +
     markets.map(m => `<option value="${m.market}">${m.market} (${m.total})</option>`).join('');
@@ -631,26 +720,26 @@ async function loadRootMarketStats() {
   const tbody = document.getElementById('root-market-stats-tbody');
   tbody.innerHTML = markets.map(m => `
     <tr>
-      <td>${m.market || '(chua ro)'}</td>
+      <td><b>${m.market || '(Chưa rõ)'}</b></td>
       <td>${m.total}</td>
-      <td>${m.pending}</td>
-      <td>${m.claimed}</td>
-      <td>${m.done}</td>
-      <td>${m.fail}</td>
+      <td><span class="badge pending">${m.pending}</span></td>
+      <td><span class="badge member">${m.claimed}</span></td>
+      <td><span class="badge done">${m.done}</span></td>
+      <td><span class="badge fail">${m.fail}</span></td>
     </tr>
-  `).join('') || '<tr><td colspan="6" class="muted">Chua co root nao.</td></tr>';
+  `).join('') || '<tr><td colspan="6" class="muted">Chưa có Root nào trong cơ sở dữ liệu.</td></tr>';
 
   const knownMarkets = markets.filter(m => m.market);
-  fillMarketSelectOptions(document.getElementById('auto-assign-market-sel'), knownMarkets, '-- Tat ca market --');
-  fillMarketSelectOptions(document.getElementById('root-filter-market'), knownMarkets, '-- Tat ca market --');
+  fillMarketSelectOptions(document.getElementById('auto-assign-market-sel'), knownMarkets, '-- Tất cả thị trường --');
+  fillMarketSelectOptions(document.getElementById('root-filter-market'), knownMarkets, '-- Tất cả thị trường --');
 }
 
 async function loadStats() {
   const s = await api('GET', '/api/stats');
   document.getElementById('stats-bar').innerHTML = `
-    <div>Root: <b>${s.root.pending}</b> pending / <b>${s.root.done}</b> done / <b>${s.root.fail}</b> fail</div>
-    <div>Related: <b>${s.related.pending}</b> pending / <b>${s.related.member}</b> member / <b>${s.related.cached}</b> cached</div>
-    <div>Tong item trong DB: <b>${s.total_items}</b></div>
+    <div>Root: <b>${s.root.pending}</b> Đang chờ / <b>${s.root.done}</b> Hoàn tất / <b>${s.root.fail}</b> Lỗi</div>
+    <div>Related: <b>${s.related.pending}</b> Đang chờ / <b>${s.related.member}</b> Thành viên / <b>${s.related.cached}</b> Cached</div>
+    <div>Tổng sản phẩm DB: <b>${s.total_items}</b></div>
   `;
 }
 
@@ -661,8 +750,8 @@ function copyMergedLink(idx) {
   const val = lastItemsList[idx] && lastItemsList[idx].merged_link;
   if (!val) return;
   navigator.clipboard.writeText(val).then(
-    () => { /* im lang, khong lam phien bang alert cho thao tac hay dung */ },
-    () => alert('Khong copy duoc (trinh duyet chan clipboard) - tu bam chon va Ctrl+C o o "Gop link".')
+    () => {},
+    () => alert('Không thể tự động sao chép (Trình duyệt chặn Clipboard) - Vui lòng chọn và Ctrl+C thủ công ở ô "Gộp link".')
   );
 }
 
@@ -672,14 +761,14 @@ async function loadAccounts() {
   const tbody = document.getElementById('accounts-tbody');
   tbody.innerHTML = accounts.map(a => `
     <tr>
-      <td>${a.name}</td>
+      <td><b>${a.name}</b></td>
       <td><code>${a.serial}</code></td>
       <td>
-        <button onclick="launchAccount('${a.name}')">Launch</button>
-        <button class="secondary" onclick="removeAccount('${a.serial}')">Xoa</button>
+        <button onclick="launchAccount('${a.name}')">Mở Chrome (Launch)</button>
+        <button class="secondary" onclick="removeAccount('${a.serial}')">Xóa</button>
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="3" class="muted">Chua co tai khoan nao.</td></tr>';
+  `).join('') || '<tr><td colspan="3" class="muted">Chưa có tài khoản nào.</td></tr>';
 }
 
 async function toggleAutoAssign() {
@@ -691,7 +780,7 @@ async function toggleAutoAssign() {
 async function addAccount(btn) {
   const name = document.getElementById('acc-name').value.trim();
   const path = document.getElementById('acc-path').value.trim();
-  if (!name || !path) { alert('Nhap du ten va duong dan profile.'); return; }
+  if (!name || !path) { alert('Vui lòng nhập đầy đủ Tên tài khoản và Đường dẫn Profile.'); return; }
   await withBusy(btn, async () => {
     await api('POST', '/api/accounts', { name, profile_path: path });
     document.getElementById('acc-name').value = '';
@@ -701,6 +790,7 @@ async function addAccount(btn) {
 }
 
 async function removeAccount(profilePath) {
+  if (!confirm('Bạn có chắc chắn muốn xóa tài khoản này?')) return;
   await api('DELETE', '/api/accounts/' + encodeURIComponent(profilePath));
   loadAccounts();
 }
@@ -709,13 +799,11 @@ async function launchAccount(name) {
   try {
     await api('POST', `/api/accounts/${encodeURIComponent(name)}/launch`);
   } catch (e) {
-    alert('Khong launch duoc: ' + e.message);
+    alert('Không thể mở Chrome profile: ' + e.message);
   }
 }
 
 function timeAgoSeconds(isoLike) {
-  // SQLite CURRENT_TIMESTAMP tra ve "YYYY-MM-DD HH:MM:SS" (UTC, khong co 'Z') - them 'Z'
-  // de Date parse dung la UTC thay vi bi hieu nham la gio local.
   const d = new Date(isoLike.replace(' ', 'T') + 'Z');
   return (Date.now() - d.getTime()) / 1000;
 }
@@ -726,35 +814,36 @@ async function loadWorkers() {
   tbody.innerHTML = workers.map(w => {
     const ageSec = timeAgoSeconds(w.last_heartbeat);
     const status = ageSec > 15 ? 'offline' : w.status;
+    const statusLabel = status === 'offline' ? 'Ngoại tuyến' : (status === 'working' ? 'Đang chạy' : status);
     return `
     <tr>
-      <td>${w.device_key}</td>
+      <td><b>${w.device_key}</b></td>
       <td>${w.market || '-'}</td>
-      <td><span class="badge ${status}">${status}</span></td>
-      <td>${w.current_root || '-'}</td>
-      <td>${Math.round(ageSec)}s truoc</td>
+      <td><span class="badge ${status}">${statusLabel}</span></td>
+      <td><code>${w.current_root || '-'}</code></td>
+      <td>${Math.round(ageSec)} giây trước</td>
     </tr>`;
-  }).join('') || '<tr><td colspan="5" class="muted">Chua co worker nao bao ve (chua bam Start o tab nao).</td></tr>';
+  }).join('') || '<tr><td colspan="5" class="muted">Chưa có Worker nào báo cáo (Chưa bấm Start ở tab script nào).</td></tr>';
 }
 
 async function assignRoot(itemid, market) {
   const sel = document.getElementById('assign-sel-' + itemid);
   const deviceKey = sel.value;
-  if (!deviceKey) { alert('Chon 1 tai khoan de giao viec.'); return; }
+  if (!deviceKey) { alert('Vui lòng chọn 1 tài khoản để giao việc.'); return; }
   try {
     await api('POST', `/api/roots/${encodeURIComponent(itemid)}/assign`, { device_key: deviceKey, market });
     loadRoots();
   } catch (e) {
-    alert('Khong giao duoc: ' + e.message);
+    alert('Không giao việc được: ' + e.message);
   }
 }
 
 async function importRoots() {
   const raw = document.getElementById('root-links').value;
   const links = raw.split('\n').map(s => s.trim()).filter(Boolean);
-  if (!links.length) { alert('Dan it nhat 1 link.'); return; }
+  if (!links.length) { alert('Vui lòng dán ít nhất 1 liên kết sản phẩm.'); return; }
   const { added } = await api('POST', '/api/roots/import', { links });
-  document.getElementById('import-result').textContent = `Da them ${added} root moi (${links.length - added} da co san/khong hop le).`;
+  document.getElementById('import-result').textContent = `Đã thêm ${added} Root mới (${links.length - added} đã có sẵn hoặc không hợp lệ).`;
   document.getElementById('root-links').value = '';
   loadRoots();
   loadStats();
@@ -767,13 +856,13 @@ function accountOptions(selected) {
 }
 
 function rootStatusBadge(r) {
-  if (r.status_link === 'pending') return '<span class="badge pending">dang cho</span>';
-  if (r.status_link === 'fail') return '<span class="badge fail">loi</span>';
+  if (r.status_link === 'pending') return '<span class="badge pending">Đang chờ</span>';
+  if (r.status_link === 'fail') return '<span class="badge fail">Lỗi</span>';
   if (r.status_link === 'done') {
-    if (r.member_count >= 60) return '<span class="badge working">du 60/60</span>';
-    return `<span class="badge insufficient">THIEU (${r.member_count}/60)</span>`;
+    if (r.member_count >= 60) return '<span class="badge working">Đủ 60/60</span>';
+    return `<span class="badge insufficient">THIẾU (${r.member_count}/60)</span>`;
   }
-  return r.status_link;
+  return `<span class="badge idle">${r.status_link}</span>`;
 }
 
 async function loadRoots() {
@@ -783,71 +872,76 @@ async function loadRoots() {
   const tbody = document.getElementById('roots-tbody');
   tbody.innerHTML = roots.map(r => `
     <tr>
-      <td>${r.itemid}</td>
-      <td>${r.market || '-'}</td>
+      <td><code>${r.itemid}</code></td>
+      <td><b>${r.market || '-'}</b></td>
       <td>${rootStatusBadge(r)}</td>
-      <td>${r.member_count}/60</td>
+      <td><b>${r.member_count}</b>/60</td>
       <td>${r.assigned_key || '-'}</td>
-      <td><a href="${r.product_link || '#'}" target="_blank">link</a></td>
+      <td><a href="${r.product_link || '#'}" target="_blank">Mở link ↗</a></td>
       <td>
         ${r.status_link === 'pending' ? `
-          <select id="assign-sel-${r.itemid}"><option value="">-- chon tai khoan --</option>${accountOptions(r.assigned_key)}</select>
-          <button class="secondary" onclick="assignRoot('${r.itemid}', '${r.market}')">Giao viec</button>
+          <select id="assign-sel-${r.itemid}"><option value="">-- Chọn tài khoản --</option>${accountOptions(r.assigned_key)}</select>
+          <button class="secondary" onclick="assignRoot('${r.itemid}', '${r.market}')">Giao việc</button>
         ` : `
-          <button class="secondary" onclick="resetRoot('${r.itemid}', '${r.market}')" title="Dua ve pending de giao lai">Dat lai</button>
-          <button class="secondary" onclick="recomputeMerged('${r.itemid}', '${r.market}')" title="Tinh lai cot Gop link">Gop link</button>
+          <button class="secondary" onclick="resetRoot('${r.itemid}', '${r.market}')" title="Đưa về pending để giao lại">Đặt lại</button>
+          <button class="secondary" onclick="recomputeMerged('${r.itemid}', '${r.market}')" title="Tính lại cột Gộp link">Gộp link</button>
         `}
-        <button class="secondary" onclick="showMembers('${r.itemid}', '${r.market}')">Xem</button>
+        <button class="secondary" onclick="showMembers('${r.itemid}', '${r.market}')">Xem thành viên</button>
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="7" class="muted">Chua co root nao.</td></tr>';
+  `).join('') || '<tr><td colspan="7" class="muted">Chưa có Root nào.</td></tr>';
 }
 
 async function recomputeMerged(itemid, market) {
   try {
     const { total_links } = await api('POST', `/api/roots/${encodeURIComponent(itemid)}/recompute_merged`, { market });
-    alert(`Da gop xong ${total_links} link cua nhom ${itemid} - xem cot "Gop link" o tab San pham da cao.`);
+    alert(`Đã gộp xong ${total_links} link của nhóm ${itemid} - Xem cột "Gộp link" ở tab Sản phẩm đã cào.`);
   } catch (e) {
-    alert('Loi: ' + e.message);
+    alert('Lỗi: ' + e.message);
   }
 }
 
 async function recomputeMergedAll() {
   try {
     const { roots_processed, total_links } = await api('POST', '/api/roots/recompute_merged_all');
-    alert(`Da gop lai cho ${roots_processed} root (tong ${total_links} link) - xem tab San pham da cao.`);
+    alert(`Đã gộp lại cho ${roots_processed} Root (tổng ${total_links} link) - Xem kết quả tại tab Sản phẩm đã cào.`);
   } catch (e) {
-    alert('Loi: ' + e.message);
+    alert('Lỗi: ' + e.message);
   }
 }
 
 async function resetInsufficientAll() {
-  if (!confirm('Dua VE "pending" toan bo root da done nhung chua du 60/60 de giao lai? (khong xoa cac san pham da gom truoc do)')) return;
+  if (!confirm('Đưa VỀ "pending" toàn bộ Root đã làm xong nhưng chưa đủ 60/60 để giao lại? (KHÔNG xóa sản phẩm đã gom trước đó)')) return;
   try {
     const { reset_count } = await api('POST', '/api/roots/reset_insufficient_all');
-    alert(`Da dat lai ${reset_count} root thieu ve "pending".`);
+    alert(`Đã đặt lại ${reset_count} Root thiếu về trạng thái "pending".`);
     loadRoots();
   } catch (e) {
-    alert('Loi: ' + e.message);
+    alert('Lỗi: ' + e.message);
   }
 }
 
 async function resetRoot(itemid, market) {
-  if (!confirm(`Dua root ${itemid} ve 'pending' de giao lai? (cac san pham tuong tu da gom truoc do van giu nguyen, khong mat)`)) return;
+  if (!confirm(`Đưa Root ${itemid} về 'pending' để giao lại? (Các sản phẩm tương tự đã gom trước đó vẫn được giữ nguyên)`)) return;
   try {
     await api('POST', `/api/roots/${encodeURIComponent(itemid)}/reset`, { market });
     loadRoots();
   } catch (e) {
-    alert('Loi: ' + e.message);
+    alert('Lỗi: ' + e.message);
   }
 }
 
 async function showMembers(groupid, market) {
   const { members } = await api('GET', `/api/roots/${encodeURIComponent(groupid)}/members?market=${encodeURIComponent(market)}`);
   const box = document.getElementById('members-panel');
-  box.innerHTML = `<div class="members-box"><b>Thanh vien nhom ${groupid} (${members.length}):</b><br>` +
-    members.map(m => `${m.itemid} - sold=${m.sold} - aff7d=${m.affiliate_promoted_last_7days} - <a href="${m.product_link}" target="_blank">link</a>`).join('<br>') +
+  box.innerHTML = `<div class="members-box"><b>Thành viên nhóm ${groupid} (${members.length} sản phẩm):</b><br>` +
+    members.map(m => `<code>${m.itemid}</code> - Đã bán: ${m.sold} - Aff 7d: ${m.affiliate_promoted_last_7days} - <a href="${m.product_link}" target="_blank">Mở link ↗</a>`).join('<br>') +
     '</div>';
+  // Panel nam duoi cung bang "Danh sach Root" (co the dai hang tram dong, cach nut hang
+  // CHUC NGAN px) - khong tu cuon toi thi ket qua nam ngoai tam nhin, nguoi dung tuong nut
+  // khong hoat dong. Dung 'auto' (nhay thang) thay vi 'smooth' - khoang cach qua lon, cuon
+  // muot se mat vai giay truot rat khong on.
+  box.scrollIntoView({ behavior: 'auto', block: 'start' });
 }
 
 function filterByGroup(groupid) {
@@ -872,13 +966,13 @@ async function loadItems() {
   if (groupid) params.set('groupid', groupid);
   params.set('limit', '200');
   const { items } = await api('GET', '/api/items/list?' + params.toString());
-  lastItemsList = items; // dung cho copyMergedLink() tra cuu lai gia tri day du, tranh phai nhoi chuoi dai (nhieu dau |, ") vao onclick inline
-  document.getElementById('items-count').textContent = `Hien thi ${items.length} dong (toi da 200 - loc them de thu hep).`;
+  lastItemsList = items;
+  document.getElementById('items-count').textContent = `Hiển thị ${items.length} dòng (tối đa 200 - Lọc thêm để thu hẹp).`;
   const tbody = document.getElementById('items-tbody');
 
   function metricCell(value, passes) {
     if (value == null) return '<span class="muted">-</span>';
-    if (passes == null) return value; // chua tai duoc settings de so sanh
+    if (passes == null) return value;
     return `<span style="color:${passes ? '#16a34a' : '#dc2626'};font-weight:600;">${value}</span>`;
   }
 
@@ -889,36 +983,36 @@ async function loadItems() {
     const commPasses = s && it.seller_commission != null ? it.seller_commission > s.seller_commission_vnd_min : null;
     return `
     <tr>
-      <td>${it.itemid}</td>
+      <td><code>${it.itemid}</code></td>
       <td><span class="ellipsis" title="${(it.name || '').replace(/"/g, '&quot;')}">${it.name || '-'}</span></td>
       <td>${metricCell(it.sold, soldPasses)}</td>
       <td>${metricCell(it.affiliate_promoted_last_7days, aff7dPasses)}</td>
       <td>${metricCell(it.seller_commission, commPasses)}</td>
-      <td>${it.link_type || '-'}</td>
+      <td><span class="badge ${it.link_type === 'root' ? 'pending' : 'idle'}">${it.link_type || '-'}</span></td>
       <td>${it.status_link ? `<span class="badge ${it.status_link}">${it.status_link}</span>` : '-'}</td>
-      <td>${it.groupid ? `<a href="#" onclick="filterByGroup('${it.groupid}'); return false;" title="Loc theo nhom nay">${it.groupid}</a>` : '-'}</td>
+      <td>${it.groupid ? `<a href="#" onclick="filterByGroup('${it.groupid}'); return false;" title="Lọc theo nhóm này"><code>${it.groupid}</code></a>` : '-'}</td>
       <td>
         ${it.merged_link
           ? `<span class="ellipsis" style="max-width:160px;" title="${it.merged_link.replace(/"/g, '&quot;')}">${it.merged_link}</span>
-             <button class="secondary" onclick="copyMergedLink(${idx})">Copy</button>`
+             <button class="secondary" onclick="copyMergedLink(${idx})">Sao chép</button>`
           : '-'}
       </td>
       <td>
-        <a href="${it.product_link || '#'}" target="_blank">link</a>
-        <button class="secondary" onclick="deleteItem('${it.itemid}', '${it.market}')">Xoa</button>
+        <a href="${it.product_link || '#'}" target="_blank">Link ↗</a>
+        <button class="secondary" onclick="deleteItem('${it.itemid}', '${it.market}')">Xóa</button>
       </td>
     </tr>
   `;
-  }).join('') || '<tr><td colspan="10" class="muted">Khong co san pham nao khop bo loc.</td></tr>';
+  }).join('') || '<tr><td colspan="10" class="muted">Không có sản phẩm nào khớp bộ lọc.</td></tr>';
 }
 
 async function deleteItem(itemid, market) {
-  if (!confirm(`Xoa han item ${itemid} khoi DB?`)) return;
+  if (!confirm(`Xóa hẳn sản phẩm ${itemid} khỏi cơ sở dữ liệu?`)) return;
   try {
     await api('DELETE', `/api/items/${encodeURIComponent(itemid)}?market=${encodeURIComponent(market)}`);
     loadItems();
   } catch (e) {
-    alert('Loi: ' + e.message);
+    alert('Lỗi: ' + e.message);
   }
 }
 
@@ -938,23 +1032,23 @@ async function loadVideoMachines() {
   const tbody = document.getElementById('video-machines-tbody');
   tbody.innerHTML = machines.map(m => `
     <tr>
-      <td>${m.name}</td>
+      <td><b>${m.name}</b></td>
       <td class="ellipsis" title="${m.api_key}">${maskApiKey(m.api_key)}</td>
-      <td>${m.tag}</td>
-      <td>${m.pool}</td>
-      <td><span class="badge ${m.enabled ? 'working' : 'offline'}">${m.enabled ? 'Bat' : 'Tat'}</span></td>
+      <td><span class="badge member">${m.tag}</span></td>
+      <td><code>${m.pool}</code></td>
+      <td><span class="badge ${m.enabled ? 'working' : 'offline'}">${m.enabled ? 'Đang bật' : 'Đang tắt'}</span></td>
       <td>
-        <button class="secondary" onclick="toggleVideoMachine(${m.id}, ${m.enabled ? 'false' : 'true'})">${m.enabled ? 'Tat' : 'Bat'}</button>
-        <button class="secondary" onclick="removeVideoMachine(${m.id})">Xoa</button>
+        <button class="secondary" onclick="toggleVideoMachine(${m.id}, ${m.enabled ? 'false' : 'true'})">${m.enabled ? 'Tắt' : 'Bật'}</button>
+        <button class="secondary" onclick="removeVideoMachine(${m.id})">Xóa</button>
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="6" class="muted">Chua co may nao - them o duoi.</td></tr>';
+  `).join('') || '<tr><td colspan="6" class="muted">Chưa có máy nào - Thêm ở form bên dưới.</td></tr>';
 
   const sel = document.getElementById('video-machine-sel');
   const enabledMachines = machines.filter(m => m.enabled);
   sel.innerHTML = enabledMachines.length
     ? enabledMachines.map(m => `<option value="${m.id}">${m.name} (${m.tag})</option>`).join('')
-    : '<option value="">-- chua co may nao dang bat --</option>';
+    : '<option value="">-- Chưa có máy nào đang bật --</option>';
 }
 
 async function addVideoMachine(btn) {
@@ -962,7 +1056,7 @@ async function addVideoMachine(btn) {
   const api_key = document.getElementById('vm-apikey').value.trim();
   const tag = document.getElementById('vm-tag').value.trim();
   const pool = document.getElementById('vm-pool').value;
-  if (!name || !api_key || !tag) { alert('Nhap du Ten may, API key va Thu muc (Tag).'); return; }
+  if (!name || !api_key || !tag) { alert('Vui lòng nhập đầy đủ Tên máy, API Key và Thẻ (Tag).'); return; }
   await withBusy(btn, async () => {
     await api('POST', '/api/video_machines', { name, api_key, tag, pool });
     document.getElementById('vm-name').value = '';
@@ -973,7 +1067,7 @@ async function addVideoMachine(btn) {
 }
 
 async function removeVideoMachine(id) {
-  if (!confirm('Xoa may nay?')) return;
+  if (!confirm('Xóa máy tạo video này?')) return;
   await api('DELETE', `/api/video_machines/${id}`);
   loadVideoMachines();
 }
@@ -986,10 +1080,10 @@ async function toggleVideoMachine(id, enabled) {
 async function loadVideoStats() {
   const s = await api('GET', '/api/videos/stats');
   document.getElementById('video-stats-bar').innerHTML = `
-    <div>Du dieu kien (co Gop link): <b>${s.eligible}</b></div>
-    <div>Da day cache: <b>${s.cache_uploaded}</b></div>
-    <div>Da tao video: <b>${s.job_created}</b></div>
-    <div>Con lai chua tao: <b>${s.eligible - s.job_created}</b></div>
+    <div>Đủ điều kiện (có Gộp link): <b>${s.eligible}</b></div>
+    <div>Đã đẩy Cache: <b>${s.cache_uploaded}</b></div>
+    <div>Đã tạo Video: <b>${s.job_created}</b></div>
+    <div>Còn lại chưa tạo: <b>${s.eligible - s.job_created}</b></div>
   `;
   loadVideoMarketStats();
 }
@@ -999,16 +1093,16 @@ async function loadVideoMarketStats() {
   const tbody = document.getElementById('video-market-stats-tbody');
   tbody.innerHTML = markets.map(m => `
     <tr>
-      <td>${m.market || '(chua ro)'}</td>
+      <td><b>${m.market || '(Chưa rõ)'}</b></td>
       <td>${m.eligible}</td>
       <td>${m.cache_uploaded}</td>
       <td>${m.job_created}</td>
-      <td>${m.eligible - m.job_created}</td>
+      <td><b>${m.eligible - m.job_created}</b></td>
     </tr>
-  `).join('') || '<tr><td colspan="5" class="muted">Chua co link nao.</td></tr>';
+  `).join('') || '<tr><td colspan="5" class="muted">Chưa có liên kết nào.</td></tr>';
 
   const knownMarkets = markets.filter(m => m.market).map(m => ({ market: m.market, total: m.eligible }));
-  fillMarketSelectOptions(document.getElementById('video-market-sel'), knownMarkets, 'All markets');
+  fillMarketSelectOptions(document.getElementById('video-market-sel'), knownMarkets, 'Tất cả thị trường');
 }
 
 function exportVideosXlsx() {
@@ -1016,9 +1110,9 @@ function exportVideosXlsx() {
 }
 
 async function resetVideoJobs() {
-  if (!confirm('Dat lai trang thai toan bo link DA TAO VIDEO ve "cho tao video"? Se tao lai task moi cho lan chay sau.')) return;
+  if (!confirm('Đặt lại trạng thái toàn bộ liên kết ĐÃ TẠO VIDEO về "Cho tạo video"? Hệ thống sẽ tạo lại task mới cho lần chạy sau.')) return;
   const { reset } = await api('POST', '/api/videos/reset');
-  alert(`Da dat lai ${reset} link ve trang thai cho tao video.`);
+  alert(`Đã đặt lại ${reset} liên kết về trạng thái chờ tạo video.`);
   loadVideoStats();
 }
 
@@ -1030,14 +1124,14 @@ function videoLog(msg) {
 async function runVideoPush() {
   if (videoRunning) return;
   const machineId = document.getElementById('video-machine-sel').value;
-  if (!machineId) { alert('Chon 1 may tao video (dang Bat) truoc khi chay.'); return; }
+  if (!machineId) { alert('Vui lòng chọn 1 máy tạo video (đang Bật) trước khi chạy.'); return; }
   const market = document.getElementById('video-market-sel').value;
   const target = Math.max(1, parseInt(document.getElementById('video-target').value, 10) || 200);
   videoRunning = true;
   videoStop = false;
   document.getElementById('video-start-btn').disabled = true;
   document.getElementById('video-stop-btn').disabled = false;
-  videoLog(`Bat dau - muc tieu ${target} video${market ? ` (market: ${market})` : ''}...`);
+  videoLog(`Bắt đầu xử lý - Mục tiêu ${target} video${market ? ` (Thị trường: ${market})` : ''}...`);
   let totalDone = 0, totalPushed = 0, totalCreated = 0, totalErrors = 0;
   try {
     while (!videoStop && totalDone < target) {
@@ -1046,48 +1140,48 @@ async function runVideoPush() {
       try {
         data = await api('POST', '/api/videos/push', { limit: want, machine_id: Number(machineId), market: market || undefined });
       } catch (e) {
-        videoLog('Loi: ' + e.message);
+        videoLog('Lỗi: ' + e.message);
         break;
       }
-      if (!data.done) { videoLog(`Het hang doi (da xu ly tong ${totalDone}/${target}).`); break; }
+      if (!data.done) { videoLog(`Hết hàng chờ (Đã xử lý tổng ${totalDone}/${target}).`); break; }
       totalDone += data.done;
       totalPushed += data.pushed;
       totalCreated += data.created;
       totalErrors += (data.errors || []).length;
-      videoLog(`Lo ${data.done}: day cache ${data.pushed}, tao video ${data.created}, loi ${(data.errors || []).length} - tong da xu ly ${totalDone}/${target}.`);
-      (data.errors || []).slice(0, 5).forEach(e => videoLog(`  loi: ${e.itemid || ''} ${e.reason || ''}`));
+      videoLog(`Lô ${data.done}: Đẩy cache ${data.pushed}, tạo video ${data.created}, lỗi ${(data.errors || []).length} - Tổng đã xử lý ${totalDone}/${target}.`);
+      (data.errors || []).slice(0, 5).forEach(e => videoLog(`  Lỗi detail: ${e.itemid || ''} ${e.reason || ''}`));
       loadVideoStats();
     }
-    if (totalDone >= target) videoLog(`Da dat muc tieu ${target} video.`);
+    if (totalDone >= target) videoLog(`Đã hoàn tất mục tiêu ${target} video.`);
   } finally {
     videoRunning = false;
     document.getElementById('video-start-btn').disabled = false;
     document.getElementById('video-stop-btn').disabled = true;
-    videoLog(`XONG (hoac da dung). Tong: xu ly ${totalDone}, day cache ${totalPushed}, tao video ${totalCreated}, loi ${totalErrors}.`);
+    videoLog(`HOÀN TẤT (hoặc đã dừng). Tổng kết: Đã xử lý ${totalDone}, Đẩy cache ${totalPushed}, Tạo video ${totalCreated}, Lỗi ${totalErrors}.`);
     loadVideoStats();
   }
 }
 
 function stopVideoPush() { videoStop = true; }
 
-// ---- Tab "Tao tai khoan Shopee" (mua mail dongvanfb + doc code) ----
+// ---- Tab "Tạo tài khoản Shopee" ----
 
 let mailAccountTypes = [];
 let lastMailAccountsList = [];
 const MAIL_MARKET_OPTIONS = ['PH', 'TH', 'MS'];
 const MAILACC_COLUMNS = [
-  { field: 'full_info', label: 'Full info' },
+  { field: 'full_info', label: 'Thông tin đầy đủ' },
   { field: 'email', label: 'Email' },
-  { field: 'password', label: 'PassEmail' },
-  { field: 'shopee_id', label: 'Shopee_id' },
-  { field: 'device', label: 'Device' },
+  { field: 'password', label: 'Mật khẩu Mail' },
+  { field: 'shopee_id', label: 'Shopee ID' },
+  { field: 'device', label: 'Thiết bị' },
   { field: 'slot', label: 'Slot' },
-  { field: 'market', label: 'Market' },
-  { field: 'shopee_code', label: 'Shopee_code' },
+  { field: 'market', label: 'Thị trường' },
+  { field: 'shopee_code', label: 'Mã Shopee' },
   { field: null, label: '' },
-  { field: 'created_at', label: 'Thoi gian' },
+  { field: 'created_at', label: 'Thời gian tạo' },
 ];
-let mailAccSort = { field: null, dir: 1 }; // dir: 1 = A-Z, -1 = Z-A
+let mailAccSort = { field: null, dir: 1 };
 
 function sortMailAccounts(field) {
   if (mailAccSort.field === field) {
@@ -1109,7 +1203,7 @@ function renderMailAccHeader() {
   tr.innerHTML = MAILACC_COLUMNS.map(c => {
     if (!c.field) return '<th></th>';
     const arrow = mailAccSort.field === c.field ? (mailAccSort.dir === 1 ? ' ▲' : ' ▼') : '';
-    return `<th class="sortable" onclick="sortMailAccounts('${c.field}')" title="Sap xep A-Z">${c.label}${arrow}</th>`;
+    return `<th class="sortable" onclick="sortMailAccounts('${c.field}')" title="Sắp xếp A-Z">${c.label}${arrow}</th>`;
   }).join('');
 }
 
@@ -1126,14 +1220,14 @@ async function loadMailBalance() {
   const el = document.getElementById('mailacc-balance');
   try {
     const { balance } = await api('GET', '/api/mail_accounts/balance');
-    el.textContent = balance == null ? 'loi' : balance;
+    el.textContent = balance == null ? 'Lỗi' : balance;
   } catch (e) {
-    el.textContent = 'chua co key hop le';
+    el.textContent = 'Chưa có Key hợp lệ';
   }
 }
 
 async function loadMailAccountTypes() {
-  if (mailAccountTypes.length) return; // danh sach tinh, khong doi giua cac lan mo tab
+  if (mailAccountTypes.length) return;
   const { account_types } = await api('GET', '/api/mail_accounts/account_types');
   mailAccountTypes = account_types;
   document.getElementById('mailacc-type').innerHTML = account_types.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
@@ -1146,11 +1240,11 @@ async function buyMailAccounts(btn) {
     try {
       const r = await api('POST', '/api/mail_accounts/buy', { account_type, quantity });
       document.getElementById('mailacc-buy-result').textContent =
-        `Da mua ${r.added} mail (het ${r.total_amount}, so du con ${r.balance}).`;
+        `Đã mua thành công ${r.added} Email (Tổng ${r.total_amount}, Số dư còn ${r.balance}).`;
       await loadMailAccounts();
       loadMailBalance();
     } catch (e) {
-      alert('Loi mua mail: ' + e.message);
+      alert('Lỗi mua Email: ' + e.message);
     }
   });
 }
@@ -1165,50 +1259,49 @@ async function loadMailAccounts() {
   if (search) params.set('search', search);
   params.set('limit', '300');
   const { accounts } = await api('GET', '/api/mail_accounts/list?' + params.toString());
-  lastMailAccountsList = accounts; // dung cho cac nut Copy tra cuu lai gia tri day du, tranh nhoi chuoi dai (nhieu ky tu dac biet trong refresh_token) vao onclick inline
+  lastMailAccountsList = accounts;
   renderMailAccounts();
 }
 
 function renderMailAccounts() {
   renderMailAccHeader();
   if (mailAccSort.field) {
-    // Sap xep ngay tren lastMailAccountsList de idx dung voi cac nut Copy ben duoi.
     lastMailAccountsList.sort((a, b) => mailAccSort.dir * compareMailAccVal(a[mailAccSort.field], b[mailAccSort.field]));
   }
   const accounts = lastMailAccountsList;
-  document.getElementById('mailacc-count').textContent = `Hien thi ${accounts.length} dong (toi da 300 - loc them de thu hep).`;
+  document.getElementById('mailacc-count').textContent = `Hiển thị ${accounts.length} dòng (tối đa 300 - Lọc thêm để thu hẹp).`;
   const tbody = document.getElementById('mailacc-tbody');
   tbody.innerHTML = accounts.map((a, idx) => `
     <tr>
       <td><span class="ellipsis" style="max-width:120px;" title="${(a.full_info || '').replace(/"/g, '&quot;')}">${a.full_info}</span>
-        <button class="secondary" onclick="copyMailField(${idx}, 'full_info')">Copy</button></td>
-      <td>${a.email}
-        <button class="secondary" onclick="copyMailField(${idx}, 'email')">Copy</button></td>
-      <td>${a.password || '-'}</td>
-      <td><input type="text" value="${(a.shopee_id || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'shopee_id', this.value)" style="width:100px;"></td>
-      <td><input type="text" value="${(a.device || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'device', this.value)" style="width:100px;"></td>
-      <td><input type="text" value="${(a.slot || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'slot', this.value)" style="width:100px;"></td>
+        <button class="secondary" onclick="copyMailField(${idx}, 'full_info')">Sao chép</button></td>
+      <td><b>${a.email}</b>
+        <button class="secondary" onclick="copyMailField(${idx}, 'email')">Sao chép</button></td>
+      <td><code>${a.password || '-'}</code></td>
+      <td><input type="text" value="${(a.shopee_id || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'shopee_id', this.value)" placeholder="Shopee ID" style="min-width:160px; width:100%;"></td>
+      <td><input type="text" value="${(a.device || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'device', this.value)" placeholder="Tên thiết bị" style="min-width:160px; width:100%;"></td>
+      <td><input type="text" value="${(a.slot || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'slot', this.value)" placeholder="Slot" style="min-width:65px; width:65px; text-align:center;"></td>
       <td>
         <select onchange="updateMailAccountField(${a.id}, 'market', this.value)">
           ${MAIL_MARKET_OPTIONS.map(m => `<option value="${m}" ${a.market === m ? 'selected' : ''}>${m}</option>`).join('')}
         </select>
       </td>
-      <td>${a.shopee_code ? `<b style="color:#16a34a;">${a.shopee_code}</b>` : (a.checked_at ? '<span class="muted">chua co</span>' : '-')}</td>
+      <td>${a.shopee_code ? `<b style="color:var(--success); font-size:14px;">${a.shopee_code}</b>` : (a.checked_at ? '<span class="muted">Chưa có</span>' : '-')}</td>
       <td style="white-space:nowrap;">
-        <button onclick="getMailCode(this, ${a.id})">Get code</button>
-        <button class="secondary" onclick="deleteMailAccount(${a.id})">Xoa</button>
+        <button onclick="getMailCode(this, ${a.id})">Lấy mã (Get code)</button>
+        <button class="secondary" onclick="deleteMailAccount(${a.id})">Xóa</button>
       </td>
       <td class="muted" style="white-space:nowrap;">${a.created_at || '-'}</td>
     </tr>
-  `).join('') || '<tr><td colspan="10" class="muted">Chua mua mail nao.</td></tr>';
+  `).join('') || '<tr><td colspan="10" class="muted">Chưa có Email nào.</td></tr>';
 }
 
 function copyMailField(idx, field) {
   const val = lastMailAccountsList[idx] && lastMailAccountsList[idx][field];
   if (!val) return;
   navigator.clipboard.writeText(val).then(
-    () => { /* im lang, khong lam phien bang alert cho thao tac hay dung */ },
-    () => alert('Khong copy tu dong duoc (trinh duyet chan clipboard) - tu bam chon va Ctrl+C.')
+    () => {},
+    () => alert('Không thể sao chép tự động (Trình duyệt chặn Clipboard) - Vui lòng chọn và Ctrl+C thủ công.')
   );
 }
 
@@ -1216,32 +1309,29 @@ async function updateMailAccountField(id, field, value) {
   try {
     await api('POST', `/api/mail_accounts/${id}`, { [field]: value });
   } catch (e) {
-    alert('Loi luu: ' + e.message);
+    alert('Lỗi lưu dữ liệu: ' + e.message);
   }
 }
 
-const MAILACC_CODE_CELL_INDEX = 7; // vi tri cot Shopee_code trong <tr>, xem MAILACC_COLUMNS
+const MAILACC_CODE_CELL_INDEX = 7;
 
 async function getMailCode(btn, id) {
-  // Moi nut doc lap - vo hieu hoa CHI nut nay trong luc cho (withBusy), cac nut Get code
-  // khac tren cac dong con lai van bam duoc binh thuong, khong bi khoa theo.
-  // Xoa ngay ma cu tren giao dien luc bam, tranh nham lan voi ma moi trong luc cho ket qua.
   const codeCell = btn.closest('tr').children[MAILACC_CODE_CELL_INDEX];
-  codeCell.innerHTML = '<span class="muted">Dang lay ma...</span>';
+  codeCell.innerHTML = '<span class="muted">Đang lấy mã...</span>';
   await withBusy(btn, async () => {
     try {
       const { code, note } = await api('POST', `/api/mail_accounts/${id}/get_code`);
       await loadMailAccounts();
-      if (!code) alert('Chua lay duoc ma Shopee.\n' + (note || ''));
+      if (!code) alert('Chưa lấy được mã Shopee.\n' + (note || ''));
     } catch (e) {
-      alert('Loi lay ma: ' + e.message);
-      await loadMailAccounts(); // dong bo lai giao dien voi trang thai that tren server, tranh ke ket qua bi ket o "Dang lay ma..."
+      alert('Lỗi lấy mã: ' + e.message);
+      await loadMailAccounts();
     }
   });
 }
 
 async function deleteMailAccount(id) {
-  if (!confirm('Xoa dong mail nay?')) return;
+  if (!confirm('Bạn có chắc muốn xóa Email này?')) return;
   await api('DELETE', `/api/mail_accounts/${id}`);
   loadMailAccounts();
 }
@@ -1251,15 +1341,15 @@ function exportMailAccountsXlsx() {
 }
 
 async function clearMailAccounts() {
-  if (!confirm('Xoa TOAN BO danh sach mail da mua? Khong the hoan tac.')) return;
+  if (!confirm('Xóa TOÀN BỘ danh sách Email đã mua? Không thể hoàn tác.')) return;
   const { deleted } = await api('POST', '/api/mail_accounts/clear');
-  alert(`Da xoa ${deleted} dong.`);
+  alert(`Đã xóa ${deleted} dòng.`);
   loadMailAccounts();
 }
 
 async function refreshAll() {
-  await loadAccounts(); // loadRoots can duoc du lieu tai khoan de ve select "Giao cho"
-  await loadRootMarketStats(); // dien options market truoc - loadSettings can de chon dung gia tri auto_assign_market
+  await loadAccounts();
+  await loadRootMarketStats();
   await Promise.all([loadStats(), loadRoots(), loadSettings(), loadWorkers(), loadUserscripts()]);
 }
 refreshAll();
