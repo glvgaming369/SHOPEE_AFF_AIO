@@ -17,6 +17,9 @@ import argparse
 import io
 import os
 import re
+import subprocess
+import threading
+import time
 from datetime import datetime
 
 from flask import Flask, Response, abort, jsonify, render_template, request
@@ -32,6 +35,8 @@ DB_PATH = shopee_db.DB_PATH_DEFAULT  # ghi de qua --db-path luc khoi dong, xem m
 LAUNCH_URL_DEFAULT = "https://affiliate.shopee.ph/offer/product_offer"
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 USERSCRIPTS_DIR = os.path.join(SCRIPTS_DIR, "userscripts")
+REPO_ROOT = os.path.dirname(SCRIPTS_DIR)  # thu muc goc git (chua .git/) - dung cho /api/update/*
+UPDATE_RESTART_EXIT_CODE = 42  # start_affiliate_scraper.bat doc ma nay de tu khoi dong lai
 
 # Nguon chan ly DUY NHAT cho moi thu lien quan userscript - dashboard (index.html) doc
 # qua GET /api/userscripts thay vi hardcode ten/mo ta rieng, tranh 2 noi bi lech nhau.
@@ -100,6 +105,78 @@ def userscript(name):
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()
     return Response(content, content_type="text/javascript; charset=utf-8")
+
+
+def _run_git(args, timeout=30):
+    """Chay 1 lenh git trong REPO_ROOT (KHONG dua vao cwd cua tien trinh - server co the
+    duoc khoi dong tu bat ky thu muc nao). Tra ve subprocess.CompletedProcess (khong raise
+    khi git tra ma loi khac 0 - nguoi goi tu kiem tra returncode)."""
+    return subprocess.run(
+        ["git"] + args,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+@app.route("/api/update/check", methods=["GET"])
+def update_check():
+    """Kiem tra co ban code moi tren remote 'origin' khong (git fetch + so sanh HEAD local
+    voi origin/master) - dung cho nut 'Kiem tra cap nhat' tren dashboard. Repo PUBLIC
+    (SHOPEE_AFF_AIO) nen fetch khong can dang nhap/token gi ca."""
+    fetch = _run_git(["fetch", "origin", "master"])
+    if fetch.returncode != 0:
+        return jsonify({"error": f"git fetch that bai: {fetch.stderr.strip() or fetch.stdout.strip()}"}), 500
+
+    local = _run_git(["rev-parse", "HEAD"])
+    remote = _run_git(["rev-parse", "origin/master"])
+    if local.returncode != 0 or remote.returncode != 0:
+        return jsonify({"error": "Khong doc duoc commit hien tai - thu muc nay co phai git repo (da git clone) khong?"}), 500
+
+    local_sha = local.stdout.strip()
+    remote_sha = remote.stdout.strip()
+    update_available = local_sha != remote_sha
+
+    commits = []
+    if update_available:
+        log = _run_git(["log", f"{local_sha}..{remote_sha}", "--pretty=format:%h %s"])
+        commits = [line for line in log.stdout.splitlines() if line.strip()]
+
+    return jsonify({
+        "update_available": update_available,
+        "local_commit": local_sha[:7],
+        "remote_commit": remote_sha[:7],
+        "commits": commits,
+    })
+
+
+@app.route("/api/update/apply", methods=["POST"])
+def update_apply():
+    """Tai ban code moi nhat (git pull --ff-only tu origin/master) roi TU KHOI DONG LAI -
+    dung cho nut 'Cap nhat ngay'. --ff-only: tu choi neu co local change/lich su re nhanh
+    (an toan - KHONG bao gio tao merge commit hay ghi de am tham), tra loi ro nguyen nhan
+    thay vi lam hong thu muc lam viec.
+
+    Tu restart bang cach thoat tien trinh voi UPDATE_RESTART_EXIT_CODE (42) - script khoi
+    dong (start_affiliate_scraper.bat) doc ma nay va TU chay lai python, ap dung code vua
+    pull. Tra response VE TRUOC (qua thread nen + sleep ngan) de trinh duyet nhan duoc ket
+    qua truoc khi tien trinh bi os._exit() (ngat ngang, khong chay cleanup) - day la ly do
+    can thread rieng thay vi goi os._exit() ngay tai day."""
+    pull = _run_git(["pull", "--ff-only", "origin", "master"])
+    if pull.returncode != 0:
+        return jsonify({"error": f"git pull that bai: {pull.stderr.strip() or pull.stdout.strip()}"}), 500
+
+    def _restart_soon():
+        time.sleep(1)
+        os._exit(UPDATE_RESTART_EXIT_CODE)
+
+    threading.Thread(target=_restart_soon, daemon=True).start()
+    return jsonify({
+        "ok": True,
+        "output": pull.stdout.strip(),
+        "message": "Da cap nhat code moi nhat - server dang tu khoi dong lai...",
+    })
 
 
 def _bad_request(msg):

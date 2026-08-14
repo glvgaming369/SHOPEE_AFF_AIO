@@ -92,6 +92,21 @@
     <div id="userscripts-list">Dang tai...</div>
   </section>
 
+  <section>
+    <h2>Cap nhat dashboard</h2>
+    <div class="muted" style="margin-bottom:8px;">
+      Tai code moi nhat tu GitHub (<code>SHOPEE_AFF_AIO</code>) - server tu <code>git pull</code>
+      roi tu khoi dong lai, KHONG dung toi du lieu/DB. Chi hoat dong neu thu muc nay la ban
+      <code>git clone</code> tu repo do (khong ap dung cho ban .zip roi rac).
+    </div>
+    <div class="row">
+      <button class="secondary" onclick="checkForUpdate()">Kiem tra cap nhat</button>
+      <button id="update-apply-btn" onclick="applyUpdate()" disabled>Cap nhat ngay</button>
+      <span class="muted" id="update-status">Chua kiem tra.</span>
+    </div>
+    <pre id="update-log" style="margin-top:10px; max-height:160px; overflow:auto; background:var(--bg-soft); padding:10px; border-radius:6px; font-size:12px; white-space:pre-wrap; display:none;"></pre>
+  </section>
+
 </div>
 
 <div id="tab-operations" class="tab-panel active">
@@ -392,6 +407,48 @@ async function loadUserscripts() {
       </div>
     </div>
   `).join('');
+}
+
+let pendingUpdateCommits = 0;
+
+async function checkForUpdate() {
+  const statusEl = document.getElementById('update-status');
+  const applyBtn = document.getElementById('update-apply-btn');
+  statusEl.textContent = 'Dang kiem tra...';
+  applyBtn.disabled = true;
+  try {
+    const data = await api('GET', '/api/update/check');
+    if (data.update_available) {
+      pendingUpdateCommits = data.commits.length;
+      statusEl.textContent = `Co ban moi! ${data.local_commit} -> ${data.remote_commit} (${data.commits.length} commit moi).`;
+      applyBtn.disabled = false;
+    } else {
+      statusEl.textContent = `Dang dung ban moi nhat (${data.local_commit}).`;
+    }
+  } catch (e) {
+    statusEl.textContent = 'Loi kiem tra: ' + e.message;
+  }
+}
+
+async function applyUpdate() {
+  if (!confirm(`Tai ${pendingUpdateCommits} commit moi va tu khoi dong lai server?`)) return;
+  const statusEl = document.getElementById('update-status');
+  const logEl = document.getElementById('update-log');
+  const applyBtn = document.getElementById('update-apply-btn');
+  applyBtn.disabled = true;
+  statusEl.textContent = 'Dang cap nhat...';
+  try {
+    const data = await api('POST', '/api/update/apply');
+    statusEl.textContent = data.message;
+    logEl.style.display = 'block';
+    logEl.textContent = data.output || '(khong co output)';
+    setTimeout(() => {
+      statusEl.textContent = 'Server dang khoi dong lai - doi vai giay roi tai lai trang (F5).';
+    }, 1500);
+  } catch (e) {
+    statusEl.textContent = 'Loi cap nhat: ' + e.message;
+    applyBtn.disabled = false;
+  }
 }
 
 async function loadSettings() {

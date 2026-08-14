@@ -23,7 +23,14 @@ echo.
 echo [2/2] Khoi dong server + mo trinh duyet ^(Ctrl+C de dung^) ...
 echo    URL: http://127.0.0.1:%PORT%
 start "" cmd /c "timeout /t 2 >nul & start http://127.0.0.1:%PORT%"
+
+:run
 python scripts\affiliate_scrape_server.py --port %PORT% --db-path %DBPATH%
+if %errorlevel%==42 (
+    echo.
+    echo [Cap nhat] Da tai code moi - khoi dong lai server...
+    goto run
+)
 
 echo.
 echo Da dong server.
