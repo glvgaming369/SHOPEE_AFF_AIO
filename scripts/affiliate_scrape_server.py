@@ -16,6 +16,7 @@ Chay:
 import argparse
 import io
 import os
+import re
 from datetime import datetime
 
 from flask import Flask, Response, abort, jsonify, render_template, request
@@ -60,6 +61,21 @@ USERSCRIPTS = [
 ]
 USERSCRIPT_ALLOWLIST = {u["file"] for u in USERSCRIPTS}
 
+_VERSION_RE = re.compile(r"^//\s*@version\s+(\S+)", re.MULTILINE)
+
+
+def _userscript_version(filename):
+    """Doc truc tiep dong '// @version' tu file .user.js that (KHONG hardcode trong
+    USERSCRIPTS - se le voi file that moi lan bump version). None neu khong doc duoc/khong
+    co dong @version."""
+    try:
+        with open(os.path.join(USERSCRIPTS_DIR, filename), "r", encoding="utf-8") as f:
+            content = f.read()
+    except OSError:
+        return None
+    m = _VERSION_RE.search(content)
+    return m.group(1) if m else None
+
 
 @app.route("/", methods=["GET"])
 def index():
@@ -68,7 +84,8 @@ def index():
 
 @app.route("/api/userscripts", methods=["GET"])
 def list_userscripts():
-    return jsonify({"userscripts": USERSCRIPTS})
+    items = [dict(u, version=_userscript_version(u["file"])) for u in USERSCRIPTS]
+    return jsonify({"userscripts": items})
 
 
 @app.route("/userscripts/<name>", methods=["GET"])
@@ -115,9 +132,12 @@ def import_roots():
 def claim_root():
     body = request.get_json(force=True, silent=True) or {}
     device_key = body.get("device_key")
+    market = body.get("market")
     if not device_key:
         return _bad_request("thieu 'device_key' (ten tai khoan/profile dang claim)")
-    row = shopee_db.claim_root(DB_PATH, device_key)
+    if not market:
+        return _bad_request("thieu 'market' (tab chi duoc claim root DUNG market no dang mo)")
+    row = shopee_db.claim_root(DB_PATH, device_key, market)
     return jsonify({"root": row})
 
 
@@ -125,15 +145,21 @@ def claim_root():
 def assign_root(itemid):
     body = request.get_json(force=True, silent=True) or {}
     device_key = body.get("device_key")
+    market = body.get("market")
     if not device_key:
         return _bad_request("thieu 'device_key'")
-    result = shopee_db.assign_root_to_worker(DB_PATH, itemid, device_key)
+    if not market:
+        return _bad_request("thieu 'market'")
+    result = shopee_db.assign_root_to_worker(DB_PATH, itemid, device_key, market)
     return jsonify(result), (200 if result["ok"] else 409)
 
 
 @app.route("/api/workers/<device_key>/assigned_root", methods=["GET"])
 def assigned_root(device_key):
-    root = shopee_db.get_assigned_root_for_worker(DB_PATH, device_key)
+    market = request.args.get("market")
+    if not market:
+        return _bad_request("thieu 'market' (tab chi duoc giao root DUNG market no dang mo)")
+    root = shopee_db.get_assigned_root_for_worker(DB_PATH, device_key, market)
     return jsonify({"root": root})
 
 
@@ -144,7 +170,7 @@ def workers_heartbeat():
     status = body.get("status")
     if not device_key or not status:
         return _bad_request("thieu 'device_key' hoac 'status'")
-    shopee_db.worker_heartbeat(DB_PATH, device_key, status, body.get("current_root"))
+    shopee_db.worker_heartbeat(DB_PATH, device_key, status, body.get("current_root"), body.get("market"))
     return jsonify({"ok": True})
 
 
@@ -155,9 +181,13 @@ def workers_list():
 
 @app.route("/api/roots/<itemid>/reset", methods=["POST"])
 def reset_root(itemid):
-    ok = shopee_db.reset_root_to_pending(DB_PATH, itemid)
+    body = request.get_json(force=True, silent=True) or {}
+    market = body.get("market")
+    if not market:
+        return _bad_request("thieu 'market'")
+    ok = shopee_db.reset_root_to_pending(DB_PATH, itemid, market)
     if not ok:
-        return _bad_request(f"khong tim thay root '{itemid}'")
+        return _bad_request(f"khong tim thay root '{itemid}' o market '{market}'")
     return jsonify({"ok": True})
 
 
@@ -167,7 +197,10 @@ def fail_root(itemid):
     claim + chuyen status_link='fail' de KHONG bi nhan lai vo han lan sau."""
     body = request.get_json(force=True, silent=True) or {}
     reason = body.get("reason") or "unknown_error"
-    shopee_db.mark_root_failed(DB_PATH, itemid, reason)
+    market = body.get("market")
+    if not market:
+        return _bad_request("thieu 'market'")
+    shopee_db.mark_root_failed(DB_PATH, itemid, market, reason)
     return jsonify({"ok": True})
 
 
@@ -175,7 +208,11 @@ def fail_root(itemid):
 def recompute_merged(itemid):
     """Tinh lai merged_link thu cong - dung cho group da 'done' TU TRUOC KHI co tinh nang
     nay (finish_root() tu dong lam viec nay cho group hoan tat SAU nay)."""
-    total = shopee_db.compute_merged_links(DB_PATH, itemid)
+    body = request.get_json(force=True, silent=True) or {}
+    market = body.get("market")
+    if not market:
+        return _bad_request("thieu 'market'")
+    total = shopee_db.compute_merged_links(DB_PATH, itemid, market)
     return jsonify({"ok": True, "total_links": total})
 
 
@@ -195,9 +232,12 @@ def reset_insufficient_all():
 def finish_root():
     body = request.get_json(force=True, silent=True) or {}
     itemid = body.get("itemid")
+    market = body.get("market")
     if not itemid:
         return _bad_request("thieu 'itemid'")
-    shopee_db.finish_root(DB_PATH, itemid)
+    if not market:
+        return _bad_request("thieu 'market'")
+    shopee_db.finish_root(DB_PATH, itemid, market)
     return jsonify({"ok": True})
 
 
@@ -259,39 +299,59 @@ def filter_new():
 @app.route("/api/items/list", methods=["GET"])
 def list_items():
     """Danh sach san pham da cao (tab 'San pham' tren dashboard) - loc theo
-    link_type/status_link/search (khop ten cot itemid/name/shop_name), gioi han so dong."""
+    link_type/status_link/search (khop ten cot itemid/name/shop_name)/groupid (khop chinh
+    xac 1 nhom), gioi han so dong."""
     link_type = request.args.get("link_type") or None
     status_link = request.args.get("status_link") or None
     search = request.args.get("search") or None
+    groupid = request.args.get("groupid") or None
     limit = request.args.get("limit", 200, type=int)
     items = shopee_db.fetch_all_items(
-        DB_PATH, link_type=link_type, status_link=status_link, search=search, limit=limit
+        DB_PATH, link_type=link_type, status_link=status_link, search=search,
+        groupid=groupid, limit=limit,
     )
     return jsonify({"items": items})
 
 
 @app.route("/api/items/<itemid>", methods=["DELETE"])
 def delete_item(itemid):
-    ok = shopee_db.delete_item(DB_PATH, itemid)
+    market = request.args.get("market")
+    if not market:
+        return _bad_request("thieu query param 'market'")
+    ok = shopee_db.delete_item(DB_PATH, itemid, market)
     if not ok:
-        return _bad_request(f"khong tim thay item '{itemid}'")
+        return _bad_request(f"khong tim thay item '{itemid}' o market '{market}'")
     return jsonify({"ok": True})
 
 
 @app.route("/api/groups/<groupid>/count", methods=["GET"])
 def group_count(groupid):
-    count = shopee_db.count_group_members(DB_PATH, groupid)
+    market = request.args.get("market")
+    if not market:
+        return _bad_request("thieu query param 'market'")
+    count = shopee_db.count_group_members(DB_PATH, groupid, market)
     return jsonify({"groupid": groupid, "member_count": count})
 
 
 @app.route("/api/roots/list", methods=["GET"])
 def list_roots():
-    return jsonify({"roots": shopee_db.list_roots_with_counts(DB_PATH)})
+    market = request.args.get("market") or None
+    return jsonify({"roots": shopee_db.list_roots_with_counts(DB_PATH, market=market)})
+
+
+@app.route("/api/roots/market_stats", methods=["GET"])
+def roots_market_stats():
+    """Tong hop so root theo tung market - dung cho bang "Root theo market" + dropdown
+    chon market cho auto-assign o tab "Van hanh"."""
+    return jsonify({"markets": shopee_db.count_roots_by_market(DB_PATH)})
 
 
 @app.route("/api/roots/<groupid>/members", methods=["GET"])
 def root_members(groupid):
-    return jsonify({"members": shopee_db.list_group_members(DB_PATH, groupid)})
+    market = request.args.get("market")
+    if not market:
+        return _bad_request("thieu query param 'market'")
+    return jsonify({"members": shopee_db.list_group_members(DB_PATH, groupid, market)})
 
 
 @app.route("/api/accounts", methods=["GET"])
@@ -346,6 +406,7 @@ def update_settings():
         seller_commission_vnd_min=body.get("seller_commission_vnd_min"),
         auto_assign=body.get("auto_assign"),
         dongvanfb_api_key=body.get("dongvanfb_api_key"),
+        auto_assign_market=body.get("auto_assign_market"),
     )
     return jsonify(result)
 
@@ -393,6 +454,13 @@ def video_stats():
     return jsonify(shopee_db.count_video_push_stats(DB_PATH))
 
 
+@app.route("/api/videos/stats_by_market", methods=["GET"])
+def video_stats_by_market():
+    """Thong ke link tao video theo TUNG market - dung cho bang "Link theo market" o tab
+    "Tao video"."""
+    return jsonify({"markets": shopee_db.count_video_push_stats_by_market(DB_PATH)})
+
+
 @app.route("/api/videos/export.xlsx", methods=["GET"])
 def export_videos_xlsx():
     """Xuat toan bo san pham DA TAO VIDEO (job_id khong null) ra .xlsx, cot A|B|C =
@@ -415,6 +483,14 @@ def export_videos_xlsx():
     )
 
 
+@app.route("/api/videos/reset", methods=["POST"])
+def reset_videos():
+    """Dat lai trang thai 've cho tao video' cho toan bo san pham da tao xong (job_id
+    khong null) - dung cho nut 'Dat lai trang thai' o tab 'Tao video'."""
+    count = shopee_db.reset_video_jobs(DB_PATH)
+    return jsonify({"reset": count})
+
+
 @app.route("/api/videos/push", methods=["POST"])
 def push_videos():
     """1 lo (toi da 200, gioi han cua chinh VideoAI): day cache (cho dong chua
@@ -427,6 +503,7 @@ def push_videos():
     body = request.get_json(force=True, silent=True) or {}
     limit = min(max(1, int(body.get("limit") or 200)), videoai_client.BATCH_LIMIT)
     machine_id = body.get("machine_id")
+    market = body.get("market") or None
     if not machine_id:
         return _bad_request("thieu 'machine_id' - chon 1 may tao video truoc khi chay.")
 
@@ -439,17 +516,16 @@ def push_videos():
     tag = machine["tag"]
     pool = machine["pool"] or "selfhostPool"
 
-    candidates = shopee_db.list_video_push_candidates(DB_PATH, limit)
+    candidates = shopee_db.list_video_push_candidates(DB_PATH, limit, market=market)
     if not candidates:
         return jsonify({"done": 0, "pushed": 0, "created": 0, "errors": []})
 
-    # Gom theo market THAT (suy tu domain link, khong dung cot 'market' - xem
-    # videoai_client.market_from_link()) vi language/prefix anh phu thuoc market, va API
-    # tao task chi nhan 1 'language' chung cho ca lo.
+    # Gom theo market (cot 'market' gio da dang tin - moi insert path deu tu suy dung tu
+    # domain link, xem shopee_db.market_from_link()) vi language/prefix anh phu thuoc
+    # market, va API tao task chi nhan 1 'language' chung cho ca lo.
     by_market = {}
     for row in candidates:
-        m = videoai_client.market_from_link(row.get("product_link"))
-        by_market.setdefault(m, []).append(row)
+        by_market.setdefault(row.get("market"), []).append(row)
 
     total_pushed = 0
     total_created = 0
@@ -458,6 +534,7 @@ def push_videos():
     for market, rows in by_market.items():
         language = videoai_client.language_for_market(market)
         url_to_itemid = {r["product_link"]: r["itemid"] for r in rows}
+        url_to_merged_link = {r["product_link"]: r.get("merged_link") for r in rows}
         ready_urls = [r["product_link"] for r in rows if r.get("cache_uploaded")]
         need_cache_rows = [r for r in rows if not r.get("cache_uploaded")]
 
@@ -484,13 +561,16 @@ def push_videos():
                         ok_itemids.append(url_to_itemid[it["url"]])
                         ready_urls.append(it["url"])
                     if ok_itemids:
-                        shopee_db.mark_cache_uploaded(DB_PATH, ok_itemids)
+                        shopee_db.mark_cache_uploaded(DB_PATH, [(iid, market) for iid in ok_itemids])
                         total_pushed += len(ok_itemids)
 
         if ready_urls:
+            ready_items = [
+                {"url": u, "merged_link": url_to_merged_link.get(u)} for u in ready_urls
+            ]
             try:
                 task_results = videoai_client.create_video_batch(
-                    ready_urls, api_key, tag=tag, pool=pool, language=language
+                    ready_items, api_key, tag=tag, pool=pool, language=language
                 )
             except Exception as e:
                 errors.append({"reason": f"loi tao video ({market}): {e}"})
@@ -501,7 +581,7 @@ def push_videos():
                     if not itemid:
                         continue
                     if it.get("jobId"):
-                        job_updates.append((itemid, it["jobId"]))
+                        job_updates.append((itemid, market, it["jobId"]))
                         total_created += 1
                     else:
                         errors.append({"itemid": itemid, "reason": it.get("error") or "tao video that bai"})

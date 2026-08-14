@@ -1012,6 +1012,41 @@
     return dongvanfbToolsPost('/graph_messages', { email, refresh_token: refreshToken, client_id: clientId, list_mail: 'all' });
   }
 
+  // Nhanh du phong (IMAP/OAuth2, KHONG dung Graph API) - dongvanfb ho tro song song 2 nhanh
+  // doc lap cho cung 1 tai khoan mail (xem api_docs_dongvanfb.txt). Da gap thuc te
+  // (2026-08-10, mail Shopee TH ConleyBoush867420@outlook.com): graph_code/graph_messages
+  // tra ve "Graph token invalid" (refresh_token khong doi duoc access token Graph API cho
+  // tai khoan nay), NHUNG get_messages_oauth2 doc DUOC dung mail do qua IMAP - 2 nhanh
+  // khong luon thanh cong/that bai cung nhau, nen can thu ca 2 truoc khi ket luan "chua co ma".
+  async function getShopeeCodeOauth2(email, refreshToken, clientId) {
+    return dongvanfbToolsPost('/get_code_oauth2', { email, refresh_token: refreshToken, client_id: clientId, type: 'shopee' });
+  }
+
+  async function getMailboxMessagesOauth2(email, refreshToken, clientId) {
+    return dongvanfbToolsPost('/get_messages_oauth2', { email, refresh_token: refreshToken, client_id: clientId, list_mail: 'all' });
+  }
+
+  // Noi dung 'message' tra ve tu dongvanfb la RAW MIME quoted-printable (vd "=E0=B8=A3=E0=..."
+  // cho ky tu UTF-8 ngoai ASCII, "=\r\n" la soft line break) - da gap thuc te (2026-08-10,
+  // mail Shopee Thai Lan): sau khi boc the HTML ma KHONG giai ma QP truoc, cum tu tieng Thai
+  // "OTP ...cua ban la:" van con nguyen dang "=E0=B8=xx" vun, khien moi regex tren van ban
+  // (bao gom ca cac pattern tieng Anh/Viet cu) khong khop duoc voi phan van ban bao quanh ma
+  // OTP - PHAI giai ma quoted-printable ra UTF-8 truoc roi moi bo the/regex.
+  function decodeQuotedPrintable(str) {
+    const noSoftBreaks = String(str || '').replace(/=\r?\n/g, '');
+    const bytes = [];
+    for (let i = 0; i < noSoftBreaks.length; i++) {
+      if (noSoftBreaks[i] === '=' && /^[0-9A-Fa-f]{2}$/.test(noSoftBreaks.slice(i + 1, i + 3))) {
+        bytes.push(parseInt(noSoftBreaks.slice(i + 1, i + 3), 16));
+        i += 2;
+      } else {
+        bytes.push(noSoftBreaks.charCodeAt(i) & 0xff);
+      }
+    }
+    try { return new TextDecoder('utf-8').decode(Uint8Array.from(bytes)); }
+    catch (e) { return noSoftBreaks; }
+  }
+
   // Tu tach ma OTP tu noi dung tho khi dongvanfb TRA VE RONG - da gap thuc te (2026-08-07):
   // email that "Shopee: Use OTP To Verify Your Identity" tu info@mail.shopee.ph CO ma
   // (746881, ngay sau "Your Shopee OTP Code is:") nhung CA graph_code LAN field 'code'
@@ -1021,7 +1056,8 @@
   // </td></tr><tr><td...> chen giua "OTP Code is:" va con so, khong the liet ke het cac
   // kieu the co the gap), da xac nhan qua test that voi dung noi dung email tren.
   function stripHtml(html) {
-    return String(html || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+    const utf8 = decodeQuotedPrintable(html);
+    return utf8.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
   }
   function extractOtpCode(text) {
     if (!text) return null;
@@ -1030,11 +1066,58 @@
       /(?:OTP|verification)\s*Code\s*is:?\s*(\d{4,8})/i,
       /(?:OTP|verification)\s*code:?\s*(\d{4,8})/i,
       /\b(\d{4,8})\s*(?:is your|la ma)\b/i,
+      // Mau khong phai tieng Anh (vd Thai Lan "OTP ...cua ban la: 283096") - "OTP" van luon
+      // xuat hien nguyen van (khong dich) trong moi ngon ngu Shopee dung, nen bat ma so
+      // 4-8 chu so trong pham vi gan sau tu "OTP" thay vi doi hoi dung cum tu tieng Anh.
+      /OTP[^0-9]{0,60}(\d{4,8})\b/i,
     ];
     for (const re of patterns) {
       const m = plain.match(re);
       if (m) return m[1];
     }
+    return null;
+  }
+
+  // Thu lan luot Graph API roi den OAuth2/IMAP - 2 nhanh cua dongvanfb hoat dong doc lap
+  // (mot tai khoan co the loi nhanh nay nhung nhanh kia van doc duoc, xem ghi chu tai
+  // getShopeeCodeOauth2()), nen phai thu du ca 4 buoc truoc khi ket luan "chua co ma". Loi
+  // tung buoc rieng le KHONG lam dung ca chuoi - chi bao loi tong hop khi ca 4 buoc deu that bai.
+  async function fetchShopeeCodeForRow(row, log) {
+    const errors = [];
+    try {
+      const result = await getShopeeCode(row.email, row.refreshToken, row.clientId);
+      if (result && result.status && result.code) return result.code;
+    } catch (e) { errors.push('graph_code: ' + e.message); }
+
+    try {
+      const msgsResp = await getMailboxMessages(row.email, row.refreshToken, row.clientId);
+      const msgs = (msgsResp && msgsResp.messages) || [];
+      const shopeeMsgs = msgs.filter((m) => /shopee/i.test(m.from || '') || /shopee/i.test(m.subject || ''));
+      for (const m of shopeeMsgs) {
+        const found = extractOtpCode(m.message) || extractOtpCode(m.subject);
+        if (found) { log(`  (Lay ma ${found} qua Graph API - tu quet hop thu vi field 'code' rong)`); return found; }
+      }
+    } catch (e) { errors.push('graph_messages: ' + e.message); }
+
+    try {
+      const result2 = await getShopeeCodeOauth2(row.email, row.refreshToken, row.clientId);
+      if (result2 && result2.status && result2.code) {
+        log(`  (Lay ma ${result2.code} qua nhanh OAuth2/IMAP - Graph API khong doc duoc hop thu nay)`);
+        return result2.code;
+      }
+    } catch (e) { errors.push('get_code_oauth2: ' + e.message); }
+
+    try {
+      const msgsResp2 = await getMailboxMessagesOauth2(row.email, row.refreshToken, row.clientId);
+      const msgs2 = (msgsResp2 && msgsResp2.messages) || [];
+      const shopeeMsgs2 = msgs2.filter((m) => /shopee/i.test(m.from || '') || /shopee/i.test(m.subject || ''));
+      for (const m of shopeeMsgs2) {
+        const found = extractOtpCode(m.message) || extractOtpCode(m.subject);
+        if (found) { log(`  (Lay ma ${found} qua nhanh OAuth2/IMAP - tu quet hop thu, Graph API khong doc duoc)`); return found; }
+      }
+    } catch (e) { errors.push('get_messages_oauth2: ' + e.message); }
+
+    if (errors.length) log(`  (Ca 4 cach lay ma deu loi/rong cho ${row.email}: ${errors.join(' | ')})`);
     return null;
   }
 
@@ -1181,21 +1264,7 @@
         if (!row) return;
         btn.disabled = true; btn.textContent = '...';
         try {
-          const result = await getShopeeCode(row.email, row.refreshToken, row.clientId);
-          let code = result && result.status ? result.code : null;
-          // dongvanfb doi luc tra ve rong ngay ca khi hop thu THAT SU co ma (da gap thuc
-          // te: mau email "Shopee: Use OTP To Verify Your Identity" tu info@mail.shopee.ph -
-          // xem extractOtpCode()) - tu quet lai toan bo hop thu, uu tien thu tu Shopee,
-          // roi tu trich ma tu noi dung tho lam phuong an du phong.
-          if (!code) {
-            const msgsResp = await getMailboxMessages(row.email, row.refreshToken, row.clientId);
-            const msgs = (msgsResp && msgsResp.messages) || [];
-            const shopeeMsgs = msgs.filter((m) => /shopee/i.test(m.from || '') || /shopee/i.test(m.subject || ''));
-            for (const m of shopeeMsgs) {
-              const found = extractOtpCode(m.message) || extractOtpCode(m.subject);
-              if (found) { code = found; log(`  (Lay ma ${found} qua tu quet hop thu - dongvanfb tra ve rong cho email "${m.subject}")`); break; }
-            }
-          }
+          const code = await fetchShopeeCodeForRow(row, log);
           row.shopeeCode = code || null;
           row.checkedAt = new Date().toLocaleString('vi-VN');
           saveMailResults(arr2);
@@ -1217,12 +1286,20 @@
         if (!row) return;
         btn.disabled = true; btn.textContent = '...';
         try {
-          const result = await getMailboxMessages(row.email, row.refreshToken, row.clientId);
-          const msgs = (result && result.messages) || [];
+          let result = await getMailboxMessages(row.email, row.refreshToken, row.clientId);
+          let msgs = (result && result.messages) || [];
+          let viaOauth2 = false;
+          // Graph API co the loi rieng cho tai khoan nay (vd "Graph token invalid") du
+          // hop thu that su co thu - thu them nhanh OAuth2/IMAP truoc khi ket luan trong.
+          if (!msgs.length) {
+            const result2 = await getMailboxMessagesOauth2(row.email, row.refreshToken, row.clientId);
+            const msgs2 = (result2 && result2.messages) || [];
+            if (msgs2.length) { msgs = msgs2; viaOauth2 = true; }
+          }
           const summary = msgs.length
             ? msgs.map((m) => `- [${m.from}] ${m.subject}${m.code ? ' (code: ' + m.code + ')' : ''}`).join('\n')
             : '(Hop thu trong)';
-          log(`Hop thu ${row.email} (${msgs.length} thu):\n${summary.slice(0, 1500)}`);
+          log(`Hop thu ${row.email}${viaOauth2 ? ' (qua nhanh OAuth2/IMAP - Graph API loi/rong)' : ''} (${msgs.length} thu):\n${summary.slice(0, 1500)}`);
         } catch (e) {
           log(`Loi xem hop thu ${row.email}: ` + e.message);
         } finally {

@@ -53,6 +53,7 @@
 <body>
 <header><h1>Shopee Affiliate Offer Scraper - Bang dieu khien</h1><span class="version">v2.5</span></header>
 <nav class="tab-nav">
+  <button class="tab-btn" id="tabbtn-setup" onclick="switchTab('setup')">Tai khoan & Script</button>
   <button class="tab-btn active" id="tabbtn-operations" onclick="switchTab('operations')">Van hanh</button>
   <button class="tab-btn" id="tabbtn-products" onclick="switchTab('products')">San pham da cao</button>
   <button class="tab-btn" id="tabbtn-video" onclick="switchTab('video')">Tao video</button>
@@ -60,16 +61,7 @@
 </nav>
 <main>
 
-<div id="tab-operations" class="tab-panel active">
-
-  <section>
-    <h2>Tong quan</h2>
-    <div class="stats-bar" id="stats-bar">Dang tai...</div>
-    <div style="margin-top:12px;">
-      <button class="danger" onclick="resetAll()">Xoa toan bo du lieu</button>
-      <span class="muted">(chi xoa root/related da cao - KHONG xoa danh sach tai khoan/profile)</span>
-    </div>
-  </section>
+<div id="tab-setup" class="tab-panel">
 
   <section>
     <h2>Tai khoan / Chrome profile</h2>
@@ -100,6 +92,19 @@
     <div id="userscripts-list">Dang tai...</div>
   </section>
 
+</div>
+
+<div id="tab-operations" class="tab-panel active">
+
+  <section>
+    <h2>Tong quan</h2>
+    <div class="stats-bar" id="stats-bar">Dang tai...</div>
+    <div style="margin-top:12px;">
+      <button class="danger" onclick="resetAll()">Xoa toan bo du lieu</button>
+      <span class="muted">(chi xoa root/related da cao - KHONG xoa danh sach tai khoan/profile)</span>
+    </div>
+  </section>
+
   <section>
     <h2>Worker (tab Tampermonkey dang chay)</h2>
     <div class="muted" style="margin-bottom:8px;">
@@ -107,7 +112,7 @@
       qua 15s khong thay bao gi (co the tab da dong/mat mang).
     </div>
     <table>
-      <thead><tr><th>Device key</th><th>Trang thai</th><th>Root dang lam</th><th>Lan cuoi bao</th></tr></thead>
+      <thead><tr><th>Device key</th><th>Market</th><th>Trang thai</th><th>Root dang lam</th><th>Lan cuoi bao</th></tr></thead>
       <tbody id="workers-tbody"></tbody>
     </table>
   </section>
@@ -143,20 +148,37 @@
   </section>
 
   <section>
+    <h2>Root theo market</h2>
+    <div class="muted" style="margin-bottom:8px;">Tong hop so root cua TUNG thi truong - dang cho (chua ai giu) / dang lam (da giao, chua xong) / done / fail.</div>
+    <table>
+      <thead><tr><th>Market</th><th>Tong</th><th>Dang cho</th><th>Dang lam</th><th>Done</th><th>Fail</th></tr></thead>
+      <tbody id="root-market-stats-tbody"></tbody>
+    </table>
+  </section>
+
+  <section>
     <h2>Danh sach root</h2>
     <div class="row">
       <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
         <input type="checkbox" id="auto-assign-toggle" onchange="toggleAutoAssign()">
         Tu dong giao viec (worker ranh se tu nhan root pending ke tiep, khong can chon tay)
       </label>
+      <label style="white-space:nowrap;">cho market:</label>
+      <select id="auto-assign-market-sel" onchange="toggleAutoAssign()" style="max-width:200px;">
+        <option value="">-- Tat ca market --</option>
+      </select>
     </div>
     <div class="row">
+      <label style="white-space:nowrap;">Loc theo market:</label>
+      <select id="root-filter-market" onchange="loadRoots()" style="max-width:200px;">
+        <option value="">-- Tat ca market --</option>
+      </select>
       <button class="secondary" onclick="loadRoots()">Lam moi</button>
       <button class="secondary" onclick="recomputeMergedAll()">Gop link cho TAT CA root</button>
       <button class="secondary" onclick="resetInsufficientAll()">Dat lai TAT CA root thieu</button>
     </div>
     <table>
-      <thead><tr><th>item_id</th><th>Trang thai</th><th>Thanh vien</th><th>Giao cho</th><th>Link</th><th></th></tr></thead>
+      <thead><tr><th>item_id</th><th>Market</th><th>Trang thai</th><th>Thanh vien</th><th>Giao cho</th><th>Link</th><th></th></tr></thead>
       <tbody id="roots-tbody"></tbody>
     </table>
     <div id="members-panel"></div>
@@ -183,7 +205,9 @@
         <option value="fail">fail</option>
       </select>
       <input type="text" id="item-filter-search" placeholder="Tim theo itemid/ten/shop..." onkeydown="if(event.key==='Enter') loadItems()">
+      <input type="text" id="item-filter-groupid" placeholder="Loc theo groupId..." onkeydown="if(event.key==='Enter') loadItems()">
       <button class="secondary" onclick="loadItems()">Loc</button>
+      <button class="secondary" onclick="clearGroupFilter()">Bo loc nhom</button>
     </div>
     <div class="muted" style="margin-bottom:8px;" id="items-count"></div>
     <table>
@@ -197,13 +221,13 @@
 <div id="tab-video" class="tab-panel">
 
   <section>
-    <h2>May tao video</h2>
+    <h2>Video Machines</h2>
     <div class="muted" style="margin-bottom:8px;">
       Goi thang toi <code>videoai-api.devappnow.com</code> (khong qua Postgres cua 2-tao-video).
       Moi may 1 API key + 1 thu muc (Tag) + Pool rieng - dung khi co nhieu tai khoan/may VideoAI.
     </div>
     <table>
-      <thead><tr><th>Ten may</th><th>API key</th><th>Thu muc (Tag)</th><th>Pool</th><th>Trang thai</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>API key</th><th>Tag</th><th>Pool</th><th>Status</th><th></th></tr></thead>
       <tbody id="video-machines-tbody"></tbody>
     </table>
     <div class="row" style="margin-top:10px;">
@@ -214,27 +238,39 @@
         <option value="selfhostPool">selfhostPool</option>
         <option value="adminPool">adminPool</option>
       </select>
-      <button onclick="addVideoMachine(this)">Them may</button>
+      <button onclick="addVideoMachine(this)">Add Machine</button>
     </div>
   </section>
 
   <section>
-    <h2>Tao video (day cache + tao task hang loat)</h2>
+    <h2>Create Videos</h2>
     <div class="muted" style="margin-bottom:8px;">
       Dieu kien du de day: san pham da co "Gop link" (thuoc 1 nhom da gom du/hoan tat va dat
       tieu chi loc). Moi lan chay xu ly theo lo toi da 200 (gioi han cua VideoAI), tu lap
-      lai toi khi het hang doi hoac bam Dung.
+      lai toi khi het hang doi hoac bam Stop.
     </div>
     <div class="stats-bar" id="video-stats-bar">Dang tai...</div>
+    <table style="margin-top:12px;">
+      <thead><tr><th>Market</th><th>Eligible</th><th>Cached</th><th>Created</th><th>Remaining</th></tr></thead>
+      <tbody id="video-market-stats-tbody"></tbody>
+    </table>
+
     <div class="row" style="margin-top:12px;">
-      <select id="video-machine-sel" style="min-width:200px;"></select>
-      <label style="white-space:nowrap;">So luong video can tao</label>
+      <select id="video-machine-sel" style="min-width:180px;"></select>
+      <select id="video-market-sel" style="min-width:140px;">
+        <option value="">All markets</option>
+      </select>
+      <label style="white-space:nowrap;">Quantity</label>
       <input type="number" id="video-target" min="1" value="200" style="max-width:100px;">
-      <button id="video-start-btn" onclick="runVideoPush()">Day + Tao video</button>
-      <button id="video-stop-btn" class="secondary" onclick="stopVideoPush()" disabled>Dung</button>
-      <button class="secondary" onclick="loadVideoStats()">Lam moi thong ke</button>
-      <button class="secondary" onclick="exportVideosXlsx()">Xuat Excel (da tao video)</button>
+      <button id="video-start-btn" onclick="runVideoPush()">Push + Create</button>
+      <button id="video-stop-btn" class="secondary" onclick="stopVideoPush()" disabled>Stop</button>
     </div>
+    <div class="row" style="margin-top:8px;">
+      <button class="secondary" onclick="loadVideoStats()">Refresh</button>
+      <button class="secondary" onclick="exportVideosXlsx()">Export Excel</button>
+      <button class="secondary" onclick="resetVideoJobs()">Reset Status</button>
+    </div>
+
     <pre id="video-log" style="margin-top:12px; max-height:280px; overflow:auto; background:var(--bg-soft); padding:10px; border-radius:6px; font-size:12px; white-space:pre-wrap;"></pre>
   </section>
 
@@ -351,7 +387,7 @@ async function loadUserscripts() {
   document.getElementById('userscripts-list').innerHTML = userscripts.map(u => `
     <div class="row" style="align-items:flex-start;">
       <div style="flex:1;">
-        <div><a href="/userscripts/${u.file}" target="_blank"><b>${u.title}</b></a></div>
+        <div><a href="/userscripts/${u.file}" target="_blank"><b>${u.title}</b></a> ${u.version ? `<span class="muted">v${u.version}</span>` : ''}</div>
         <div class="muted">${u.description}</div>
       </div>
     </div>
@@ -365,6 +401,7 @@ async function loadSettings() {
   document.getElementById('set-sold').value = s.sold_min;
   document.getElementById('set-commission').value = s.seller_commission_vnd_min;
   document.getElementById('auto-assign-toggle').checked = !!s.auto_assign;
+  document.getElementById('auto-assign-market-sel').value = s.auto_assign_market || '';
 }
 
 async function saveSettings() {
@@ -387,6 +424,34 @@ async function resetAll() {
   const { deleted } = await api('POST', '/api/reset');
   alert(`Da xoa ${deleted} dong.`);
   refreshAll();
+}
+
+function fillMarketSelectOptions(selectEl, markets, allLabel) {
+  // Giu lua chon hien tai cua nguoi dung qua moi lan refresh dinh ky (setInterval) - chi
+  // rebuild <option>, khong reset ve "Tat ca" neu gia tri dang chon van con hop le.
+  const current = selectEl.value;
+  selectEl.innerHTML = `<option value="">${allLabel}</option>` +
+    markets.map(m => `<option value="${m.market}">${m.market} (${m.total})</option>`).join('');
+  if ([...selectEl.options].some(o => o.value === current)) selectEl.value = current;
+}
+
+async function loadRootMarketStats() {
+  const { markets } = await api('GET', '/api/roots/market_stats');
+  const tbody = document.getElementById('root-market-stats-tbody');
+  tbody.innerHTML = markets.map(m => `
+    <tr>
+      <td>${m.market || '(chua ro)'}</td>
+      <td>${m.total}</td>
+      <td>${m.pending}</td>
+      <td>${m.claimed}</td>
+      <td>${m.done}</td>
+      <td>${m.fail}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="6" class="muted">Chua co root nao.</td></tr>';
+
+  const knownMarkets = markets.filter(m => m.market);
+  fillMarketSelectOptions(document.getElementById('auto-assign-market-sel'), knownMarkets, '-- Tat ca market --');
+  fillMarketSelectOptions(document.getElementById('root-filter-market'), knownMarkets, '-- Tat ca market --');
 }
 
 async function loadStats() {
@@ -428,7 +493,8 @@ async function loadAccounts() {
 
 async function toggleAutoAssign() {
   const checked = document.getElementById('auto-assign-toggle').checked;
-  await api('POST', '/api/settings', { auto_assign: checked });
+  const market = document.getElementById('auto-assign-market-sel').value;
+  await api('POST', '/api/settings', { auto_assign: checked, auto_assign_market: market });
 }
 
 async function addAccount(btn) {
@@ -472,19 +538,20 @@ async function loadWorkers() {
     return `
     <tr>
       <td>${w.device_key}</td>
+      <td>${w.market || '-'}</td>
       <td><span class="badge ${status}">${status}</span></td>
       <td>${w.current_root || '-'}</td>
       <td>${Math.round(ageSec)}s truoc</td>
     </tr>`;
-  }).join('') || '<tr><td colspan="4" class="muted">Chua co worker nao bao ve (chua bam Start o tab nao).</td></tr>';
+  }).join('') || '<tr><td colspan="5" class="muted">Chua co worker nao bao ve (chua bam Start o tab nao).</td></tr>';
 }
 
-async function assignRoot(itemid) {
+async function assignRoot(itemid, market) {
   const sel = document.getElementById('assign-sel-' + itemid);
   const deviceKey = sel.value;
   if (!deviceKey) { alert('Chon 1 tai khoan de giao viec.'); return; }
   try {
-    await api('POST', `/api/roots/${encodeURIComponent(itemid)}/assign`, { device_key: deviceKey });
+    await api('POST', `/api/roots/${encodeURIComponent(itemid)}/assign`, { device_key: deviceKey, market });
     loadRoots();
   } catch (e) {
     alert('Khong giao duoc: ' + e.message);
@@ -519,11 +586,14 @@ function rootStatusBadge(r) {
 }
 
 async function loadRoots() {
-  const { roots } = await api('GET', '/api/roots/list');
+  const market = document.getElementById('root-filter-market').value;
+  const qs = market ? `?market=${encodeURIComponent(market)}` : '';
+  const { roots } = await api('GET', `/api/roots/list${qs}`);
   const tbody = document.getElementById('roots-tbody');
   tbody.innerHTML = roots.map(r => `
     <tr>
       <td>${r.itemid}</td>
+      <td>${r.market || '-'}</td>
       <td>${rootStatusBadge(r)}</td>
       <td>${r.member_count}/60</td>
       <td>${r.assigned_key || '-'}</td>
@@ -531,20 +601,20 @@ async function loadRoots() {
       <td>
         ${r.status_link === 'pending' ? `
           <select id="assign-sel-${r.itemid}"><option value="">-- chon tai khoan --</option>${accountOptions(r.assigned_key)}</select>
-          <button class="secondary" onclick="assignRoot('${r.itemid}')">Giao viec</button>
+          <button class="secondary" onclick="assignRoot('${r.itemid}', '${r.market}')">Giao viec</button>
         ` : `
-          <button class="secondary" onclick="resetRoot('${r.itemid}')" title="Dua ve pending de giao lai">Dat lai</button>
-          <button class="secondary" onclick="recomputeMerged('${r.itemid}')" title="Tinh lai cot Gop link">Gop link</button>
+          <button class="secondary" onclick="resetRoot('${r.itemid}', '${r.market}')" title="Dua ve pending de giao lai">Dat lai</button>
+          <button class="secondary" onclick="recomputeMerged('${r.itemid}', '${r.market}')" title="Tinh lai cot Gop link">Gop link</button>
         `}
-        <button class="secondary" onclick="showMembers('${r.itemid}')">Xem</button>
+        <button class="secondary" onclick="showMembers('${r.itemid}', '${r.market}')">Xem</button>
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="6" class="muted">Chua co root nao.</td></tr>';
+  `).join('') || '<tr><td colspan="7" class="muted">Chua co root nao.</td></tr>';
 }
 
-async function recomputeMerged(itemid) {
+async function recomputeMerged(itemid, market) {
   try {
-    const { total_links } = await api('POST', `/api/roots/${encodeURIComponent(itemid)}/recompute_merged`);
+    const { total_links } = await api('POST', `/api/roots/${encodeURIComponent(itemid)}/recompute_merged`, { market });
     alert(`Da gop xong ${total_links} link cua nhom ${itemid} - xem cot "Gop link" o tab San pham da cao.`);
   } catch (e) {
     alert('Loi: ' + e.message);
@@ -571,22 +641,32 @@ async function resetInsufficientAll() {
   }
 }
 
-async function resetRoot(itemid) {
+async function resetRoot(itemid, market) {
   if (!confirm(`Dua root ${itemid} ve 'pending' de giao lai? (cac san pham tuong tu da gom truoc do van giu nguyen, khong mat)`)) return;
   try {
-    await api('POST', `/api/roots/${encodeURIComponent(itemid)}/reset`);
+    await api('POST', `/api/roots/${encodeURIComponent(itemid)}/reset`, { market });
     loadRoots();
   } catch (e) {
     alert('Loi: ' + e.message);
   }
 }
 
-async function showMembers(groupid) {
-  const { members } = await api('GET', `/api/roots/${encodeURIComponent(groupid)}/members`);
+async function showMembers(groupid, market) {
+  const { members } = await api('GET', `/api/roots/${encodeURIComponent(groupid)}/members?market=${encodeURIComponent(market)}`);
   const box = document.getElementById('members-panel');
   box.innerHTML = `<div class="members-box"><b>Thanh vien nhom ${groupid} (${members.length}):</b><br>` +
     members.map(m => `${m.itemid} - sold=${m.sold} - aff7d=${m.affiliate_promoted_last_7days} - <a href="${m.product_link}" target="_blank">link</a>`).join('<br>') +
     '</div>';
+}
+
+function filterByGroup(groupid) {
+  document.getElementById('item-filter-groupid').value = groupid || '';
+  loadItems();
+}
+
+function clearGroupFilter() {
+  document.getElementById('item-filter-groupid').value = '';
+  loadItems();
 }
 
 async function loadItems() {
@@ -594,9 +674,11 @@ async function loadItems() {
   const linkType = document.getElementById('item-filter-linktype').value;
   const status = document.getElementById('item-filter-status').value;
   const search = document.getElementById('item-filter-search').value.trim();
+  const groupid = document.getElementById('item-filter-groupid').value.trim();
   if (linkType) params.set('link_type', linkType);
   if (status) params.set('status_link', status);
   if (search) params.set('search', search);
+  if (groupid) params.set('groupid', groupid);
   params.set('limit', '200');
   const { items } = await api('GET', '/api/items/list?' + params.toString());
   lastItemsList = items; // dung cho copyMergedLink() tra cuu lai gia tri day du, tranh phai nhoi chuoi dai (nhieu dau |, ") vao onclick inline
@@ -623,7 +705,7 @@ async function loadItems() {
       <td>${metricCell(it.seller_commission, commPasses)}</td>
       <td>${it.link_type || '-'}</td>
       <td>${it.status_link || '-'}</td>
-      <td>${it.groupid || '-'}</td>
+      <td>${it.groupid ? `<a href="#" onclick="filterByGroup('${it.groupid}'); return false;" title="Loc theo nhom nay">${it.groupid}</a>` : '-'}</td>
       <td>
         ${it.merged_link
           ? `<span class="ellipsis" style="max-width:160px;" title="${it.merged_link.replace(/"/g, '&quot;')}">${it.merged_link}</span>
@@ -632,17 +714,17 @@ async function loadItems() {
       </td>
       <td>
         <a href="${it.product_link || '#'}" target="_blank">link</a>
-        <button class="secondary" onclick="deleteItem('${it.itemid}')">Xoa</button>
+        <button class="secondary" onclick="deleteItem('${it.itemid}', '${it.market}')">Xoa</button>
       </td>
     </tr>
   `;
   }).join('') || '<tr><td colspan="10" class="muted">Khong co san pham nao khop bo loc.</td></tr>';
 }
 
-async function deleteItem(itemid) {
+async function deleteItem(itemid, market) {
   if (!confirm(`Xoa han item ${itemid} khoi DB?`)) return;
   try {
-    await api('DELETE', `/api/items/${encodeURIComponent(itemid)}`);
+    await api('DELETE', `/api/items/${encodeURIComponent(itemid)}?market=${encodeURIComponent(market)}`);
     loadItems();
   } catch (e) {
     alert('Loi: ' + e.message);
@@ -718,10 +800,35 @@ async function loadVideoStats() {
     <div>Da tao video: <b>${s.job_created}</b></div>
     <div>Con lai chua tao: <b>${s.eligible - s.job_created}</b></div>
   `;
+  loadVideoMarketStats();
+}
+
+async function loadVideoMarketStats() {
+  const { markets } = await api('GET', '/api/videos/stats_by_market');
+  const tbody = document.getElementById('video-market-stats-tbody');
+  tbody.innerHTML = markets.map(m => `
+    <tr>
+      <td>${m.market || '(chua ro)'}</td>
+      <td>${m.eligible}</td>
+      <td>${m.cache_uploaded}</td>
+      <td>${m.job_created}</td>
+      <td>${m.eligible - m.job_created}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="5" class="muted">Chua co link nao.</td></tr>';
+
+  const knownMarkets = markets.filter(m => m.market).map(m => ({ market: m.market, total: m.eligible }));
+  fillMarketSelectOptions(document.getElementById('video-market-sel'), knownMarkets, 'All markets');
 }
 
 function exportVideosXlsx() {
   window.location.href = '/api/videos/export.xlsx';
+}
+
+async function resetVideoJobs() {
+  if (!confirm('Dat lai trang thai toan bo link DA TAO VIDEO ve "cho tao video"? Se tao lai task moi cho lan chay sau.')) return;
+  const { reset } = await api('POST', '/api/videos/reset');
+  alert(`Da dat lai ${reset} link ve trang thai cho tao video.`);
+  loadVideoStats();
 }
 
 function videoLog(msg) {
@@ -733,19 +840,20 @@ async function runVideoPush() {
   if (videoRunning) return;
   const machineId = document.getElementById('video-machine-sel').value;
   if (!machineId) { alert('Chon 1 may tao video (dang Bat) truoc khi chay.'); return; }
+  const market = document.getElementById('video-market-sel').value;
   const target = Math.max(1, parseInt(document.getElementById('video-target').value, 10) || 200);
   videoRunning = true;
   videoStop = false;
   document.getElementById('video-start-btn').disabled = true;
   document.getElementById('video-stop-btn').disabled = false;
-  videoLog(`Bat dau - muc tieu ${target} video...`);
+  videoLog(`Bat dau - muc tieu ${target} video${market ? ` (market: ${market})` : ''}...`);
   let totalDone = 0, totalPushed = 0, totalCreated = 0, totalErrors = 0;
   try {
     while (!videoStop && totalDone < target) {
       const want = Math.min(200, target - totalDone);
       let data;
       try {
-        data = await api('POST', '/api/videos/push', { limit: want, machine_id: Number(machineId) });
+        data = await api('POST', '/api/videos/push', { limit: want, machine_id: Number(machineId), market: market || undefined });
       } catch (e) {
         videoLog('Loi: ' + e.message);
         break;
@@ -960,10 +1068,11 @@ async function clearMailAccounts() {
 
 async function refreshAll() {
   await loadAccounts(); // loadRoots can duoc du lieu tai khoan de ve select "Giao cho"
+  await loadRootMarketStats(); // dien options market truoc - loadSettings can de chon dung gia tri auto_assign_market
   await Promise.all([loadStats(), loadRoots(), loadSettings(), loadWorkers(), loadUserscripts()]);
 }
 refreshAll();
-setInterval(() => { loadStats(); loadRoots(); loadWorkers(); }, 5000);
+setInterval(() => { loadStats(); loadRoots(); loadWorkers(); loadRootMarketStats(); }, 5000);
 </script>
 </body>
 </html>

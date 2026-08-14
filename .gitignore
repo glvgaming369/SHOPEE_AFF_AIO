@@ -1,0 +1,56 @@
+# Claude Code local overrides (never commit — machine/user specific)
+CLAUDE.local.md
+settings.local.json
+.claude/settings.local.json
+
+# Dependencies
+node_modules/
+vendor/
+.venv/
+scripts/__pycache__/
+__pycache__/
+
+# Build output
+dist/
+build/
+out/
+*.pyc
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local SQLite DB (du lieu that - khong phai source, khong commit) - o CA thu muc goc LAN
+# scripts/artifacts (stray tu 1 lan chay server voi cwd sai, van la DB that, van phai chan).
+artifacts/db/
+scripts/artifacts/
+
+# Reference dump chua API key SMSPool/dongvanfb that + cookie/session Shopee/5sim that -
+# giu local de tham chieu, khong commit.
+check_phone_exist/
+5sim.txt/
+
+# Claude Code / tooling / test artifact cuc bo - khong phai source cua du an.
+.claude/
+.playwright-mcp/
+product_offer/
+url.txt
+
+# Script test/replay ca nhan - chua COOKIE/TOKEN dang nhap Shopee THAT hardcode san
+# (csrftoken/shopee_token/af-ac-enc-sz-token...) de debug API - TUYET DOI khong commit,
+# dac biet vi repo nay la PUBLIC.
+scripts/test_api_call.py
+scripts/test_post_create_replay.py
+scripts/test_search.py
+scripts/test_search_curlcffi.py

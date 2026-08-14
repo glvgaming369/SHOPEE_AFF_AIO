@@ -18,6 +18,31 @@ import sqlite3
 
 DB_PATH_DEFAULT = "artifacts/db/shopee.db"
 
+# Nguon chan ly DUY NHAT de suy market THAT tu domain cua 1 link Shopee - khop dung danh
+# sach domain trong @match cua shopee_collector.user.js. videoai_client.py tai dung ham
+# nay (import truc tiep) thay vi tu giu 1 ban regex hep rieng (truoc day chi co vn/sg/ph,
+# la nguyen nhan cot 'market' trong DB bi mac dinh sai cho MOI market khac).
+_MARKET_DOMAIN_RE = re.compile(
+    r"shopee\.(vn|ph|tw|sg|cl|co\.th|com\.my|co\.id|com\.br|com\.mx|com\.co)",
+    re.IGNORECASE,
+)
+_MARKET_CODE_BY_DOMAIN_SUFFIX = {
+    "vn": "vn", "ph": "ph", "tw": "tw", "sg": "sg", "cl": "cl",
+    "co.th": "th", "com.my": "my", "co.id": "id",
+    "com.br": "br", "com.mx": "mx", "com.co": "co",
+}
+
+
+def market_from_link(link):
+    """Suy market THAT tu domain cua link (vd shopee.co.th -> 'th'). Tra ve None neu
+    khong nhan dien duoc domain nao (KHONG con mac dinh 'vn' nhu code cu - do chinh la
+    nguyen nhan bug 'moi root deu bi ghi market=vn' du that ra tu PH/TH/MY)."""
+    m = _MARKET_DOMAIN_RE.search(str(link or ""))
+    if not m:
+        return None
+    return _MARKET_CODE_BY_DOMAIN_SUFFIX.get(m.group(1).lower())
+
+
 # Dung thu tu, dung ten cot voi D:\Shopee369\0-database\migrate\schema.sql (bang
 # products) + 1 cot moi affiliate_promoted_last_7days o cuoi.
 COLUMNS = [
@@ -102,14 +127,15 @@ create table if not exists workers (
     device_key text primary key,
     status text,
     current_root text,
-    last_heartbeat timestamp
+    last_heartbeat timestamp,
+    market text
 );
 """
 
 CREATE_TABLE_SQL = """
 create table if not exists products (
     id integer primary key autoincrement,
-    itemid text unique,
+    itemid text,
     shopid text,
     name text,
     price integer,
@@ -131,7 +157,7 @@ create table if not exists products (
     description text,
     status_link text default 'pending',
     created_at timestamp default current_timestamp,
-    market text default 'vn',
+    market text,
     category_group text,
     original_price integer,
     review_count integer,
@@ -141,7 +167,8 @@ create table if not exists products (
     cache_uploaded integer default 0,
     affiliate_promoted_last_7days integer,
     xtra integer,
-    fail_reason text
+    fail_reason text,
+    unique(market, itemid)
 );
 """
 
@@ -173,6 +200,45 @@ def init_db(db_path=DB_PATH_DEFAULT):
         conn.execute("update products set link_type = 'root' where link_type = 'L1'")
         conn.execute("update products set link_type = 'related' where link_type = 'L2'")
         conn.execute("PRAGMA user_version = 1")
+    # Migration itemid unique TOAN CUC -> unique(market, itemid): itemid Shopee duoc cap
+    # DOC LAP theo tung market, KHONG dam bao duy nhat toan cau - 2 san pham o 2 market
+    # khac nhau co the trung so itemid. SQLite khong cho ALTER constraint truc tiep nen
+    # phai dung lai bang moi (products_new) + copy du lieu qua. Nhan tien BACKFILL luon
+    # cot 'market' cho du lieu cu bang market_from_link(product_link) - truoc gio cot nay
+    # bi ghi sai hang loat thanh 'vn' (mac dinh cua schema cu) du du lieu that tu PH/TH/MY,
+    # vi khong insert path nao tung truyen market vao ca (xem videoai_client.py, module do
+    # phai tu suy lai market tu URL thay vi tin cot nay - chinh la bang chung bug nay
+    # thuc su ton tai chu khong phai ly thuyet). Doc theo 'order by id asc' de giu dung thu
+    # tu FIFO cu (claim_pending/claim_root/compute_merged_links deu dua vao thu tu id tang
+    # dan) - id moi se tu dong tang lai theo dung thu tu nay.
+    if conn.execute("PRAGMA user_version").fetchone()[0] < 2:
+        conn.row_factory = sqlite3.Row
+        existing_cols_old = {row[1] for row in conn.execute("pragma table_info(products)").fetchall()}
+        select_cols = [c for c in COLUMNS if c in existing_cols_old]
+        old_rows = conn.execute(
+            f"select {', '.join(select_cols)} from products order by id asc"
+        ).fetchall()
+        conn.row_factory = None
+
+        conn.execute("drop table if exists products_new")
+        conn.execute(
+            CREATE_TABLE_SQL.replace(
+                "create table if not exists products (",
+                "create table if not exists products_new (",
+            )
+        )
+        insert_cols_sql = ", ".join(COLUMNS)
+        placeholders = ", ".join("?" for _ in COLUMNS)
+        for old_row in old_rows:
+            r = {c: old_row[c] for c in select_cols}
+            r["market"] = market_from_link(r.get("product_link")) or r.get("market")
+            values = [r.get(c) for c in COLUMNS]
+            conn.execute(
+                f"insert into products_new ({insert_cols_sql}) values ({placeholders})", values
+            )
+        conn.execute("drop table products")
+        conn.execute("alter table products_new rename to products")
+        conn.execute("PRAGMA user_version = 2")
     # Cot 'xtra' them sau - DB cu (tao truoc khi co dong nay trong CREATE_TABLE_SQL) se
     # khong tu co cot, phai ALTER TABLE rieng. SQLite khong ho tro "ADD COLUMN IF NOT
     # EXISTS" nen phai tu kiem tra qua pragma table_info truoc.
@@ -208,9 +274,21 @@ def init_db(db_path=DB_PATH_DEFAULT):
         "create index if not exists idx_products_merged_link on products(merged_link) "
         "where merged_link is not null"
     )
+    # itemid khong con TU DONG co index rieng nhu truoc (truoc day 'unique' 1 cot tu tao
+    # index; gio unique la composite (market, itemid), khong tan dung duoc cho tra cuu CHI
+    # theo itemid nhu search LIKE trong fetch_all_items()/list_roots_with_counts()) - can
+    # index rieng.
+    conn.execute("create index if not exists idx_products_itemid on products(itemid)")
     conn.execute(CREATE_DEVICES_TABLE_SQL)
     conn.execute(CREATE_SETTINGS_TABLE_SQL)
     conn.execute(CREATE_WORKERS_TABLE_SQL)
+    # Cot 'market' them sau - DB cu (bang workers tao truoc khi co dong nay) can ALTER
+    # TABLE rieng, cung ly do nhu xtra/fail_reason o tren. Luu market cua CHINH tab
+    # Tampermonkey (suy tu hostname luc heartbeat) de dashboard biet tab nao dang phuc vu
+    # market nao - xem worker_heartbeat().
+    existing_workers_cols = {row[1] for row in conn.execute("pragma table_info(workers)").fetchall()}
+    if "market" not in existing_workers_cols:
+        conn.execute("alter table workers add column market text")
     # Cot 'auto_assign' them sau - DB cu (bang settings tao truoc khi co dong nay) can
     # ALTER TABLE rieng, cung ly do nhu xtra/fail_reason o tren.
     existing_settings_cols = {row[1] for row in conn.execute("pragma table_info(settings)").fetchall()}
@@ -218,6 +296,11 @@ def init_db(db_path=DB_PATH_DEFAULT):
         conn.execute("alter table settings add column auto_assign integer default 0")
     if "dongvanfb_api_key" not in existing_settings_cols:
         conn.execute("alter table settings add column dongvanfb_api_key text default ''")
+    # Cot 'auto_assign_market' them sau - gioi han auto_assign CHI ap dung cho 1 market cu
+    # the thay vi luon ca TAT CA market cung luc. Rong/NULL = tat ca market (hanh vi cu,
+    # tuong thich nguoc). Xem get_assigned_root_for_worker().
+    if "auto_assign_market" not in existing_settings_cols:
+        conn.execute("alter table settings add column auto_assign_market text default ''")
     conn.execute(CREATE_VIDEO_MACHINES_TABLE_SQL)
     conn.execute(CREATE_MAIL_ACCOUNTS_TABLE_SQL)
     # Cot 'slot' them sau - DB cu (tao truoc khi co dong nay trong
@@ -265,11 +348,15 @@ def get_settings(db_path=DB_PATH_DEFAULT):
 
 
 def update_settings(db_path=DB_PATH_DEFAULT, promoted_7d_max=None, sold_min=None,
-                     seller_commission_vnd_min=None, auto_assign=None, dongvanfb_api_key=None):
+                     seller_commission_vnd_min=None, auto_assign=None, dongvanfb_api_key=None,
+                     auto_assign_market=None):
     """Cap nhat MOT PHAN nguong loc (tham so None = giu nguyen gia tri cu). Tra ve settings
     day du sau khi cap nhat - dung cho endpoint POST /api/settings. dongvanfb_api_key dung
     chung cho tab "Tao tai khoan Shopee" (mua mail + lay code) - luu chung 1 dong settings
-    nay thay vi bang rieng vi chi co DUY NHAT 1 key toan cuc, khong nhieu nhu video_machines."""
+    nay thay vi bang rieng vi chi co DUY NHAT 1 key toan cuc, khong nhieu nhu video_machines.
+    auto_assign_market: '' (chuoi rong) nghia la NGUOI DUNG CHU DINH chon "Tat ca market" -
+    PHAI phan biet voi None (khong truyen = giu nguyen gia tri cu), nen dung is not None thay
+    vi truthy check nhu cac cot khac."""
     current = get_settings(db_path)
     new_vals = {
         "promoted_7d_max": promoted_7d_max if promoted_7d_max is not None else current["promoted_7d_max"],
@@ -280,14 +367,17 @@ def update_settings(db_path=DB_PATH_DEFAULT, promoted_7d_max=None, sold_min=None
             else current["seller_commission_vnd_min"]
         ),
         "auto_assign": int(bool(auto_assign)) if auto_assign is not None else current["auto_assign"],
+        "auto_assign_market": (
+            auto_assign_market if auto_assign_market is not None else current["auto_assign_market"]
+        ),
     }
     conn = _connect(db_path)
     try:
         conn.execute(
             "update settings set promoted_7d_max=?, sold_min=?, seller_commission_vnd_min=?, "
-            "auto_assign=?, dongvanfb_api_key=? where id=1",
+            "auto_assign=?, dongvanfb_api_key=?, auto_assign_market=? where id=1",
             (new_vals["promoted_7d_max"], new_vals["sold_min"], new_vals["seller_commission_vnd_min"],
-             new_vals["auto_assign"], new_vals["dongvanfb_api_key"]),
+             new_vals["auto_assign"], new_vals["dongvanfb_api_key"], new_vals["auto_assign_market"]),
         )
         conn.commit()
     finally:
@@ -295,14 +385,14 @@ def update_settings(db_path=DB_PATH_DEFAULT, promoted_7d_max=None, sold_min=None
     return get_settings(db_path)
 
 
-# --- Quan ly danh sach dien thoai (ten hien thi + serial ADB) - dung cho UI Streamlit
-# chon 1/nhieu/tat ca dien thoai de chay cung luc. serial la khoa that su dung lam
-# device_key cho claim_pending()/u2.connect() - name chi la nhan hien thi, khong anh
-# huong logic. ---
+# --- Quan ly danh sach 'accounts' (ten hien thi + duong dan Chrome profile) cho tab
+# "Tai khoan" cua dashboard - launch qua chrome_launcher.py (POST /api/accounts/<name>/launch).
+# Cot 'serial' la ten lich su (tung dung cho serial ADB thoi con u2/AutoX), hien tai luu
+# duong dan THU MUC PROFILE Chrome day du - khong con lien quan thiet bi that. ---
 
 def add_device(db_path, name, serial):
-    """Them 1 dien thoai moi, hoac DOI TEN neu serial da ton tai (ON CONFLICT tren
-    cot 'serial' - unique)."""
+    """Them 1 account moi, hoac DOI TEN neu profile path (cot 'serial') da ton tai
+    (ON CONFLICT tren cot 'serial' - unique)."""
     conn = _connect(db_path)
     try:
         conn.execute(
@@ -316,7 +406,7 @@ def add_device(db_path, name, serial):
 
 
 def list_devices(db_path):
-    """Danh sach dien thoai da dang ky, sap theo ten."""
+    """Danh sach account (Chrome profile) da dang ky, sap theo ten."""
     conn = _connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
@@ -327,8 +417,9 @@ def list_devices(db_path):
 
 
 def remove_device(db_path, serial):
-    """Xoa 1 dien thoai khoi danh sach dang ky (KHONG anh huong toi cac dong 'products'
-    da claim boi serial nay truoc do - assigned_key la du lieu lich su, van giu nguyen)."""
+    """Xoa 1 account khoi danh sach dang ky (KHONG anh huong toi cac dong 'products'
+    da claim boi 'serial' (profile path) nay truoc do - assigned_key la du lieu lich su,
+    van giu nguyen)."""
     conn = _connect(db_path)
     try:
         conn.execute("delete from devices where serial = ?", (serial,))
@@ -337,23 +428,35 @@ def remove_device(db_path, serial):
         conn.close()
 
 
-def item_exists(db_path, itemid):
+def item_exists(db_path, itemid, market=None):
+    """market=None: kiem tra itemid nay ton tai o BAT KY market nao (dung cho cac cho
+    chi can biet 'da tung thay itemid nay chua', khong quan tam market nao)."""
     conn = _connect(db_path)
     try:
-        row = conn.execute("select 1 from products where itemid = ?", (str(itemid),)).fetchone()
+        if market is not None:
+            row = conn.execute(
+                "select 1 from products where itemid = ? and market = ?", (str(itemid), market)
+            ).fetchone()
+        else:
+            row = conn.execute("select 1 from products where itemid = ?", (str(itemid),)).fetchone()
         return row is not None
     finally:
         conn.close()
 
 
-def delete_item(db_path, itemid):
+def delete_item(db_path, itemid, market):
     """Xoa 1 dong bat ky (root hoac related) - dung cho tab quan ly san pham tren UI khi
     nguoi dung muon bo 1 item cu the (vd nham/khong con phu hop) ra khoi DB. Neu xoa 1
     ROOT thi cac 'related' cua no (groupid=itemid) VAN GIU NGUYEN (khong cascade) - tranh
-    xoa nham hang loat, nguoi dung tu xoa them neu thuc su muon don sach ca nhom."""
+    xoa nham hang loat, nguoi dung tu xoa them neu thuc su muon don sach ca nhom.
+
+    market BAT BUOC - itemid khong con la khoa duy nhat toan cuc (2 market co the trung
+    so itemid), thieu market se co nguy co xoa NHAM dong cua market khac."""
     conn = _connect(db_path)
     try:
-        cur = conn.execute("delete from products where itemid=?", (str(itemid),))
+        cur = conn.execute(
+            "delete from products where itemid=? and market=?", (str(itemid), market)
+        )
         conn.commit()
         return cur.rowcount > 0
     finally:
@@ -386,14 +489,20 @@ def _parse_money_amount(text):
     return int(digits) if digits else None
 
 
-def map_v2_data_to_row(data, link_type=None, groupid=None, status_link="pending", market="vn"):
+def map_v2_data_to_row(data, link_type=None, groupid=None, status_link="pending", market=None):
     """Map tu response_json['data'] cua API offer/product_v2 sang dict dung ten cot
     trong bang 'products'. link_type ('root'/'related') va groupid (itemid cua root lien
     quan) KHONG the suy ra tu chinh du lieu cua item - nguoi goi phai tu truyen vao.
 
+    market=None: TU SUY tu data['product_link'] qua market_from_link() (an toan mac dinh -
+    hau het noi goi ham nay deu co san product_link that trong response). Truyen market
+    tuong minh khi noi goi da biet chac (vd ke thua tu root cua nhom).
+
     Vai cot chua ro ngu nghia/don vi thuc te ben du an 0-database (merged_link,
     category_group, don vi price) - de None/best-effort thay vi doan bua, ghi chu ro
     de dieu chinh sau khi doi chieu voi 1-cao."""
+    if market is None:
+        market = market_from_link(data.get("product_link"))
     batch = data.get("batch_item_for_item_card_full") or {}
     commission_rate = data.get("commission_rate") or {}
     item_rating = batch.get("item_rating") or {}
@@ -439,7 +548,7 @@ def map_v2_data_to_row(data, link_type=None, groupid=None, status_link="pending"
 
 
 def upsert_item(db_path, row: dict):
-    """INSERT OR REPLACE 1 dong vao bang products theo itemid (unique)."""
+    """INSERT OR REPLACE 1 dong vao bang products theo (market, itemid) (unique)."""
     conn = _connect(db_path)
     try:
         cols = [c for c in COLUMNS if c in row]
@@ -448,8 +557,8 @@ def upsert_item(db_path, row: dict):
         values = [row[c] for c in cols]
         conn.execute(
             f"insert into products ({col_list}) values ({placeholders}) "
-            f"on conflict(itemid) do update set "
-            + ", ".join(f"{c}=excluded.{c}" for c in cols if c != "itemid"),
+            f"on conflict(market, itemid) do update set "
+            + ", ".join(f"{c}=excluded.{c}" for c in cols if c not in ("itemid", "market")),
             values,
         )
         conn.commit()
@@ -479,24 +588,35 @@ def count_items(db_path=DB_PATH_DEFAULT):
         conn.close()
 
 
-def get_item(db_path=DB_PATH_DEFAULT, itemid=None):
+def get_item(db_path=DB_PATH_DEFAULT, itemid=None, market=None):
     """Lay dung 1 dong theo itemid (khop chinh xac, khong phai LIKE nhu fetch_all_items) -
-    dung de kiem tra trang thai 1 item NGAY sau khi cao/cham diem xong."""
+    dung de kiem tra trang thai 1 item NGAY sau khi cao/cham diem xong. market=None: khop
+    BAT KY market nao (co the tra ve 1 trong nhieu dong trung itemid o cac market khac
+    nhau - truyen market khi da biet chac de tranh mo ho)."""
     conn = _connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
-        row = conn.execute("select * from products where itemid = ?", (str(itemid),)).fetchone()
+        if market is not None:
+            row = conn.execute(
+                "select * from products where itemid = ? and market = ?", (str(itemid), market)
+            ).fetchone()
+        else:
+            row = conn.execute("select * from products where itemid = ?", (str(itemid),)).fetchone()
         return dict(row) if row else None
     finally:
         conn.close()
 
 
-def fetch_all_items(db_path=DB_PATH_DEFAULT, link_type=None, status_link=None, search=None, limit=500):
+def fetch_all_items(db_path=DB_PATH_DEFAULT, link_type=None, status_link=None, search=None,
+                     groupid=None, limit=500):
     """Doc lai danh sach item da luu trong DB - dung cho tab 'Xem DB' cua Streamlit UI.
     link_type: loc theo 'root'/'related' (None/'' = tat ca). status_link: loc theo
     'pending'/'done'/'fail' (None/'' = tat ca). search: loc itemid/name/shop_name co chua
-    chuoi nay (khong phan biet hoa thuong). Dung tham so hoa (?) cho ca gia tri loc lan
-    LIMIT - khong noi chuoi nguoi dung truc tiep vao cau SQL (tranh SQL injection)."""
+    chuoi nay (khong phan biet hoa thuong). groupid: loc DUNG 1 nhom (khop chinh xac,
+    khong phai LIKE - groupid la khoa nhom, khong can tim gan dung) - dung cho tab 'San
+    pham da cao' khi nguoi dung muon xem het thanh vien cua 1 nhom cu the. Dung tham so hoa
+    (?) cho ca gia tri loc lan LIMIT - khong noi chuoi nguoi dung truc tiep vao cau SQL
+    (tranh SQL injection)."""
     conn = _connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
@@ -508,6 +628,9 @@ def fetch_all_items(db_path=DB_PATH_DEFAULT, link_type=None, status_link=None, s
         if status_link:
             where.append("status_link = ?")
             params.append(status_link)
+        if groupid:
+            where.append("groupid = ?")
+            params.append(str(groupid))
         if search:
             where.append("(itemid LIKE ? OR name LIKE ? OR shop_name LIKE ?)")
             like = f"%{search}%"
@@ -532,42 +655,6 @@ def fetch_all_items(db_path=DB_PATH_DEFAULT, link_type=None, status_link=None, s
 # IS NOT NULL lam tin hieu "da cao xong" (khong them cot moi), con status_link chi phan
 # anh KET QUA CHAM DIEM theo nguong HIEN TAI (tinh lai duoc bat ky luc nao qua
 # reclassify_status(), khong can cao lai thiet bi neu doi nguong sau nay). ---
-
-def import_links_as_pending(db_path, links, link_type="root", extract_item_id=None):
-    """Nap 1 danh sach link vao DB lam hang doi 'pending' - itemid da co san (bat ke
-    trang thai gi) thi BO QUA (INSERT OR IGNORE), khong ghi de tien do cu. link_type='root'
-    thi tu gan groupid=itemid (root tu nhom voi chinh no). extract_item_id: ham tach itemid
-    tu link (mac dinh dung u2_affiliate_offer_flow.extract_item_id_from_link qua lazy
-    import - tranh import vong vi module do lai import shopee_db)."""
-    if extract_item_id is None:
-        import u2_affiliate_offer_flow as flow
-        extract_item_id = flow.extract_item_id_from_link
-
-    conn = _connect(db_path)
-    try:
-        inserted = 0
-        already_existed = 0
-        invalid = 0
-        for link in links:
-            itemid = extract_item_id(link)
-            if not itemid:
-                invalid += 1
-                continue
-            groupid = str(itemid) if link_type == "root" else None
-            cur = conn.execute(
-                "insert or ignore into products (itemid, product_link, link_type, groupid, status_link) "
-                "values (?, ?, ?, ?, 'pending')",
-                (str(itemid), link, link_type, groupid),
-            )
-            if cur.rowcount:
-                inserted += 1
-            else:
-                already_existed += 1
-        conn.commit()
-        return {"inserted": inserted, "already_existed": already_existed, "invalid": invalid}
-    finally:
-        conn.close()
-
 
 def insert_related_as_pending(db_path, groupid, related_items):
     """Nap cac ung vien 'San pham tuong tu' (tu offer_product_list_combined.list, DA CO
@@ -606,11 +693,12 @@ def mark_no_affiliate(db_path, itemid, link_type=None, groupid=None, product_lin
     GIO thu lai item nay nua o cac lan chay sau - tranh lang phi vong lap vo ich."""
     conn = _connect(db_path)
     try:
+        market = market_from_link(product_link)
         conn.execute(
-            "insert into products (itemid, product_link, link_type, groupid, status_link, xtra, fail_reason) "
-            "values (?, ?, ?, ?, 'fail', 0, 'no_affiliate') "
-            "on conflict(itemid) do update set status_link = 'fail', xtra = 0, fail_reason = 'no_affiliate'",
-            (str(itemid), product_link, link_type, str(groupid) if groupid else None),
+            "insert into products (itemid, product_link, link_type, groupid, status_link, xtra, fail_reason, market) "
+            "values (?, ?, ?, ?, 'fail', 0, 'no_affiliate', ?) "
+            "on conflict(market, itemid) do update set status_link = 'fail', xtra = 0, fail_reason = 'no_affiliate'",
+            (str(itemid), product_link, link_type, str(groupid) if groupid else None, market),
         )
         conn.commit()
     finally:
@@ -626,18 +714,19 @@ def mark_product_not_found(db_path, itemid, link_type=None, groupid=None, produc
     BAO GIO thu lai item nay nua."""
     conn = _connect(db_path)
     try:
+        market = market_from_link(product_link)
         conn.execute(
-            "insert into products (itemid, product_link, link_type, groupid, status_link, fail_reason) "
-            "values (?, ?, ?, ?, 'fail', 'not_found') "
-            "on conflict(itemid) do update set status_link = 'fail', fail_reason = 'not_found'",
-            (str(itemid), product_link, link_type, str(groupid) if groupid else None),
+            "insert into products (itemid, product_link, link_type, groupid, status_link, fail_reason, market) "
+            "values (?, ?, ?, ?, 'fail', 'not_found', ?) "
+            "on conflict(market, itemid) do update set status_link = 'fail', fail_reason = 'not_found'",
+            (str(itemid), product_link, link_type, str(groupid) if groupid else None, market),
         )
         conn.commit()
     finally:
         conn.close()
 
 
-def claim_pending(db_path, device_key, limit=1, lease_seconds=1800, sold_min=None, groupid=None):
+def claim_pending(db_path, device_key, market, limit=1, lease_seconds=1800, sold_min=None, groupid=None):
     """Claim NGUYEN TU (BEGIN IMMEDIATE - khoa ghi ca file DB trong luc chon+danh dau,
     tranh 2 tien trinh/thiet bi cung tro vao 1 file SQLite gianh trung dong) toi da
     `limit` dong 'pending' CHUA CAO DU LIEU (affiliate_promoted_last_7days is null) va
@@ -657,18 +746,20 @@ def claim_pending(db_path, device_key, limit=1, lease_seconds=1800, sold_min=Non
     tram root khac dang cho trong hang doi FIFO chung (order by id asc - related moi nap
     luon co id lon hon, tu nhien xep sau het backlog root cu neu khong loc theo groupid).
     Tra ve danh sach dong day du (dict) VUA duoc claim (assigned_key da la device_key
-    nay)."""
+    nay). market BAT BUOC - itemid khong con la khoa duy nhat toan cuc, thieu market co
+    the claim/tra ve NHAM dong cua market khac trung so itemid."""
     conn = _connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
         conn.execute("BEGIN IMMEDIATE")
         where = [
             "status_link = 'pending'",
+            "market = ?",
             "affiliate_promoted_last_7days is null",
             "(assigned_key is null or claimed_at is null "
             "or claimed_at < datetime('now', ?))",
         ]
-        params = [f"-{lease_seconds} seconds"]
+        params = [market, f"-{lease_seconds} seconds"]
         if sold_min is not None:
             where.append("(link_type = 'root' or (sold is not null and sold > ?))")
             params.append(sold_min)
@@ -684,11 +775,12 @@ def claim_pending(db_path, device_key, limit=1, lease_seconds=1800, sold_min=Non
             placeholders = ",".join("?" for _ in ids)
             conn.execute(
                 f"update products set assigned_key = ?, claimed_at = current_timestamp "
-                f"where itemid in ({placeholders})",
-                [device_key] + ids,
+                f"where market = ? and itemid in ({placeholders})",
+                [device_key, market] + ids,
             )
             claimed = conn.execute(
-                f"select * from products where itemid in ({placeholders})", ids
+                f"select * from products where market = ? and itemid in ({placeholders})",
+                [market] + ids,
             ).fetchall()
         else:
             claimed = []
@@ -708,26 +800,28 @@ def find_stale_related_groups(db_path):
     quen vinh vien sau khi root cua no da xu ly xong o 1 lan chay truoc."""
     conn = _connect(db_path)
     try:
+        conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "select distinct p.groupid from products p "
-            "join products root on root.itemid = p.groupid "
+            "select distinct p.groupid, p.market from products p "
+            "join products root on root.itemid = p.groupid and root.market = p.market "
             "where p.link_type = 'related' and p.status_link = 'pending' "
             "and root.status_link != 'pending'"
         ).fetchall()
-        return [r[0] for r in rows]
+        return [{"groupid": r["groupid"], "market": r["market"]} for r in rows]
     finally:
         conn.close()
 
 
-def release_claim(db_path, itemid):
+def release_claim(db_path, itemid, market):
     """Xoa assigned_key/claimed_at cho 1 item (goi sau khi xu ly xong, du thanh cong hay
     loi ky thuat) - de item van con 'pending' kha dung NGAY cho thiet bi khac, khong can
-    doi het lease_seconds."""
+    doi het lease_seconds. market BAT BUOC - itemid khong con la khoa duy nhat toan cuc."""
     conn = _connect(db_path)
     try:
         conn.execute(
-            "update products set assigned_key = null, claimed_at = null where itemid = ?",
-            (str(itemid),),
+            "update products set assigned_key = null, claimed_at = null "
+            "where itemid = ? and market = ?",
+            (str(itemid), market),
         )
         conn.commit()
     finally:
@@ -753,12 +847,16 @@ def release_claims_for_device(db_path, device_key):
 # LOGIC GROUP MOI (updatelogic.txt): 1 root -> group du 'target' san pham dat chi tieu.
 # Chi ROOT co status 'pending' + claim da thiet bi. San pham tuong tu khi vao DB da mang
 # status 'member' (da gan group, dat chi tieu) hoac 'cached' (da cao product_v2, chua gan /
-# de tai dung metrics tranh goi lai). Unique TOAN CUC: 1 itemid chi thuoc 1 group.
+# de tai dung metrics tranh goi lai). Unique THEO MARKET: 1 cap (market, itemid) chi thuoc
+# 1 group - itemid TRAN khong con la khoa duy nhat (2 market khac nhau co the trung so).
 # =====================================================================================
 
 def import_roots_as_pending(db_path, links):
-    """Nap link root -> insert link_type='root', status='pending', groupid=itemid. Bo qua
-    itemid da ton tai (insert or ignore). Tra ve so root MOI them."""
+    """Nap link root -> insert link_type='root', status='pending', groupid=itemid, market
+    suy tu domain cua chinh link (market_from_link). Bo qua (market, itemid) da ton tai
+    (insert or ignore) - 2 link cung itemid nhung KHAC market (vd shopee.ph vs shopee.co.th)
+    van duoc luu thanh 2 dong rieng biet, khong con bi de len nhau nhu truoc. Tra ve so root
+    MOI them."""
     conn = _connect(db_path)
     try:
         added = 0
@@ -767,10 +865,11 @@ def import_roots_as_pending(db_path, links):
             if not m:
                 continue
             itemid = m.group(1)
+            market = market_from_link(link)
             cur = conn.execute(
-                "insert or ignore into products (itemid, product_link, link_type, groupid, status_link) "
-                "values (?, ?, 'root', ?, 'pending')",
-                (itemid, link, itemid),
+                "insert or ignore into products (itemid, product_link, link_type, groupid, status_link, market) "
+                "values (?, ?, 'root', ?, 'pending', ?)",
+                (itemid, link, itemid, market),
             )
             added += cur.rowcount
         conn.commit()
@@ -779,25 +878,28 @@ def import_roots_as_pending(db_path, links):
         conn.close()
 
 
-def claim_root(db_path, device_key, lease_seconds=1800):
-    """Claim NGUYEN TU (BEGIN IMMEDIATE) 1 root 'pending' chua bi thiet bi khac giu (hoac
-    lease het). Tra ve dict dong root, hoac None neu het root."""
+def claim_root(db_path, device_key, market, lease_seconds=1800):
+    """Claim NGUYEN TU (BEGIN IMMEDIATE) 1 root 'pending' DUNG market nay, chua bi thiet
+    bi khac giu (hoac lease het). Tra ve dict dong root, hoac None neu het root. market BAT
+    BUOC - 1 tab Tampermonkey chi goi duoc API that cua DUNG market no dang mo (location.origin),
+    giao nham root market khac se lam tab do that bai het cac request that (va lam root
+    bi bo do oan uong vi 'fail')."""
     conn = _connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
-            "select * from products where link_type='root' and status_link='pending' "
+            "select * from products where link_type='root' and status_link='pending' and market=? "
             "and (assigned_key is null or claimed_at is null or claimed_at < datetime('now', ?)) "
             "order by id asc limit 1",
-            (f"-{lease_seconds} seconds",),
+            (market, f"-{lease_seconds} seconds"),
         ).fetchone()
         if row is None:
             conn.commit()
             return None
         conn.execute(
-            "update products set assigned_key=?, claimed_at=current_timestamp where itemid=?",
-            (device_key, row["itemid"]),
+            "update products set assigned_key=?, claimed_at=current_timestamp where itemid=? and market=?",
+            (device_key, row["itemid"], market),
         )
         conn.commit()
         return dict(row)
@@ -805,18 +907,21 @@ def claim_root(db_path, device_key, lease_seconds=1800):
         conn.close()
 
 
-def assign_root_to_worker(db_path, itemid, device_key):
+def assign_root_to_worker(db_path, itemid, device_key, market):
     """Giao THU CONG 1 root cu the cho 1 device_key cu the (dashboard chon tay) - dung lai
     dung 2 cot assigned_key/claimed_at nhu claim_root() (root van la 1 hang doi, chi khac
     AI duoc quyen chon: nguoi dung tren dashboard, khong phai tab tu claim). NGUYEN TU:
     tu choi neu root khong ton tai/khong phai 'pending', hoac dang bi device KHAC giu (va
-    lease chua het). Tra ve {"ok": True, "root": {...}} hoac {"ok": False, "error": "..."}."""
+    lease chua het). market BAT BUOC - itemid khong con la khoa duy nhat toan cuc (dashboard
+    da co san market tu dong duoc chon trong danh sach root, xem list_roots_with_counts()).
+    Tra ve {"ok": True, "root": {...}} hoac {"ok": False, "error": "..."}."""
     conn = _connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
-            "select * from products where itemid=? and link_type='root'", (str(itemid),)
+            "select * from products where itemid=? and market=? and link_type='root'",
+            (str(itemid), market),
         ).fetchone()
         if row is None:
             conn.commit()
@@ -828,55 +933,66 @@ def assign_root_to_worker(db_path, itemid, device_key):
             conn.commit()
             return {"ok": False, "error": f"root dang duoc giao cho '{row['assigned_key']}' roi"}
         conn.execute(
-            "update products set assigned_key=?, claimed_at=current_timestamp where itemid=?",
-            (device_key, str(itemid)),
+            "update products set assigned_key=?, claimed_at=current_timestamp where itemid=? and market=?",
+            (device_key, str(itemid), market),
         )
         conn.commit()
-        updated = conn.execute("select * from products where itemid=?", (str(itemid),)).fetchone()
+        updated = conn.execute(
+            "select * from products where itemid=? and market=?", (str(itemid), market)
+        ).fetchone()
         return {"ok": True, "root": dict(updated)}
     finally:
         conn.close()
 
 
-def get_assigned_root_for_worker(db_path, device_key):
+def get_assigned_root_for_worker(db_path, device_key, market):
     """Root (neu co) dang duoc giao cho dung device_key nay va van con 'pending' - worker
-    (Tampermonkey) goi lien tuc de biet co viec moi hay chua.
+    (Tampermonkey) goi lien tuc de biet co viec moi hay chua. market BAT BUOC (tab nay chi
+    goi duoc API that cua dung market no dang mo).
 
     Neu chua co gi duoc giao THU CONG va setting 'auto_assign' dang bat: tu dong lay 1
     root 'pending' con trong (chua ai giu) giao luon cho worker nay, tai dung nguyen
     claim_root() (van la cung 1 co che nguyen tu/lease, chi khac la duoc goi tu day thay
     vi worker tu goi truc tiep nhu truoc). Nho vay nguoi dung KHONG can tu bam "Giao viec"
-    tung root mot khi bat che do nay - worker ranh se tu nhan viec o lan poll ke tiep."""
+    tung root mot khi bat che do nay - worker ranh se tu nhan viec o lan poll ke tiep.
+
+    'auto_assign_market' (rong = tat ca market) gioi han auto-claim CHI ap dung cho 1
+    market cu the - worker o market khac se KHONG tu nhan viec (van co the duoc giao thu
+    cong qua assign_root_to_worker()). Dung de nguoi dung chi muon chay tu dong 1 thi
+    truong tai 1 thoi diem (vd dang tap trung PH, chua muon TH tu dong chay theo)."""
     conn = _connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             "select * from products where link_type='root' and status_link='pending' "
-            "and assigned_key=? order by claimed_at asc limit 1",
-            (device_key,),
+            "and assigned_key=? and market=? order by claimed_at asc limit 1",
+            (device_key, market),
         ).fetchone()
         if row:
             return dict(row)
     finally:
         conn.close()
 
-    if get_settings(db_path)["auto_assign"]:
-        return claim_root(db_path, device_key)
+    settings = get_settings(db_path)
+    auto_assign_market = settings.get("auto_assign_market") or ""
+    if settings["auto_assign"] and (not auto_assign_market or auto_assign_market == market):
+        return claim_root(db_path, device_key, market)
     return None
 
 
-def worker_heartbeat(db_path, device_key, status, current_root=None):
+def worker_heartbeat(db_path, device_key, status, current_root=None, market=None):
     """Upsert trang thai 'song' cua 1 tab Tampermonkey - CHI de dashboard hien thi
-    (idle/working/blocked + root dang lam), khong dung de gan viec (xem
-    assign_root_to_worker())."""
+    (idle/working/blocked + root dang lam + market dang phuc vu), khong dung de gan viec
+    (xem assign_root_to_worker())."""
     conn = _connect(db_path)
     try:
         conn.execute(
-            "insert into workers (device_key, status, current_root, last_heartbeat) "
-            "values (?, ?, ?, current_timestamp) "
+            "insert into workers (device_key, status, current_root, last_heartbeat, market) "
+            "values (?, ?, ?, current_timestamp, ?) "
             "on conflict(device_key) do update set status=excluded.status, "
-            "current_root=excluded.current_root, last_heartbeat=excluded.last_heartbeat",
-            (device_key, status, current_root),
+            "current_root=excluded.current_root, last_heartbeat=excluded.last_heartbeat, "
+            "market=excluded.market",
+            (device_key, status, current_root, market),
         )
         conn.commit()
     finally:
@@ -954,7 +1070,12 @@ def try_assign_verified(db_path, row: dict, groupid, promoted_7d_max=None, sold_
 
     Tra ve dict {"outcome": "assigned"|"already_member"|"claimed_by_other"|"failed_criteria",
     "group_member_count": int} - group_member_count chi co gia tri khi outcome="assigned"
-    hoac "already_member" (dung de vong lap BFS phia goi biet khi nao dat 60 ma dung)."""
+    hoac "already_member" (dung de vong lap BFS phia goi biet khi nao dat 60 ma dung).
+
+    market luon lay tu row["market"] (da duoc map_v2_data_to_row() tu suy tu product_link) -
+    moi tra cuu/khoa itemid ben duoi deu KEM market de tranh dung nham dong cua market
+    khac trung so itemid (xem CREATE_TABLE_SQL: unique la (market, itemid), khong con la
+    itemid don le)."""
     import select_l1_l2_candidates as l1l2
     if promoted_7d_max is None or sold_min is None or seller_commission_vnd_min is None:
         _settings = get_settings(db_path)
@@ -966,6 +1087,7 @@ def try_assign_verified(db_path, row: dict, groupid, promoted_7d_max=None, sold_
             seller_commission_vnd_min = _settings["seller_commission_vnd_min"]
 
     itemid = str(row["itemid"])
+    market = row["market"]
     groupid = str(groupid)
     metrics = l1l2._row_metrics(row)
     passes = l1l2.passes_criteria(metrics, promoted_7d_max, sold_min, seller_commission_vnd_min)
@@ -975,7 +1097,8 @@ def try_assign_verified(db_path, row: dict, groupid, promoted_7d_max=None, sold_
         conn.row_factory = sqlite3.Row
         conn.execute("BEGIN IMMEDIATE")
         ex = conn.execute(
-            "select status_link, groupid, link_type from products where itemid=?", (itemid,)
+            "select status_link, groupid, link_type from products where itemid=? and market=?",
+            (itemid, market),
         ).fetchone()
 
         if not passes:
@@ -993,8 +1116,8 @@ def try_assign_verified(db_path, row: dict, groupid, promoted_7d_max=None, sold_
                 r.update(link_type="related", groupid=None, status_link="cached")
                 setcols = [c for c in COLUMNS if c in r and c != "itemid"]
                 conn.execute(
-                    f"update products set {', '.join(f'{c}=?' for c in setcols)} where itemid=?",
-                    [r[c] for c in setcols] + [itemid],
+                    f"update products set {', '.join(f'{c}=?' for c in setcols)} where itemid=? and market=?",
+                    [r[c] for c in setcols] + [itemid, market],
                 )
             conn.commit()
             return {"outcome": "failed_criteria", "group_member_count": None}
@@ -1008,7 +1131,7 @@ def try_assign_verified(db_path, row: dict, groupid, promoted_7d_max=None, sold_
                 [r[c] for c in cols],
             )
             conn.commit()
-            count = count_group_members(db_path, groupid)
+            count = count_group_members(db_path, groupid, market)
             return {"outcome": "assigned", "group_member_count": count}
 
         status, gid, lt = ex["status_link"], ex["groupid"], ex["link_type"]
@@ -1018,7 +1141,10 @@ def try_assign_verified(db_path, row: dict, groupid, promoted_7d_max=None, sold_
         if status == "member":
             conn.commit()
             if gid == groupid:
-                return {"outcome": "already_member", "group_member_count": count_group_members(db_path, groupid)}
+                return {
+                    "outcome": "already_member",
+                    "group_member_count": count_group_members(db_path, groupid, market),
+                }
             return {"outcome": "claimed_by_other", "group_member_count": None}
         if gid is not None and gid != groupid:
             # 'pending'/'cached' nhung da bi nhom khac seed/giu truoc
@@ -1029,28 +1155,37 @@ def try_assign_verified(db_path, row: dict, groupid, promoted_7d_max=None, sold_
         r.update(link_type="related", groupid=groupid, status_link="member")
         setcols = [c for c in COLUMNS if c in r and c != "itemid"]
         conn.execute(
-            f"update products set {', '.join(f'{c}=?' for c in setcols)} where itemid=?",
-            [r[c] for c in setcols] + [itemid],
+            f"update products set {', '.join(f'{c}=?' for c in setcols)} where itemid=? and market=?",
+            [r[c] for c in setcols] + [itemid, market],
         )
         conn.commit()
-        count = count_group_members(db_path, groupid)
+        count = count_group_members(db_path, groupid, market)
         return {"outcome": "assigned", "group_member_count": count}
     finally:
         conn.close()
 
 
-def seed_and_claim_candidates(db_path, groupid, related_items):
+def seed_and_claim_candidates(db_path, groupid, related_items, market=None):
     """Nhu insert_related_as_pending() nhung ATOMIC + tra ve DUNG cac item_id ma NHOM NAY
     dang thuc su giu quyen (moi them lan nay, hoac da la cua nhom nay tu seed truoc do) -
     dung cho BFS song song (nhieu Chrome profile/root cung luc): item da bi nhom KHAC
     seed truoc se KHONG co trong ket qua tra ve, phia goi biet ngay khong can xep vao
     hang doi cua minh nua (khoi ton 1 request that toi Shopee roi bi tu choi o
-    try_assign_verified())."""
+    try_assign_verified()).
+
+    market=None: tu suy tu market cua CHINH root (groupid=itemid cua root) - san pham
+    tuong tu Shopee tra ve luon CUNG market voi root dang xem, nen day la nguon dang tin
+    cay nhat (khong phu thuoc domain cua tung product_link rieng le co the thieu/le)."""
     groupid = str(groupid)
     conn = _connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
         conn.execute("BEGIN IMMEDIATE")
+        if market is None:
+            root = conn.execute(
+                "select market from products where itemid=? and link_type='root'", (groupid,)
+            ).fetchone()
+            market = root["market"] if root else None
         claimed = []
         for item in related_items:
             itemid = item.get("item_id")
@@ -1059,12 +1194,14 @@ def seed_and_claim_candidates(db_path, groupid, related_items):
                 continue
             itemid = str(itemid)
             sold = (item.get("batch_item_for_item_card_full") or {}).get("sold")
-            ex = conn.execute("select groupid from products where itemid=?", (itemid,)).fetchone()
+            ex = conn.execute(
+                "select groupid from products where itemid=? and market=?", (itemid, market)
+            ).fetchone()
             if ex is None:
                 conn.execute(
-                    "insert into products (itemid, product_link, sold, link_type, groupid, status_link) "
-                    "values (?, ?, ?, 'related', ?, 'pending')",
-                    (itemid, link, sold, groupid),
+                    "insert into products (itemid, product_link, sold, link_type, groupid, status_link, market) "
+                    "values (?, ?, ?, 'related', ?, 'pending', ?)",
+                    (itemid, link, sold, groupid, market),
                 )
                 claimed.append(itemid)
             elif ex["groupid"] == groupid:
@@ -1097,6 +1234,7 @@ def verify_root(db_path, offer_data, promoted_7d_max=None, sold_min=None,
 
     row = map_v2_data_to_row(offer_data, link_type="root", groupid=str(offer_data.get("item_id") or ""))
     itemid = row["itemid"]
+    market = row["market"]
     if not itemid:
         raise ValueError("offer_data khong co item_id hop le")
     metric_cols = [
@@ -1108,8 +1246,9 @@ def verify_root(db_path, offer_data, promoted_7d_max=None, sold_min=None,
     conn = _connect(db_path)
     try:
         conn.execute(
-            f"update products set {', '.join(f'{c}=?' for c in metric_cols)} where itemid=?",
-            [row[c] for c in metric_cols] + [itemid],
+            f"update products set {', '.join(f'{c}=?' for c in metric_cols)} "
+            f"where itemid=? and market=?",
+            [row[c] for c in metric_cols] + [itemid, market],
         )
         conn.commit()
     finally:
@@ -1120,21 +1259,31 @@ def verify_root(db_path, offer_data, promoted_7d_max=None, sold_min=None,
     return {"passes": passes, "metrics": metrics}
 
 
-def filter_new_itemids(db_path, itemids):
-    """Loc ra cac itemid CHUA TUNG xuat hien trong DB (bat ky trang thai/nhom nao) - dung
-    cho vong lap BFS phia Tampermonkey de bo qua ngay cac candidate da biet (da la
-    root/member/pending/cached cua bat ky nhom nao), tranh xep vao hang doi roi lai bi
-    tu choi o try_assign_verified() (do da bi nhom khac giu) - kiem tra som, tiet kiem
-    request that toi Shopee."""
+def filter_new_itemids(db_path, itemids, market=None):
+    """Loc ra cac itemid CHUA TUNG xuat hien trong DB - dung cho vong lap BFS phia
+    Tampermonkey de bo qua ngay cac candidate da biet (da la root/member/pending/cached
+    cua bat ky nhom nao), tranh xep vao hang doi roi lai bi tu choi o try_assign_verified()
+    (do da bi nhom khac giu) - kiem tra som, tiet kiem request that toi Shopee.
+
+    market=None: khop 'da tung xuat hien o BAT KY market nao' (dang khong duoc goi tu
+    dau trong pipeline hien tai - endpoint /api/items/filter_new con lai tu thiet ke cu,
+    xem chu thich o affiliate_scrape_server.py). Truyen market khi biet chac de tranh loc
+    nham theo du lieu cua market khac."""
     if not itemids:
         return []
     conn = _connect(db_path)
     try:
         ids = [str(i) for i in itemids]
         placeholders = ",".join("?" for _ in ids)
-        rows = conn.execute(
-            f"select itemid from products where itemid in ({placeholders})", ids
-        ).fetchall()
+        if market is not None:
+            rows = conn.execute(
+                f"select itemid from products where market = ? and itemid in ({placeholders})",
+                [market] + ids,
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                f"select itemid from products where itemid in ({placeholders})", ids
+            ).fetchall()
         known = {r[0] for r in rows}
         return [i for i in ids if i not in known]
     finally:
@@ -1159,20 +1308,24 @@ def cache_item(db_path, row):
         conn.close()
 
 
-def count_group_members(db_path, groupid):
-    """So san pham tuong tu 'member' da gan vao group (KHONG tinh root)."""
+def count_group_members(db_path, groupid, market):
+    """So san pham tuong tu 'member' da gan vao group (KHONG tinh root). market BAT BUOC -
+    groupid (= itemid cua root) khong con la khoa duy nhat toan cuc, 2 root o 2 market
+    khac nhau co the trung so groupid."""
     conn = _connect(db_path)
     try:
         return conn.execute(
-            "select count(*) from products where groupid=? and status_link='member'",
-            (str(groupid),),
+            "select count(*) from products where groupid=? and market=? and status_link='member'",
+            (str(groupid), market),
         ).fetchone()[0]
     finally:
         conn.close()
 
 
-def list_roots_with_counts(db_path, status=None, search=None, limit=200):
-    """Danh sach root + so member da gom cua tung group - dung cho UI xem group."""
+def list_roots_with_counts(db_path, status=None, search=None, market=None, limit=200):
+    """Danh sach root + so member da gom cua tung group - dung cho UI xem group. market
+    loc dung 1 thi truong cu the (dung cho dropdown loc o tab "Van hanh" - xem
+    count_roots_by_market() cho bang tong hop theo TAT CA market)."""
     conn = _connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
@@ -1181,6 +1334,9 @@ def list_roots_with_counts(db_path, status=None, search=None, limit=200):
         if status:
             where.append("status_link=?")
             params.append(status)
+        if market:
+            where.append("market=?")
+            params.append(market)
         if search:
             where.append("(itemid like ? or name like ?)")
             params += [f"%{search}%", f"%{search}%"]
@@ -1192,8 +1348,8 @@ def list_roots_with_counts(db_path, status=None, search=None, limit=200):
         for r in rows:
             d = dict(r)
             d["member_count"] = conn.execute(
-                "select count(*) from products where groupid=? and status_link='member'",
-                (d["itemid"],),
+                "select count(*) from products where groupid=? and market=? and status_link='member'",
+                (d["itemid"], d["market"]),
             ).fetchone()[0]
             out.append(d)
         return out
@@ -1201,55 +1357,93 @@ def list_roots_with_counts(db_path, status=None, search=None, limit=200):
         conn.close()
 
 
-def list_group_members(db_path, groupid):
-    """San pham tuong tu 'member' cua 1 group, sap theo promoted_7d tang dan (tot nhat truoc)."""
+def count_roots_by_market(db_path):
+    """Tong hop so root theo TUNG market (pending chua giao/dang giao/done/fail) - dung
+    cho bang "Root theo market" o tab "Van hanh" (hien thi ro rang thay vi chi 1 con so
+    tong gop nhu stats-bar) VA de dashboard biet co nhung market nao de dien vao dropdown
+    chon market cho auto-assign. Sap theo market A-Z, root chua nhan dien duoc market
+    (market NULL, thuong do link la, khong khop domain nao trong market_from_link()) gom
+    chung vao 1 dong '(chua ro)' o cuoi de khong bi that lac."""
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "select "
+            "  coalesce(market, '') as market, "
+            "  count(*) as total, "
+            "  sum(case when status_link='pending' and assigned_key is null then 1 else 0 end) as pending, "
+            "  sum(case when status_link='pending' and assigned_key is not null then 1 else 0 end) as claimed, "
+            "  sum(case when status_link='done' then 1 else 0 end) as done, "
+            "  sum(case when status_link='fail' then 1 else 0 end) as fail "
+            "from products where link_type='root' group by coalesce(market, '') order by market asc"
+        ).fetchall()
+        return [
+            {
+                "market": market or None,
+                "total": total,
+                "pending": pending,
+                "claimed": claimed,
+                "done": done,
+                "fail": fail,
+            }
+            for market, total, pending, claimed, done, fail in rows
+        ]
+    finally:
+        conn.close()
+
+
+def list_group_members(db_path, groupid, market):
+    """San pham tuong tu 'member' cua 1 group, sap theo promoted_7d tang dan (tot nhat
+    truoc). market BAT BUOC - xem count_group_members()."""
     conn = _connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "select * from products where groupid=? and status_link='member' "
+            "select * from products where groupid=? and market=? and status_link='member' "
             "order by affiliate_promoted_last_7days asc",
-            (str(groupid),),
+            (str(groupid), market),
         ).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()
 
 
-def finish_root(db_path, itemid):
+def finish_root(db_path, itemid, market):
     """Root xu ly xong -> status='done', nha claim, tu tinh lai cot merged_link cho ca
-    group (khong can nguoi dung tu bam)."""
+    group (khong can nguoi dung tu bam). market BAT BUOC - xem count_group_members()."""
     conn = _connect(db_path)
     try:
         conn.execute(
             "update products set status_link='done', assigned_key=null, claimed_at=null "
-            "where itemid=?",
-            (str(itemid),),
+            "where itemid=? and market=?",
+            (str(itemid), market),
         )
         conn.commit()
     finally:
         conn.close()
-    compute_merged_links(db_path, itemid)
+    compute_merged_links(db_path, itemid, market)
 
 
-def compute_merged_links(db_path, groupid, batch_size=6):
+def compute_merged_links(db_path, groupid, market, batch_size=6):
     """Gop moi batch_size link LIEN TIEP (theo thu tu them vao group - id tang dan) thanh
     1 chuoi noi bang '|', ghi de vao cot merged_link cua TUNG dong thuoc dung batch do
     (ca batch_size dong deu mang chung 1 gia tri merged_link). Neu ROOT cua group dat 3
     tieu chi (tinh la 1/60) thi no la link #1 trong day, cac 'member' xep tiep theo sau
     (thu tu id tang dan). Batch cuoi co the le (<batch_size) neu group khong du. Goi tu
-    finish_root() - khong can nguoi dung tu tinh lai. Tra ve tong so link da gop."""
+    finish_root() - khong can nguoi dung tu tinh lai. market BAT BUOC - xem
+    count_group_members(). Tra ve tong so link da gop."""
     import select_l1_l2_candidates as l1l2
     settings = get_settings(db_path)
     conn = _connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
         root = conn.execute(
-            "select * from products where itemid=? and link_type='root'", (str(groupid),)
+            "select * from products where itemid=? and market=? and link_type='root'",
+            (str(groupid), market),
         ).fetchone()
         members = conn.execute(
-            "select * from products where groupid=? and status_link='member' order by id asc",
-            (str(groupid),),
+            "select * from products where groupid=? and market=? and status_link='member' "
+            "order by id asc",
+            (str(groupid), market),
         ).fetchall()
 
         ordered = []  # [(itemid, product_link), ...] dung thu tu link1..linkN
@@ -1266,7 +1460,10 @@ def compute_merged_links(db_path, groupid, batch_size=6):
             chunk = ordered[i:i + batch_size]
             merged = "|".join(link for _, link in chunk)
             for itemid, _ in chunk:
-                conn.execute("update products set merged_link=? where itemid=?", (merged, itemid))
+                conn.execute(
+                    "update products set merged_link=? where itemid=? and market=?",
+                    (merged, itemid, market),
+                )
         conn.commit()
         return len(ordered)
     finally:
@@ -1280,15 +1477,16 @@ def recompute_all_merged_links(db_path):
     nang nay). Tra ve {"roots_processed": n, "total_links": n}."""
     conn = _connect(db_path)
     try:
-        root_ids = [r[0] for r in conn.execute(
-            "select itemid from products where link_type='root'"
-        ).fetchall()]
+        conn.row_factory = sqlite3.Row
+        roots = conn.execute(
+            "select itemid, market from products where link_type='root'"
+        ).fetchall()
     finally:
         conn.close()
     total_links = 0
-    for itemid in root_ids:
-        total_links += compute_merged_links(db_path, itemid)
-    return {"roots_processed": len(root_ids), "total_links": total_links}
+    for root in roots:
+        total_links += compute_merged_links(db_path, root["itemid"], root["market"])
+    return {"roots_processed": len(roots), "total_links": total_links}
 
 
 def reset_all_insufficient_roots(db_path):
@@ -1299,55 +1497,57 @@ def reset_all_insufficient_roots(db_path):
     try:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "select p.itemid, "
-            "(select count(*) from products m where m.groupid=p.itemid and m.status_link='member') "
-            "as member_count "
+            "select p.itemid, p.market, "
+            "(select count(*) from products m where m.groupid=p.itemid and m.market=p.market "
+            "and m.status_link='member') as member_count "
             "from products p where p.link_type='root' and p.status_link='done'"
         ).fetchall()
-        to_reset = [r["itemid"] for r in rows if r["member_count"] < 60]
-        for itemid in to_reset:
+        to_reset = [r for r in rows if r["member_count"] < 60]
+        for r in to_reset:
             conn.execute(
                 "update products set status_link='pending', assigned_key=null, claimed_at=null, "
-                "fail_reason=null where itemid=?",
-                (itemid,),
+                "fail_reason=null where itemid=? and market=?",
+                (r["itemid"], r["market"]),
             )
         conn.commit()
-        return {"reset_count": len(to_reset), "itemids": to_reset}
+        return {"reset_count": len(to_reset), "itemids": [r["itemid"] for r in to_reset]}
     finally:
         conn.close()
 
 
-def mark_root_failed(db_path, itemid, reason):
+def mark_root_failed(db_path, itemid, market, reason):
     """Danh dau 1 root la 'fail' (KHONG PHAI 'done') + nha claim - dung khi API tra loi
     THAT SU (vd Shopee bao 'invalid item id', item bi go/sai id...), KHONG PHAI truong
     hop "chay het ung vien truoc khi du 60" (do la 'done' + insufficient, xem finish_root()).
     BAT BUOC phai goi ham nay thay vi de nguyen 'pending' khi gap loi - da gap bug thuc te:
     de nguyen 'pending' + con assigned_key khien worker cu nhan lai DUNG root loi do moi
-    lan poll, lap vo han. Nguoi dung van co the tu "Dat lai" tren dashboard neu muon thu lai."""
+    lan poll, lap vo han. Nguoi dung van co the tu "Dat lai" tren dashboard neu muon thu lai.
+    market BAT BUOC - xem count_group_members()."""
     conn = _connect(db_path)
     try:
         conn.execute(
             "update products set status_link='fail', assigned_key=null, claimed_at=null, "
-            "fail_reason=? where itemid=? and link_type='root'",
-            (reason, str(itemid)),
+            "fail_reason=? where itemid=? and market=? and link_type='root'",
+            (reason, str(itemid), market),
         )
         conn.commit()
     finally:
         conn.close()
 
 
-def reset_root_to_pending(db_path, itemid):
+def reset_root_to_pending(db_path, itemid, market):
     """Dua 1 root ve lai 'pending' + nha claim (assigned_key/claimed_at) - dung khi nguoi
     dung muon giao lai/thu lai 1 root da 'done' (vd bi bo do do loi 403 tam thoi, khong
     phai that su het ung vien) hoac 'fail'. KHONG dong toi cac 'related' da gan group cua
     lan chay truoc - BFS lan sau se tu bo qua chung qua seed_and_claim_candidates() (da
-    thuoc group nay roi thi van tinh la "cua nhom nay", khong bi mat)."""
+    thuoc group nay roi thi van tinh la "cua nhom nay", khong bi mat). market BAT BUOC -
+    xem count_group_members()."""
     conn = _connect(db_path)
     try:
         cur = conn.execute(
             "update products set status_link='pending', assigned_key=null, claimed_at=null, "
-            "fail_reason=null where itemid=? and link_type='root'",
-            (str(itemid),),
+            "fail_reason=null where itemid=? and market=? and link_type='root'",
+            (str(itemid), market),
         )
         conn.commit()
         return cur.rowcount > 0
@@ -1390,7 +1590,7 @@ def fetch_unfetched(db_path=DB_PATH_DEFAULT, link_type=None, groupid=None, min_s
         conn.close()
 
 
-def reclassify_status(db_path, link_type=None, groupid=None, promoted_7d_max=None,
+def reclassify_status(db_path, link_type=None, groupid=None, market=None, promoted_7d_max=None,
                        sold_min=None, seller_commission_vnd_min=None):
     """Voi MOI dong DA CO du lieu (affiliate_promoted_last_7days is not null) khop bo
     loc, tinh lai passes_criteria() (tai dung tu select_l1_l2_candidates - lazy import de
@@ -1419,8 +1619,11 @@ def reclassify_status(db_path, link_type=None, groupid=None, promoted_7d_max=Non
         if groupid:
             where.append("groupid = ?")
             params.append(str(groupid))
+        if market:
+            where.append("market = ?")
+            params.append(market)
         rows = conn.execute(
-            f"select itemid, sold, seller_commission, affiliate_promoted_last_7days "
+            f"select itemid, market, sold, seller_commission, affiliate_promoted_last_7days "
             f"from products where {' and '.join(where)}",
             params,
         ).fetchall()
@@ -1431,7 +1634,10 @@ def reclassify_status(db_path, link_type=None, groupid=None, promoted_7d_max=Non
             status = ("done" if l1l2.passes_criteria(
                 metrics, promoted_7d_max, sold_min, seller_commission_vnd_min
             ) else "fail")
-            conn.execute("update products set status_link = ? where itemid = ?", (status, row["itemid"]))
+            conn.execute(
+                "update products set status_link = ? where itemid = ? and market = ?",
+                (status, row["itemid"], row["market"]),
+            )
             updated[status] += 1
         conn.commit()
         return updated
@@ -1500,51 +1706,70 @@ def set_video_machine_enabled(db_path, machine_id, enabled):
         conn.close()
 
 
-def list_video_push_candidates(db_path, limit=200):
+def list_video_push_candidates(db_path, limit=200, market=None):
     """Hang doi cho tinh nang 'Tao video': da co merged_link nhung CHUA tao xong task
     VideoAI (job_id con null) - bao gom ca dong da day cache tu lan chay truoc
-    (cache_uploaded=1) lan dong chua day. Sap FIFO (id tang dan)."""
+    (cache_uploaded=1) lan dong chua day. Sap FIFO (id tang dan). market: gioi han CHI 1
+    thi truong (None/'' = tat ca) - dung cho dropdown chon market o tab 'Tao video'."""
     conn = _connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
+        market_sql = "and market=? " if market else ""
+        params = ([market] if market else []) + [limit]
         rows = conn.execute(
             "select * from products where merged_link is not null and job_id is null "
-            "and product_link is not null order by id asc limit ?",
-            (limit,),
+            f"and product_link is not null {market_sql}order by id asc limit ?",
+            params,
         ).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()
 
 
-def mark_cache_uploaded(db_path, itemids):
-    """Danh dau da day cache VideoAI thanh cong cho danh sach itemid - lan chay sau se bo
-    qua buoc day cache cho cac dong nay (chi con thieu buoc tao task)."""
-    if not itemids:
+def mark_cache_uploaded(db_path, itemid_market_pairs):
+    """Danh dau da day cache VideoAI thanh cong cho danh sach (itemid, market) - lan chay
+    sau se bo qua buoc day cache cho cac dong nay (chi con thieu buoc tao task). market
+    BAT BUOC trong tung cap - xem count_group_members()."""
+    if not itemid_market_pairs:
         return
     conn = _connect(db_path)
     try:
         conn.executemany(
-            "update products set cache_uploaded=1 where itemid=?",
-            [(str(i),) for i in itemids],
+            "update products set cache_uploaded=1 where itemid=? and market=?",
+            [(str(i), m) for i, m in itemid_market_pairs],
         )
         conn.commit()
     finally:
         conn.close()
 
 
-def mark_video_jobs(db_path, itemid_jobid_pairs):
-    """Ghi job_id VideoAI tra ve cho tung itemid - co job_id nghia la XONG, se khong con
-    xuat hien trong list_video_push_candidates() nua (khong day/tao lai)."""
-    if not itemid_jobid_pairs:
+def mark_video_jobs(db_path, itemid_market_jobid_triples):
+    """Ghi job_id VideoAI tra ve cho tung (itemid, market) - co job_id nghia la XONG, se
+    khong con xuat hien trong list_video_push_candidates() nua (khong day/tao lai)."""
+    if not itemid_market_jobid_triples:
         return
     conn = _connect(db_path)
     try:
         conn.executemany(
-            "update products set job_id=? where itemid=?",
-            [(job_id, str(itemid)) for itemid, job_id in itemid_jobid_pairs],
+            "update products set job_id=? where itemid=? and market=?",
+            [(job_id, str(itemid), market) for itemid, market, job_id in itemid_market_jobid_triples],
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def reset_video_jobs(db_path):
+    """Dat lai trang thai 've cho tao video' cho toan bo san pham DA co job_id (xoa job_id,
+    giu nguyen cache_uploaded vi cache van con dung, chi can tao lai task) - dung cho nut
+    'Dat lai trang thai' o tab 'Tao video'. Tra ve so dong da reset."""
+    conn = _connect(db_path)
+    try:
+        cur = conn.execute(
+            "update products set job_id=null where job_id is not null"
+        )
+        conn.commit()
+        return cur.rowcount
     finally:
         conn.close()
 
@@ -1563,6 +1788,35 @@ def count_video_push_stats(db_path):
             "select count(*) from products where merged_link is not null and job_id is not null"
         ).fetchone()[0]
         return {"eligible": eligible, "cache_uploaded": cache_uploaded, "job_created": job_created}
+    finally:
+        conn.close()
+
+
+def count_video_push_stats_by_market(db_path):
+    """Nhu count_video_push_stats() nhung gom theo TUNG market - dung cho bang "Link theo
+    market" o tab "Tao video" (hien thi ro thay vi chi 1 con so tong gop). Sap theo market
+    A-Z, dong nao merged_link con thieu market (khong khop domain nao trong
+    market_from_link() - hiem, thuong do link nhap tay sai dinh dang) gom chung vao 1 dong
+    '(chua ro)' o cuoi de khong bi that lac."""
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "select "
+            "  coalesce(market, '') as market, "
+            "  count(*) as eligible, "
+            "  sum(case when cache_uploaded=1 then 1 else 0 end) as cache_uploaded, "
+            "  sum(case when job_id is not null then 1 else 0 end) as job_created "
+            "from products where merged_link is not null group by coalesce(market, '') order by market asc"
+        ).fetchall()
+        return [
+            {
+                "market": market or None,
+                "eligible": eligible,
+                "cache_uploaded": cache_uploaded,
+                "job_created": job_created,
+            }
+            for market, eligible, cache_uploaded, job_created in rows
+        ]
     finally:
         conn.close()
 
