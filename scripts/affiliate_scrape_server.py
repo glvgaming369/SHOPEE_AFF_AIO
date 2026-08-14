@@ -557,9 +557,12 @@ def export_videos_xlsx():
 
 @app.route("/api/videos/reset", methods=["POST"])
 def reset_videos():
-    """Dat lai trang thai 've cho tao video' cho toan bo san pham da tao xong (job_id
-    khong null) - dung cho nut 'Dat lai trang thai' o tab 'Tao video'."""
-    count = shopee_db.reset_video_jobs(DB_PATH)
+    """Dat lai trang thai 've cho tao video' cho san pham da tao xong (job_id khong null) -
+    dung cho nut 'Dat lai trang thai' o tab 'Tao video'. market (query/body, optional): chi
+    reset 1 thi truong dang chon tren dropdown; bo trong = tat ca."""
+    body = request.get_json(force=True, silent=True) or {}
+    market = body.get("market") or None
+    count = shopee_db.reset_video_jobs(DB_PATH, market=market)
     return jsonify({"reset": count})
 
 

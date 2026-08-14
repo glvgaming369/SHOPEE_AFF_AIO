@@ -1759,14 +1759,18 @@ def mark_video_jobs(db_path, itemid_market_jobid_triples):
         conn.close()
 
 
-def reset_video_jobs(db_path):
-    """Dat lai trang thai 've cho tao video' cho toan bo san pham DA co job_id (xoa job_id,
-    giu nguyen cache_uploaded vi cache van con dung, chi can tao lai task) - dung cho nut
-    'Dat lai trang thai' o tab 'Tao video'. Tra ve so dong da reset."""
+def reset_video_jobs(db_path, market=None):
+    """Dat lai trang thai 've cho tao video' cho san pham DA co job_id (xoa job_id, giu
+    nguyen cache_uploaded vi cache van con dung, chi can tao lai task) - dung cho nut 'Dat
+    lai trang thai' o tab 'Tao video'. market: gioi han CHI 1 thi truong (None/'' = tat ca),
+    dung dropdown chon market cua tab. Tra ve so dong da reset."""
     conn = _connect(db_path)
     try:
+        market_sql = " and market=?" if market else ""
+        params = [market] if market else []
         cur = conn.execute(
-            "update products set job_id=null where job_id is not null"
+            f"update products set job_id=null where job_id is not null{market_sql}",
+            params,
         )
         conn.commit()
         return cur.rowcount

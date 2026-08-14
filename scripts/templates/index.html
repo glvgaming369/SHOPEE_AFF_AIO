@@ -249,9 +249,43 @@
     white-space: pre-wrap; line-height: 1.6; border: 1px solid #1e293b;
     box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
   }
+
+  /* Modal popup (thay the alert()/confirm() mac dinh cua trinh duyet) */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.15s ease;
+    padding: 16px;
+  }
+  .modal-overlay.show { opacity: 1; pointer-events: auto; }
+  .modal-box {
+    background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-md);
+    padding: 24px; max-width: 440px; width: 100%;
+    transform: translateY(-12px) scale(0.98); transition: transform 0.15s ease;
+  }
+  .modal-overlay.show .modal-box { transform: translateY(0) scale(1); }
+  .modal-icon {
+    width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; font-size: 18px; font-weight: 700; margin-bottom: 14px;
+    background: var(--info-bg); color: var(--info-text); font-family: var(--font-sans);
+  }
+  .modal-icon.danger { background: var(--danger-bg); color: var(--danger-text); }
+  .modal-message {
+    font-size: 14.5px; line-height: 1.6; color: var(--ink); white-space: pre-wrap;
+  }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
 </style>
 </head>
 <body>
+
+<div id="modal-overlay" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-icon" id="modal-icon">!</div>
+    <div class="modal-message" id="modal-message"></div>
+    <div class="modal-actions" id="modal-actions"></div>
+  </div>
+</div>
 
 <header>
   <div class="logo-mark">S</div>
@@ -622,6 +656,47 @@ async function api(method, path, body) {
   return json;
 }
 
+function _showModal(message, { mode, danger } = {}) {
+  return new Promise(resolve => {
+    const overlay = document.getElementById('modal-overlay');
+    const icon = document.getElementById('modal-icon');
+    const actions = document.getElementById('modal-actions');
+    document.getElementById('modal-message').textContent = message;
+    icon.className = 'modal-icon' + (danger ? ' danger' : '');
+    icon.textContent = mode === 'confirm' ? '?' : (danger ? '!' : 'i');
+    actions.innerHTML = mode === 'confirm'
+      ? `<button class="secondary" id="modal-cancel-btn">Hủy</button><button id="modal-ok-btn" class="${danger ? 'danger' : ''}">Đồng ý</button>`
+      : `<button id="modal-ok-btn">OK</button>`;
+
+    const onKeydown = (e) => {
+      if (e.key === 'Escape') close(false);
+      if (e.key === 'Enter') close(true);
+    };
+    const close = (result) => {
+      overlay.classList.remove('show');
+      document.removeEventListener('keydown', onKeydown);
+      resolve(result);
+    };
+
+    document.getElementById('modal-ok-btn').onclick = () => close(true);
+    const cancelBtn = document.getElementById('modal-cancel-btn');
+    if (cancelBtn) cancelBtn.onclick = () => close(false);
+    overlay.onclick = (e) => { if (e.target === overlay) close(mode === 'confirm' ? false : true); };
+    document.addEventListener('keydown', onKeydown);
+
+    overlay.classList.add('show');
+    document.getElementById('modal-ok-btn').focus();
+  });
+}
+
+function customAlert(message, opts) {
+  return _showModal(message, { mode: 'alert', danger: !!(opts && opts.danger) });
+}
+
+function customConfirm(message, opts) {
+  return _showModal(message, { mode: 'confirm', danger: !!(opts && opts.danger) });
+}
+
 let currentSettings = null;
 
 async function loadUserscripts() {
@@ -658,7 +733,7 @@ async function checkForUpdate() {
 }
 
 async function applyUpdate() {
-  if (!confirm(`Tải ${pendingUpdateCommits} commit mới và tự khởi động lại server?`)) return;
+  if (!(await customConfirm(`Tải ${pendingUpdateCommits} commit mới và tự khởi động lại server?`))) return;
   const statusEl = document.getElementById('update-status');
   const logEl = document.getElementById('update-log');
   const applyBtn = document.getElementById('update-apply-btn');
@@ -693,7 +768,7 @@ async function saveSettings() {
   const sold_min = parseInt(document.getElementById('set-sold').value, 10);
   const seller_commission_vnd_min = parseFloat(document.getElementById('set-commission').value);
   if ([promoted_7d_max, sold_min, seller_commission_vnd_min].some(Number.isNaN)) {
-    alert('Cả 3 ô dữ liệu phải là số hợp lệ.');
+    await customAlert('Cả 3 ô dữ liệu phải là số hợp lệ.', { danger: true });
     return;
   }
   await api('POST', '/api/settings', { promoted_7d_max, sold_min, seller_commission_vnd_min });
@@ -702,9 +777,9 @@ async function saveSettings() {
 }
 
 async function resetAll() {
-  if (!confirm('Xóa TOÀN BỘ dữ liệu root/related đã cào? Không thể hoàn tác. Danh sách tài khoản/profile vẫn được giữ nguyên.')) return;
+  if (!(await customConfirm('Xóa TOÀN BỘ dữ liệu root/related đã cào? Không thể hoàn tác. Danh sách tài khoản/profile vẫn được giữ nguyên.', { danger: true }))) return;
   const { deleted } = await api('POST', '/api/reset');
-  alert(`Đã xóa thành công ${deleted} bản ghi.`);
+  await customAlert(`Đã xóa thành công ${deleted} bản ghi.`);
   refreshAll();
 }
 
@@ -751,7 +826,7 @@ function copyMergedLink(idx) {
   if (!val) return;
   navigator.clipboard.writeText(val).then(
     () => {},
-    () => alert('Không thể tự động sao chép (Trình duyệt chặn Clipboard) - Vui lòng chọn và Ctrl+C thủ công ở ô "Gộp link".')
+    () => customAlert('Không thể tự động sao chép (Trình duyệt chặn Clipboard) - Vui lòng chọn và Ctrl+C thủ công ở ô "Gộp link".', { danger: true })
   );
 }
 
@@ -780,7 +855,7 @@ async function toggleAutoAssign() {
 async function addAccount(btn) {
   const name = document.getElementById('acc-name').value.trim();
   const path = document.getElementById('acc-path').value.trim();
-  if (!name || !path) { alert('Vui lòng nhập đầy đủ Tên tài khoản và Đường dẫn Profile.'); return; }
+  if (!name || !path) { await customAlert('Vui lòng nhập đầy đủ Tên tài khoản và Đường dẫn Profile.', { danger: true }); return; }
   await withBusy(btn, async () => {
     await api('POST', '/api/accounts', { name, profile_path: path });
     document.getElementById('acc-name').value = '';
@@ -790,7 +865,7 @@ async function addAccount(btn) {
 }
 
 async function removeAccount(profilePath) {
-  if (!confirm('Bạn có chắc chắn muốn xóa tài khoản này?')) return;
+  if (!(await customConfirm('Bạn có chắc chắn muốn xóa tài khoản này?', { danger: true }))) return;
   await api('DELETE', '/api/accounts/' + encodeURIComponent(profilePath));
   loadAccounts();
 }
@@ -799,7 +874,7 @@ async function launchAccount(name) {
   try {
     await api('POST', `/api/accounts/${encodeURIComponent(name)}/launch`);
   } catch (e) {
-    alert('Không thể mở Chrome profile: ' + e.message);
+    await customAlert('Không thể mở Chrome profile: ' + e.message, { danger: true });
   }
 }
 
@@ -829,19 +904,19 @@ async function loadWorkers() {
 async function assignRoot(itemid, market) {
   const sel = document.getElementById('assign-sel-' + itemid);
   const deviceKey = sel.value;
-  if (!deviceKey) { alert('Vui lòng chọn 1 tài khoản để giao việc.'); return; }
+  if (!deviceKey) { await customAlert('Vui lòng chọn 1 tài khoản để giao việc.', { danger: true }); return; }
   try {
     await api('POST', `/api/roots/${encodeURIComponent(itemid)}/assign`, { device_key: deviceKey, market });
     loadRoots();
   } catch (e) {
-    alert('Không giao việc được: ' + e.message);
+    await customAlert('Không giao việc được: ' + e.message, { danger: true });
   }
 }
 
 async function importRoots() {
   const raw = document.getElementById('root-links').value;
   const links = raw.split('\n').map(s => s.trim()).filter(Boolean);
-  if (!links.length) { alert('Vui lòng dán ít nhất 1 liên kết sản phẩm.'); return; }
+  if (!links.length) { await customAlert('Vui lòng dán ít nhất 1 liên kết sản phẩm.', { danger: true }); return; }
   const { added } = await api('POST', '/api/roots/import', { links });
   document.getElementById('import-result').textContent = `Đã thêm ${added} Root mới (${links.length - added} đã có sẵn hoặc không hợp lệ).`;
   document.getElementById('root-links').value = '';
@@ -895,39 +970,39 @@ async function loadRoots() {
 async function recomputeMerged(itemid, market) {
   try {
     const { total_links } = await api('POST', `/api/roots/${encodeURIComponent(itemid)}/recompute_merged`, { market });
-    alert(`Đã gộp xong ${total_links} link của nhóm ${itemid} - Xem cột "Gộp link" ở tab Sản phẩm đã cào.`);
+    await customAlert(`Đã gộp xong ${total_links} link của nhóm ${itemid} - Xem cột "Gộp link" ở tab Sản phẩm đã cào.`);
   } catch (e) {
-    alert('Lỗi: ' + e.message);
+    await customAlert('Lỗi: ' + e.message, { danger: true });
   }
 }
 
 async function recomputeMergedAll() {
   try {
     const { roots_processed, total_links } = await api('POST', '/api/roots/recompute_merged_all');
-    alert(`Đã gộp lại cho ${roots_processed} Root (tổng ${total_links} link) - Xem kết quả tại tab Sản phẩm đã cào.`);
+    await customAlert(`Đã gộp lại cho ${roots_processed} Root (tổng ${total_links} link) - Xem kết quả tại tab Sản phẩm đã cào.`);
   } catch (e) {
-    alert('Lỗi: ' + e.message);
+    await customAlert('Lỗi: ' + e.message, { danger: true });
   }
 }
 
 async function resetInsufficientAll() {
-  if (!confirm('Đưa VỀ "pending" toàn bộ Root đã làm xong nhưng chưa đủ 60/60 để giao lại? (KHÔNG xóa sản phẩm đã gom trước đó)')) return;
+  if (!(await customConfirm('Đưa VỀ "pending" toàn bộ Root đã làm xong nhưng chưa đủ 60/60 để giao lại? (KHÔNG xóa sản phẩm đã gom trước đó)'))) return;
   try {
     const { reset_count } = await api('POST', '/api/roots/reset_insufficient_all');
-    alert(`Đã đặt lại ${reset_count} Root thiếu về trạng thái "pending".`);
+    await customAlert(`Đã đặt lại ${reset_count} Root thiếu về trạng thái "pending".`);
     loadRoots();
   } catch (e) {
-    alert('Lỗi: ' + e.message);
+    await customAlert('Lỗi: ' + e.message, { danger: true });
   }
 }
 
 async function resetRoot(itemid, market) {
-  if (!confirm(`Đưa Root ${itemid} về 'pending' để giao lại? (Các sản phẩm tương tự đã gom trước đó vẫn được giữ nguyên)`)) return;
+  if (!(await customConfirm(`Đưa Root ${itemid} về 'pending' để giao lại? (Các sản phẩm tương tự đã gom trước đó vẫn được giữ nguyên)`))) return;
   try {
     await api('POST', `/api/roots/${encodeURIComponent(itemid)}/reset`, { market });
     loadRoots();
   } catch (e) {
-    alert('Lỗi: ' + e.message);
+    await customAlert('Lỗi: ' + e.message, { danger: true });
   }
 }
 
@@ -1007,12 +1082,12 @@ async function loadItems() {
 }
 
 async function deleteItem(itemid, market) {
-  if (!confirm(`Xóa hẳn sản phẩm ${itemid} khỏi cơ sở dữ liệu?`)) return;
+  if (!(await customConfirm(`Xóa hẳn sản phẩm ${itemid} khỏi cơ sở dữ liệu?`, { danger: true }))) return;
   try {
     await api('DELETE', `/api/items/${encodeURIComponent(itemid)}?market=${encodeURIComponent(market)}`);
     loadItems();
   } catch (e) {
-    alert('Lỗi: ' + e.message);
+    await customAlert('Lỗi: ' + e.message, { danger: true });
   }
 }
 
@@ -1056,7 +1131,7 @@ async function addVideoMachine(btn) {
   const api_key = document.getElementById('vm-apikey').value.trim();
   const tag = document.getElementById('vm-tag').value.trim();
   const pool = document.getElementById('vm-pool').value;
-  if (!name || !api_key || !tag) { alert('Vui lòng nhập đầy đủ Tên máy, API Key và Thẻ (Tag).'); return; }
+  if (!name || !api_key || !tag) { await customAlert('Vui lòng nhập đầy đủ Tên máy, API Key và Thẻ (Tag).', { danger: true }); return; }
   await withBusy(btn, async () => {
     await api('POST', '/api/video_machines', { name, api_key, tag, pool });
     document.getElementById('vm-name').value = '';
@@ -1067,7 +1142,7 @@ async function addVideoMachine(btn) {
 }
 
 async function removeVideoMachine(id) {
-  if (!confirm('Xóa máy tạo video này?')) return;
+  if (!(await customConfirm('Xóa máy tạo video này?', { danger: true }))) return;
   await api('DELETE', `/api/video_machines/${id}`);
   loadVideoMachines();
 }
@@ -1101,7 +1176,7 @@ async function loadVideoMarketStats() {
     </tr>
   `).join('') || '<tr><td colspan="5" class="muted">Chưa có liên kết nào.</td></tr>';
 
-  const knownMarkets = markets.filter(m => m.market).map(m => ({ market: m.market, total: m.eligible }));
+  const knownMarkets = markets.filter(m => m.market).map(m => ({ market: m.market, total: m.eligible - m.job_created }));
   fillMarketSelectOptions(document.getElementById('video-market-sel'), knownMarkets, 'Tất cả thị trường');
 }
 
@@ -1110,9 +1185,11 @@ function exportVideosXlsx() {
 }
 
 async function resetVideoJobs() {
-  if (!confirm('Đặt lại trạng thái toàn bộ liên kết ĐÃ TẠO VIDEO về "Cho tạo video"? Hệ thống sẽ tạo lại task mới cho lần chạy sau.')) return;
-  const { reset } = await api('POST', '/api/videos/reset');
-  alert(`Đã đặt lại ${reset} liên kết về trạng thái chờ tạo video.`);
+  const market = document.getElementById('video-market-sel').value;
+  const scopeLabel = market ? `thị trường ${market}` : 'TẤT CẢ thị trường';
+  if (!(await customConfirm(`Đặt lại trạng thái các liên kết ĐÃ TẠO VIDEO (${scopeLabel}) về "Chờ tạo video"? Hệ thống sẽ tạo lại task mới cho lần chạy sau.`))) return;
+  const { reset } = await api('POST', '/api/videos/reset', { market });
+  await customAlert(`Đã đặt lại ${reset} liên kết (${scopeLabel}) về trạng thái chờ tạo video.`);
   loadVideoStats();
 }
 
@@ -1124,7 +1201,7 @@ function videoLog(msg) {
 async function runVideoPush() {
   if (videoRunning) return;
   const machineId = document.getElementById('video-machine-sel').value;
-  if (!machineId) { alert('Vui lòng chọn 1 máy tạo video (đang Bật) trước khi chạy.'); return; }
+  if (!machineId) { await customAlert('Vui lòng chọn 1 máy tạo video (đang Bật) trước khi chạy.', { danger: true }); return; }
   const market = document.getElementById('video-market-sel').value;
   const target = Math.max(1, parseInt(document.getElementById('video-target').value, 10) || 200);
   videoRunning = true;
@@ -1244,7 +1321,7 @@ async function buyMailAccounts(btn) {
       await loadMailAccounts();
       loadMailBalance();
     } catch (e) {
-      alert('Lỗi mua Email: ' + e.message);
+      await customAlert('Lỗi mua Email: ' + e.message, { danger: true });
     }
   });
 }
@@ -1301,7 +1378,7 @@ function copyMailField(idx, field) {
   if (!val) return;
   navigator.clipboard.writeText(val).then(
     () => {},
-    () => alert('Không thể sao chép tự động (Trình duyệt chặn Clipboard) - Vui lòng chọn và Ctrl+C thủ công.')
+    () => customAlert('Không thể sao chép tự động (Trình duyệt chặn Clipboard) - Vui lòng chọn và Ctrl+C thủ công.', { danger: true })
   );
 }
 
@@ -1309,7 +1386,7 @@ async function updateMailAccountField(id, field, value) {
   try {
     await api('POST', `/api/mail_accounts/${id}`, { [field]: value });
   } catch (e) {
-    alert('Lỗi lưu dữ liệu: ' + e.message);
+    await customAlert('Lỗi lưu dữ liệu: ' + e.message, { danger: true });
   }
 }
 
@@ -1322,16 +1399,16 @@ async function getMailCode(btn, id) {
     try {
       const { code, note } = await api('POST', `/api/mail_accounts/${id}/get_code`);
       await loadMailAccounts();
-      if (!code) alert('Chưa lấy được mã Shopee.\n' + (note || ''));
+      if (!code) await customAlert('Chưa lấy được mã Shopee.\n' + (note || ''), { danger: true });
     } catch (e) {
-      alert('Lỗi lấy mã: ' + e.message);
+      await customAlert('Lỗi lấy mã: ' + e.message, { danger: true });
       await loadMailAccounts();
     }
   });
 }
 
 async function deleteMailAccount(id) {
-  if (!confirm('Bạn có chắc muốn xóa Email này?')) return;
+  if (!(await customConfirm('Bạn có chắc muốn xóa Email này?', { danger: true }))) return;
   await api('DELETE', `/api/mail_accounts/${id}`);
   loadMailAccounts();
 }
@@ -1341,9 +1418,9 @@ function exportMailAccountsXlsx() {
 }
 
 async function clearMailAccounts() {
-  if (!confirm('Xóa TOÀN BỘ danh sách Email đã mua? Không thể hoàn tác.')) return;
+  if (!(await customConfirm('Xóa TOÀN BỘ danh sách Email đã mua? Không thể hoàn tác.', { danger: true }))) return;
   const { deleted } = await api('POST', '/api/mail_accounts/clear');
-  alert(`Đã xóa ${deleted} dòng.`);
+  await customAlert(`Đã xóa ${deleted} dòng.`);
   loadMailAccounts();
 }
 
