@@ -536,6 +536,8 @@
     <div class="muted" style="margin-bottom:10px;">
       Điều kiện đủ để đẩy: Sản phẩm đã có "Gộp link" (thuộc 1 nhóm đã gom đủ/hoàn tất và đạt tiêu chí lọc).
       Mỗi lần chạy xử lý theo lô tối đa 200 sản phẩm (giới hạn của VideoAI API), tự lặp lại cho tới khi hết hàng chờ hoặc bấm Dừng.
+      Nếu chọn <b>"Tất cả thị trường"</b>: hệ thống chạy LẦN LƯỢT từng thị trường, mỗi thị trường tạo đủ đúng "Số lượng" nhập bên dưới
+      (ví dụ nhập 200 → 200 video TH, rồi 200 PH, rồi 200 ID, ... - KHÔNG chia đều tổng số).
     </div>
     <div class="stats-bar" id="video-stats-bar">Đang tải thống kê...</div>
     <div class="table-wrap" style="margin-top:14px;"><table>
@@ -1251,6 +1253,29 @@ function videoLog(msg) {
   box.textContent = `[${new Date().toLocaleTimeString('vi-VN')}] ${msg}\n` + box.textContent;
 }
 
+async function pushMarketBatchLoop(machineId, market, target) {
+  let totalDone = 0, totalPushed = 0, totalCreated = 0, totalErrors = 0;
+  while (!videoStop && totalDone < target) {
+    const want = Math.min(200, target - totalDone);
+    let data;
+    try {
+      data = await api('POST', '/api/videos/push', { limit: want, machine_id: Number(machineId), market: market || undefined });
+    } catch (e) {
+      videoLog('Lỗi: ' + e.message);
+      break;
+    }
+    if (!data.done) { videoLog(`Hết hàng chờ${market ? ` (${market})` : ''} (Đã xử lý ${totalDone}/${target}).`); break; }
+    totalDone += data.done;
+    totalPushed += data.pushed;
+    totalCreated += data.created;
+    totalErrors += (data.errors || []).length;
+    videoLog(`${market ? `[${market}] ` : ''}Lô ${data.done}: Đẩy cache ${data.pushed}, tạo video ${data.created}, lỗi ${(data.errors || []).length} - Tổng đã xử lý ${totalDone}/${target}.`);
+    (data.errors || []).slice(0, 5).forEach(e => videoLog(`  Lỗi detail: ${e.itemid || ''} ${e.reason || ''}`));
+    loadVideoStats();
+  }
+  return { totalDone, totalPushed, totalCreated, totalErrors };
+}
+
 async function runVideoPush() {
   if (videoRunning) return;
   const machineId = document.getElementById('video-machine-sel').value;
@@ -1261,33 +1286,35 @@ async function runVideoPush() {
   videoStop = false;
   document.getElementById('video-start-btn').disabled = true;
   document.getElementById('video-stop-btn').disabled = false;
-  videoLog(`Bắt đầu xử lý - Mục tiêu ${target} video${market ? ` (Thị trường: ${market})` : ''}...`);
-  let totalDone = 0, totalPushed = 0, totalCreated = 0, totalErrors = 0;
+
+  let grandDone = 0, grandPushed = 0, grandCreated = 0, grandErrors = 0;
   try {
-    while (!videoStop && totalDone < target) {
-      const want = Math.min(200, target - totalDone);
-      let data;
-      try {
-        data = await api('POST', '/api/videos/push', { limit: want, machine_id: Number(machineId), market: market || undefined });
-      } catch (e) {
-        videoLog('Lỗi: ' + e.message);
-        break;
+    if (market) {
+      videoLog(`Bắt đầu xử lý - Mục tiêu ${target} video (Thị trường: ${market})...`);
+      const r = await pushMarketBatchLoop(machineId, market, target);
+      grandDone = r.totalDone; grandPushed = r.totalPushed; grandCreated = r.totalCreated; grandErrors = r.totalErrors;
+      if (r.totalDone >= target) videoLog(`Đã hoàn tất mục tiêu ${target} video (${market}).`);
+    } else {
+      const { markets } = await api('GET', '/api/videos/stats_by_market');
+      const marketList = markets.filter(m => m.market && (m.eligible - m.job_created) > 0).map(m => m.market);
+      if (!marketList.length) {
+        videoLog('Không có thị trường nào còn hàng chờ tạo video.');
+      } else {
+        videoLog(`Bắt đầu xử lý TẤT CẢ thị trường - Mục tiêu ${target} video/thị trường (${marketList.join(', ')})...`);
+        for (const mk of marketList) {
+          if (videoStop) break;
+          videoLog(`--- Chuyển sang thị trường ${mk} (mục tiêu ${target} video) ---`);
+          const r = await pushMarketBatchLoop(machineId, mk, target);
+          grandDone += r.totalDone; grandPushed += r.totalPushed; grandCreated += r.totalCreated; grandErrors += r.totalErrors;
+          if (r.totalDone >= target) videoLog(`Đã hoàn tất mục tiêu ${target} video (${mk}).`);
+        }
       }
-      if (!data.done) { videoLog(`Hết hàng chờ (Đã xử lý tổng ${totalDone}/${target}).`); break; }
-      totalDone += data.done;
-      totalPushed += data.pushed;
-      totalCreated += data.created;
-      totalErrors += (data.errors || []).length;
-      videoLog(`Lô ${data.done}: Đẩy cache ${data.pushed}, tạo video ${data.created}, lỗi ${(data.errors || []).length} - Tổng đã xử lý ${totalDone}/${target}.`);
-      (data.errors || []).slice(0, 5).forEach(e => videoLog(`  Lỗi detail: ${e.itemid || ''} ${e.reason || ''}`));
-      loadVideoStats();
     }
-    if (totalDone >= target) videoLog(`Đã hoàn tất mục tiêu ${target} video.`);
   } finally {
     videoRunning = false;
     document.getElementById('video-start-btn').disabled = false;
     document.getElementById('video-stop-btn').disabled = true;
-    videoLog(`HOÀN TẤT (hoặc đã dừng). Tổng kết: Đã xử lý ${totalDone}, Đẩy cache ${totalPushed}, Tạo video ${totalCreated}, Lỗi ${totalErrors}.`);
+    videoLog(`HOÀN TẤT (hoặc đã dừng). Tổng kết: Đã xử lý ${grandDone}, Đẩy cache ${grandPushed}, Tạo video ${grandCreated}, Lỗi ${grandErrors}.`);
     loadVideoStats();
   }
 }
