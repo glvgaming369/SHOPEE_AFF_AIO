@@ -345,8 +345,20 @@
       <input type="text" id="acc-path" placeholder="Đường dẫn thư mục Chrome profile (Ví dụ: C:\Users\...\User Data\Profile 7)">
       <button onclick="addAccount(this)">Thêm tài khoản</button>
     </div>
+    <div class="row" style="margin-bottom:10px;">
+      <label style="white-space:nowrap;font-weight:500;">Market khi mở Chrome:</label>
+      <select id="acc-launch-market-sel" style="max-width:160px;">
+        <option value="PH">PH</option>
+        <option value="TH">TH</option>
+        <option value="MY">MY</option>
+        <option value="ID">ID</option>
+        <option value="VN">VN</option>
+        <option value="SG">SG</option>
+      </select>
+    </div>
     <div class="muted" style="margin-bottom:12px;">
-      Sau khi bấm <b>Launch</b>, Chrome sẽ mở trang <code>https://affiliate.shopee.ph/offer/product_offer</code> -
+      Sau khi bấm <b>Launch</b>, Chrome sẽ mở trang <code>https://affiliate.shopee.&lt;market&gt;/offer/product_offer</code>
+      đúng theo market chọn ở trên -
       Cài sẵn Tampermonkey + script <code>tampermonkey_affiliate_group_scraper.user.js</code> trong đúng Profile đó trước,
       sau đó nhập "Device key" = tên tài khoản này trong panel điều khiển của script.
     </div>
@@ -870,9 +882,21 @@ async function removeAccount(profilePath) {
   loadAccounts();
 }
 
+const AFF_MARKET_DOMAINS = {
+  PH: 'affiliate.shopee.ph',
+  TH: 'affiliate.shopee.co.th',
+  MY: 'affiliate.shopee.com.my',
+  ID: 'affiliate.shopee.co.id',
+  VN: 'affiliate.shopee.vn',
+  SG: 'affiliate.shopee.sg',
+};
+
 async function launchAccount(name) {
+  const market = document.getElementById('acc-launch-market-sel').value;
+  const domain = AFF_MARKET_DOMAINS[market] || AFF_MARKET_DOMAINS.PH;
+  const url = `https://${domain}/offer/product_offer`;
   try {
-    await api('POST', `/api/accounts/${encodeURIComponent(name)}/launch`);
+    await api('POST', `/api/accounts/${encodeURIComponent(name)}/launch`, { url });
   } catch (e) {
     await customAlert('Không thể mở Chrome profile: ' + e.message, { danger: true });
   }
@@ -1109,11 +1133,12 @@ async function loadVideoMachines() {
     <tr>
       <td><b>${m.name}</b></td>
       <td class="ellipsis" title="${m.api_key}">${maskApiKey(m.api_key)}</td>
-      <td><span class="badge member">${m.tag}</span></td>
+      <td id="vm-tag-cell-${m.id}"><span class="badge member">${m.tag}</span></td>
       <td><code>${m.pool}</code></td>
       <td><span class="badge ${m.enabled ? 'working' : 'offline'}">${m.enabled ? 'Đang bật' : 'Đang tắt'}</span></td>
       <td>
         <button class="secondary" onclick="toggleVideoMachine(${m.id}, ${m.enabled ? 'false' : 'true'})">${m.enabled ? 'Tắt' : 'Bật'}</button>
+        <button class="secondary" onclick="editVideoMachineTag(${m.id})">Sửa</button>
         <button class="secondary" onclick="removeVideoMachine(${m.id})">Xóa</button>
       </td>
     </tr>
@@ -1145,6 +1170,34 @@ async function removeVideoMachine(id) {
   if (!(await customConfirm('Xóa máy tạo video này?', { danger: true }))) return;
   await api('DELETE', `/api/video_machines/${id}`);
   loadVideoMachines();
+}
+
+function editVideoMachineTag(id) {
+  const machine = videoMachines.find(m => m.id === id);
+  if (!machine) return;
+  const cell = document.getElementById(`vm-tag-cell-${id}`);
+  cell.innerHTML = `
+    <input type="text" id="vm-tag-input-${id}" value="${machine.tag.replace(/"/g, '&quot;')}" style="min-width:120px; width:100%;">
+    <div style="margin-top:6px; display:flex; gap:6px;">
+      <button onclick="saveVideoMachineTag(${id})">Lưu</button>
+      <button class="secondary" onclick="loadVideoMachines()">Hủy</button>
+    </div>
+  `;
+  const input = document.getElementById(`vm-tag-input-${id}`);
+  input.focus();
+  input.select();
+}
+
+async function saveVideoMachineTag(id) {
+  const input = document.getElementById(`vm-tag-input-${id}`);
+  const tag = input.value.trim();
+  if (!tag) { await customAlert('Thẻ (Tag) không được để trống.', { danger: true }); return; }
+  try {
+    await api('POST', `/api/video_machines/${id}/tag`, { tag });
+    await loadVideoMachines();
+  } catch (e) {
+    await customAlert('Lỗi lưu Tag: ' + e.message, { danger: true });
+  }
 }
 
 async function toggleVideoMachine(id, enabled) {

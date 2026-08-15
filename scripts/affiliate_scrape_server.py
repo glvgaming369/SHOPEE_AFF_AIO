@@ -521,6 +521,20 @@ def toggle_video_machine(machine_id):
     return jsonify({"ok": True})
 
 
+@app.route("/api/video_machines/<int:machine_id>/tag", methods=["POST"])
+def update_video_machine_tag(machine_id):
+    """Doi Tag (thu muc) cua 1 may tao video - dung cho nut 'Sua' canh 'Xoa' o tab 'Tao
+    video'."""
+    body = request.get_json(force=True, silent=True) or {}
+    tag = (body.get("tag") or "").strip()
+    if not tag:
+        return _bad_request("thieu 'tag'")
+    ok = shopee_db.set_video_machine_tag(DB_PATH, machine_id, tag)
+    if not ok:
+        return _bad_request(f"khong tim thay may id={machine_id}")
+    return jsonify({"ok": True})
+
+
 @app.route("/api/videos/stats", methods=["GET"])
 def video_stats():
     return jsonify(shopee_db.count_video_push_stats(DB_PATH))

@@ -1706,6 +1706,20 @@ def set_video_machine_enabled(db_path, machine_id, enabled):
         conn.close()
 
 
+def set_video_machine_tag(db_path, machine_id, tag):
+    """Doi Tag (thu muc) cua 1 may tao video - dung cho nut 'Sua' canh 'Xoa' o tab 'Tao
+    video'. Tra ve False neu khong tim thay machine_id."""
+    conn = _connect(db_path)
+    try:
+        cur = conn.execute(
+            "update video_machines set tag=? where id=?", (tag, machine_id)
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
 def list_video_push_candidates(db_path, limit=200, market=None):
     """Hang doi cho tinh nang 'Tao video': da co merged_link nhung CHUA tao xong task
     VideoAI (job_id con null) - bao gom ca dong da day cache tu lan chay truoc
