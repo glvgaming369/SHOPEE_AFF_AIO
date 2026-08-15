@@ -128,26 +128,26 @@ def push_cache_batch(items, api_key):
 
 
 def _url_entry(url, merged_link):
-    """1 phan tu cua mang 'urls' trong request tao task - API chap nhan CA 2 dang: string
-    link tho, HOAC object {url, mergeLinks} khi can gop them link khac vao CHUNG 1 video
-    (xac nhan qua vi du that nguoi dung cung cap, 2026-08-13). mergeLinks la object, KHONG
-    phai array - moi link phu duoc danh so key 'link1', 'link2', ... theo dung thu tu trong
-    cot merged_link (chuoi noi bang '|', xem compute_merged_links() ben shopee_db.py, toi da
-    6 link/nhom KE CA link chinh - nguoi dung xac nhan muon gui du ca 6, khong loai link
-    chinh ra khoi mergeLinks). Neu nhom chi co 1 link (khong co gi de gop) thi gui thang
-    string cho gon, khong bao object thua."""
-    links = [l for l in (merged_link or "").split("|") if l]
-    if len(links) <= 1:
-        return url
-    return {"url": url, "mergeLinks": {f"link{i + 1}": l for i, l in enumerate(links)}}
+    """1 phan tu cua mang 'urls' trong request tao task - LUON gui dang object {url,
+    mergeLinks}, KE CA khi nhom chi co 1 link (khong co gi de gop) - de cot 'Merge Links'
+    trong _results.xlsx cua VideoAI khong bao gio bi de trong (yeu cau nguoi dung,
+    2026-08-16). mergeLinks gui dang STRING noi bang '|' (vd 'url1|url2|url3'), giong y
+    dinh dang cot merged_link ben shopee_db.py (xem compute_merged_links(), toi da 6
+    link/nhom KE CA link chinh) - da test batch that (20 san pham, tag 'TEST', 2026-08-16):
+    Job Status Done 20/20, cot Merge Links tra ve dung format + khop 100% voi merged_link
+    trong DB, video tao ra binh thuong (kich thuoc cung range voi batch cu dung dang
+    object) - xem chi tiet trong lich su chat. Neu merged_link rong (chua tinh duoc, hiem)
+    thi fallback dung chinh 'url'."""
+    links = [l for l in (merged_link or "").split("|") if l] or [url]
+    return {"url": url, "mergeLinks": "|".join(links)}
 
 
 def create_video_batch(url_items, api_key, tag, pool, language):
     """Tao task video cho toi da BATCH_LIMIT url/lan. url_items: list [{url, merged_link}]
-    (merged_link co the None/rong - dong do se gui dang string thuong, xem _url_entry()).
-    Tra ve list [{url, jobId, status} hoac {url, error}] - 'url' trong response luon la
-    link goc, giong het du input dang string hay object (API tu doc lai key 'url' ben trong
-    object)."""
+    (merged_link co the None/rong - dong do se fallback dung 'url' lam mergeLinks.link1, xem
+    _url_entry() - luon gui dang object {url, mergeLinks}). Tra ve list [{url, jobId,
+    status} hoac {url, error}] - 'url' trong response luon la link goc (API tu doc lai key
+    'url' ben trong object)."""
     if not url_items:
         return []
     if len(url_items) > BATCH_LIMIT:
