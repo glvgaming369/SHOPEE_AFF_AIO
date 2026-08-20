@@ -8,8 +8,13 @@ test that bang API key cua nguoi dung (2026-08-06):
                                              -> {items: [{url, jobId, status} | {url, error}]}
 
 Ghi chu quan trong da xac nhan qua test that (dung lai se sai):
-    - KHONG can field 'category'/'categories' - du lieu du an nay khong co category, bo qua
-      hoan toan (nguoi dung xac nhan). Test that gui khong co field nay van thanh cong.
+    - (2026-08-06) Tung xac nhan KHONG can field 'category'/'categories' - luc do du lieu du
+      an nay chua co category, test gui thieu field nay van thanh cong. Tu (2026-08-21) du
+      an co them cat_id/cat_name (xem shopee_categories.py, cot 'cat_id'/'cat_name' trong
+      products) nen build_cache_item() gui kem field 'category' (ten danh muc, chuoi rong
+      neu khong co) - CHUA xac nhan lai bang test that VideoAI co thuc su DUNG field nay de
+      anh huong noi dung video hay chi am tham bo qua field la. Nen chay thu 1 lo nho +
+      doi chieu ket qua truoc khi day hang loat, giong cach da lam voi cac field khac o day.
     - Field Pool viet HOA chu P (khac 'pool' thuong trong 2-tao-video/lib/videoai.ts) - test
       that xac nhan 'Pool' hoa moi dung.
     - BAT BUOC co header User-Agent giong trinh duyet that - Cloudflare chan thang request
@@ -100,6 +105,7 @@ def build_cache_item(row, market=None):
         "images": images,
         "reviewCount": int(row.get("review_count") or 0),
         "ratingCount": int(row.get("rating_count") or 0),
+        "category": row.get("cat_name") or "",
     }
 
 

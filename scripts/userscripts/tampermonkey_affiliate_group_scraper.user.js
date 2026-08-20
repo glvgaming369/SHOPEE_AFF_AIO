@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee Affiliate Offer Group Scraper
 // @namespace    shopee-crawl
-// @version      0.8
+// @version      0.9
 // @description  BFS tu 1 link goc (root) qua "san pham tuong tu" cua offer/product, gom du 60 san pham dat 3 tieu chi (aff_7days/sold/seller_commission) cho 1 group_id, dong bo qua local server (affiliate_scrape_server.py) de gan group nguyen tu khi chay nhieu Chrome profile song song.
 // @match        https://affiliate.shopee.vn/*
 // @match        https://affiliate.shopee.sg/*
@@ -13,6 +13,7 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_info
 // @grant        unsafeWindow
 // @connect      127.0.0.1
 // @connect      localhost
@@ -22,7 +23,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.8'; // khop @version o header - doi ca 2 cho khi sua script
+  const SCRIPT_VERSION = '0.9'; // khop @version o header - doi ca 2 cho khi sua script
   const ENDPOINT_MARKER = '/api/v3/offer/product';
   const GROUP_TARGET = 60;
   const CALL_CAP_PER_ROOT = 500;
@@ -34,6 +35,9 @@
   const DEVICE_KEY_KEY = 'aog_device_key';
   const STOP_KEY = 'aog_stop';
   const SERVER_URL_DEFAULT = 'http://127.0.0.1:8877';
+  const OWN_SCRIPT_FILE = 'tampermonkey_affiliate_group_scraper.user.js';
+  const LAST_UPDATE_CHECK_KEY = 'aog_last_update_check';
+  const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 gio - tranh spam server moi lan mo tab
 
   // Market cua CHINH tab nay - suy tu hostname luc load (khop danh sach @match o tren).
   // Server dung gia tri nay de dam bao tab chi bao gio duoc giao root DUNG market no dang
@@ -136,6 +140,75 @@
         onerror: () => reject(new Error('Khong ket noi duoc local server (' + serverUrl + ') - server co dang chay khong?')),
       });
     });
+  }
+
+  // ---- Kiem tra/mo trang cap nhat script - xem shopee_collector.user.js de biet ly do
+  // khong the tu cap nhat qua GM_xmlhttpRequest thong thuong (phai qua man hinh
+  // Cai dat/Cap nhat cua chinh Tampermonkey). ----
+  function compareVersions(a, b) {
+    const pa = String(a).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+    const pb = String(b).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+    const len = Math.max(pa.length, pb.length);
+    for (let i = 0; i < len; i++) {
+      const diff = (pa[i] || 0) - (pb[i] || 0);
+      if (diff !== 0) return diff;
+    }
+    return 0;
+  }
+
+  function getLocalVersion() {
+    if (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) {
+      return GM_info.script.version;
+    }
+    return SCRIPT_VERSION;
+  }
+
+  function openUpdatePage() {
+    const serverUrl = GM_getValue(SERVER_URL_KEY, SERVER_URL_DEFAULT);
+    window.open(serverUrl + '/userscripts/' + OWN_SCRIPT_FILE, '_blank');
+  }
+
+  function showUpdateAvailable(remoteVersion) {
+    const badge = document.getElementById('aog-update-badge');
+    if (!badge) return;
+    badge.textContent = `🆕 Có bản mới v${remoteVersion} - Bấm để cập nhật`;
+    badge.style.display = 'inline-block';
+  }
+
+  function hideUpdateAvailable() {
+    const badge = document.getElementById('aog-update-badge');
+    if (badge) badge.style.display = 'none';
+  }
+
+  async function checkForUpdate(manual) {
+    try {
+      const json = await serverRequest('GET', '/api/userscripts');
+      const entry = (json.userscripts || []).find((u) => u.file === OWN_SCRIPT_FILE);
+      const remoteVersion = entry && entry.version;
+      if (!remoteVersion) {
+        if (manual) alert('Không tìm thấy thông tin phiên bản trên server.');
+        return;
+      }
+      const localVersion = getLocalVersion();
+      if (compareVersions(remoteVersion, localVersion) > 0) {
+        showUpdateAvailable(remoteVersion);
+        if (manual && confirm(`Có bản mới v${remoteVersion} (đang dùng v${localVersion}). Mở trang cập nhật ngay?`)) {
+          openUpdatePage();
+        }
+      } else {
+        hideUpdateAvailable();
+        if (manual) alert(`Đang dùng bản mới nhất (v${localVersion}).`);
+      }
+    } catch (e) {
+      if (manual) alert('Không kiểm tra được cập nhật: ' + e.message);
+    }
+  }
+
+  function maybeAutoCheckForUpdate() {
+    const last = parseInt(GM_getValue(LAST_UPDATE_CHECK_KEY, '0'), 10);
+    if (Date.now() - last < UPDATE_CHECK_INTERVAL_MS) return;
+    GM_setValue(LAST_UPDATE_CHECK_KEY, String(Date.now()));
+    checkForUpdate(false);
   }
 
   // ---- BFS chinh cho 1 root ----
@@ -353,6 +426,10 @@
     panel.innerHTML = `
       <div style="font-weight:700;color:#ee4d2d;margin-bottom:6px;">Affiliate Offer Group Scraper <span style="font-weight:400;color:#888;font-size:11px;">v${SCRIPT_VERSION}</span></div>
       <div style="font-size:11px;color:#666;margin-bottom:6px;">Market: <b>${currentMarket || 'KHONG NHAN DIEN DUOC'}</b></div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
+        <button id="aog-check-update-btn" style="padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer;background:#f2f2f2;color:#222;border:1px solid #ccc;border-radius:4px;">🔄 Kiểm tra cập nhật</button>
+        <span id="aog-update-badge" style="display:none;font-size:10px;font-weight:700;color:#d8431f;background:#fff5f2;border:1px solid #ee4d2d;padding:4px 8px;border-radius:4px;cursor:pointer;"></span>
+      </div>
       <div style="display:flex;gap:6px;margin-bottom:4px;">
         <input id="aog-server" type="text" placeholder="Local server URL"
           style="flex:1;padding:4px 6px;border:1px solid #ccc;border-radius:4px;">
@@ -381,6 +458,9 @@
       requestStop();
       log('(Da bam Stop - se dung sau khi xu ly xong item hien tai.)');
     });
+    document.getElementById('aog-check-update-btn').addEventListener('click', () => checkForUpdate(true));
+    document.getElementById('aog-update-badge').addEventListener('click', openUpdatePage);
+    maybeAutoCheckForUpdate();
   }
 
   if (document.readyState === 'loading') {

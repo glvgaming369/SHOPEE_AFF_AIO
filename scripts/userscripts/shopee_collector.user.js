@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee Product Link Collector
 // @namespace    http://tampermonkey.net/
-// @version      1.4.0
+// @version      1.6.0
 // @description  Thu thập link sản phẩm Shopee tự động với tính năng cuộn trang thông minh, tự động chuyển trang SPA, tự nhận diện domain quốc gia, xuất dữ liệu và đẩy thẳng vào DB (root) của dashboard affiliate offer scraper.
 // @author       Antigravity
 // @match        https://shopee.vn/*
@@ -19,6 +19,7 @@
 // @grant        GM_getValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_xmlhttpRequest
+// @grant        GM_info
 // @connect      127.0.0.1
 // @connect      localhost
 // @updateURL    http://127.0.0.1:8877/userscripts/shopee_collector.user.js
@@ -28,12 +29,16 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = 'v1.4.0';
+  const SCRIPT_VERSION = 'v1.6.0';
   const STORAGE_KEY = 'shopee_collected_links';
   const RUNNING_STATE_KEY = 'shopee_collector_is_running';
   const AUTO_PAGE_KEY = 'shopee_collector_auto_page';
   const SERVER_URL_KEY = 'shopee_collector_server_url';
+  const CAT_ID_KEY = 'shopee_collector_cat_id';
   const SERVER_URL_DEFAULT = 'http://127.0.0.1:8877';
+  const OWN_SCRIPT_FILE = 'shopee_collector.user.js';
+  const LAST_UPDATE_CHECK_KEY = 'shopee_collector_last_update_check';
+  const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 gio - tranh spam server moi lan load trang
 
   let isRunning = false;
   let autoPage = false;
@@ -89,6 +94,29 @@
       console.error('Lỗi parse URL Shopee:', e);
     }
     return null;
+  }
+
+  // Phat hien cat_id (danh muc cap 1) tu URL hien tai - Shopee dung dinh dang
+  // "<ten>-cat.<id>" hoac "<ten>-cat.<id>.<subId>" cho trang danh muc, LUON lay SO DAU
+  // TIEN sau "-cat." (vd .../Overseas-Sim-Cards-cat.11013350.11013470 -> 11013350, da xac
+  // nhan voi nguoi dung 2026-08-21). Tra ve null neu khong dang o tab danh muc nao (dung
+  // nhu thiet ke - root cao o tab khac se khong co cat_id, xem pushToDb()).
+  function detectCatIdFromUrl() {
+    const m = location.href.match(/-cat\.(\d+)/);
+    return m ? m[1] : null;
+  }
+
+  // cat_id cua PHIEN thu thap hien tai - CHI duoc dat lai khi nguoi dung bam nut Start THAT
+  // (khong phai luc script tu goi lai startCollecting() de tiep tuc sau khi tu chuyen trang
+  // hoac tu resume luc load lai trang) - xem gan su kien nut Start ben duoi. Ap dung cho
+  // TOAN BO link dang co trong bo nho dem tai thoi diem bam "Đẩy vào DB" (pushToDb()), kha
+  // nang trung voi cach nguoi dung mo ta luong lam viec (1 phien = 1 danh muc).
+  function getSessionCatId() {
+    return localStorage.getItem(CAT_ID_KEY) || null;
+  }
+  function setSessionCatId(catId) {
+    if (catId) localStorage.setItem(CAT_ID_KEY, catId);
+    else localStorage.removeItem(CAT_ID_KEY);
   }
 
   // Quét các link trên trang hiện tại
@@ -305,6 +333,101 @@
     localStorage.setItem(SERVER_URL_KEY, url);
   }
 
+  // So sanh 2 chuoi version dang "1.6.0"/"v1.6.0" - tra ve >0 neu a moi hon b, <0 neu cu
+  // hon, 0 neu bang nhau. Tach tung thanh phan so, so sanh tu trai qua phai (chuan semver
+  // don gian, du dung cho ca 2 script trong du an nay).
+  function compareVersions(a, b) {
+    const pa = String(a).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+    const pb = String(b).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+    const len = Math.max(pa.length, pb.length);
+    for (let i = 0; i < len; i++) {
+      const diff = (pa[i] || 0) - (pb[i] || 0);
+      if (diff !== 0) return diff;
+    }
+    return 0;
+  }
+
+  // Uu tien doc version THAT dang cai (GM_info.script.version - Tampermonkey tu dien day
+  // du khi cai qua URL) - chinh xac hon hang so SCRIPT_VERSION trong truong hop nguoi dung
+  // dang chay 1 ban cu hon file nguon hien tai ma chua kip cap nhat.
+  function getLocalVersion() {
+    if (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) {
+      return GM_info.script.version;
+    }
+    return SCRIPT_VERSION;
+  }
+
+  // Mo trang .user.js cua chinh script nay - Tampermonkey tu bat duoc dieu huong toi URL
+  // dang .user.js va hien man hinh Cai dat/Cap nhat cua CHINH NO (giong het cach lien ket
+  // trong tab "Cai dat / Cap nhat Script" cua dashboard hoat dong) - khong co API JS nao de
+  // 1 userscript tu cap nhat chinh no ma khong qua man hinh nay cua trinh duyet/extension.
+  function openUpdatePage() {
+    window.open(getServerUrl() + '/userscripts/' + OWN_SCRIPT_FILE, '_blank');
+  }
+
+  function showUpdateAvailable(remoteVersion) {
+    const badge = document.getElementById('sc-update-badge');
+    if (!badge) return;
+    badge.textContent = `🆕 Có bản mới v${remoteVersion} - Bấm để cập nhật`;
+    badge.style.display = 'inline-block';
+  }
+
+  function hideUpdateAvailable() {
+    const badge = document.getElementById('sc-update-badge');
+    if (badge) badge.style.display = 'none';
+  }
+
+  // Doc version MOI NHAT server dang co qua /api/userscripts (JSON co san, dashboard cung
+  // dung chinh endpoint nay) - tranh phai tu quet regex '// @version' tu noi dung file .user.js
+  // tho. manual=true: co bao loi/thong bao "da moi nhat" ro rang (nguoi dung tu bam nut);
+  // manual=false: kiem tra am tham luc load trang, chi hien badge khi THAT SU co ban moi.
+  function checkForUpdate(manual) {
+    const serverUrl = getServerUrl();
+    GM_xmlhttpRequest({
+      method: 'GET',
+      url: serverUrl + '/api/userscripts',
+      onload: (resp) => {
+        let json;
+        try {
+          json = JSON.parse(resp.responseText);
+        } catch (e) {
+          if (manual) alert('Server trả về không đọc được khi kiểm tra cập nhật.');
+          return;
+        }
+        const entry = (json.userscripts || []).find((u) => u.file === OWN_SCRIPT_FILE);
+        const remoteVersion = entry && entry.version;
+        if (!remoteVersion) {
+          if (manual) alert('Không tìm thấy thông tin phiên bản trên server.');
+          return;
+        }
+        const localVersion = getLocalVersion();
+        if (compareVersions(remoteVersion, localVersion) > 0) {
+          showUpdateAvailable(remoteVersion);
+          if (manual) {
+            if (confirm(`Có bản mới v${remoteVersion} (đang dùng v${localVersion}). Mở trang cập nhật ngay?`)) {
+              openUpdatePage();
+            }
+          }
+        } else {
+          hideUpdateAvailable();
+          if (manual) alert(`Đang dùng bản mới nhất (v${localVersion}).`);
+        }
+      },
+      onerror: () => {
+        if (manual) alert('Không kết nối được server (' + serverUrl + ') để kiểm tra cập nhật.');
+      },
+    });
+  }
+
+  // Chi tu kiem tra ngam moi UPDATE_CHECK_INTERVAL_MS/lan (khong phai moi lan load trang) -
+  // nguoi dung thuong mo rat nhieu trang san pham lien tuc, goi API nay moi trang la thua.
+  function maybeAutoCheckForUpdate() {
+    const last = parseInt(localStorage.getItem(LAST_UPDATE_CHECK_KEY) || '0', 10);
+    if (Date.now() - last < UPDATE_CHECK_INTERVAL_MS) return;
+    localStorage.setItem(LAST_UPDATE_CHECK_KEY, String(Date.now()));
+    checkForUpdate(false);
+  }
+
   // Day toan bo link da thu thap thang vao DB (bang 'products', lam root) qua
   // affiliate_scrape_server.py - KHAC origin voi shopee.* nen bat buoc GM_xmlhttpRequest
   // de ne CORS (server khong bat CORS, xem affiliate_scrape_server.py).
@@ -312,16 +435,18 @@
     const links = getStoredLinks();
     if (links.length === 0) return alert('Chưa có link nào để đẩy vào DB!');
     const serverUrl = getServerUrl();
+    const catId = getSessionCatId();
     GM_xmlhttpRequest({
       method: 'POST',
       url: serverUrl + '/api/roots/import',
       headers: { 'Content-Type': 'application/json' },
-      data: JSON.stringify({ links }),
+      data: JSON.stringify({ links, cat_id: catId }),
       onload: (resp) => {
         try {
           const json = JSON.parse(resp.responseText);
           if (resp.status >= 200 && resp.status < 300) {
-            alert(`Đã đẩy vào DB: ${json.added} root mới (${links.length - json.added} đã có sẵn/không hợp lệ).`);
+            const catMsg = catId ? ` (danh mục cat_id=${catId})` : ' (không có danh mục)';
+            alert(`Đã đẩy vào DB: ${json.added} root mới (${links.length - json.added} đã có sẵn/không hợp lệ)${catMsg}.`);
           } else {
             alert('Server báo lỗi: ' + (json.error || resp.responseText));
           }
@@ -397,6 +522,37 @@
         #shopee-collector-body {
           padding: 14px;
         }
+        .sc-update-row {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          margin-bottom: 10px;
+          flex-wrap: wrap;
+        }
+        .sc-btn-check-update {
+          flex: none;
+          background: #f1f3f5;
+          color: #333;
+          border: 1px solid #ced4da;
+          border-radius: 6px;
+          padding: 5px 10px;
+          font-size: 11px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .sc-btn-check-update:hover { background: #e9ecef; }
+        .sc-update-badge {
+          display: none;
+          font-size: 11px;
+          font-weight: 700;
+          color: #d8431f;
+          background: #fff5f2;
+          border: 1px solid #ee4d2d;
+          padding: 5px 8px;
+          border-radius: 6px;
+          cursor: pointer;
+        }
+        .sc-update-badge:hover { background: #ffe8e0; }
         .sc-status-box {
           background: #f8f9fa;
           border-radius: 8px;
@@ -414,6 +570,14 @@
           font-size: 24px;
           font-weight: bold;
           color: #ee4d2d;
+        }
+        .sc-cat-line {
+          font-size: 11px;
+          color: #6c757d;
+          margin-top: 4px;
+        }
+        .sc-cat-line b {
+          color: #333;
         }
         .sc-option-box {
           display: flex;
@@ -529,9 +693,14 @@
         <span id="sc-toggle-btn" style="font-size: 12px;">▼</span>
       </div>
       <div id="shopee-collector-body">
+        <div class="sc-update-row">
+          <button class="sc-btn-check-update" id="sc-check-update-btn">🔄 Kiểm tra cập nhật</button>
+          <span class="sc-update-badge" id="sc-update-badge"></span>
+        </div>
         <div class="sc-status-box">
           <div class="sc-status-title">Link đã thu thập</div>
           <div class="sc-status-count" id="sc-link-count">0</div>
+          <div class="sc-cat-line" id="sc-cat-line"></div>
         </div>
 
         <label class="sc-option-box">
@@ -565,7 +734,13 @@
     });
 
     // Gán sự kiện nút
-    document.getElementById('sc-start-btn').addEventListener('click', startCollecting);
+    // Chi phat hien lai cat_id luc bam Start THAT (khong phai luc startCollecting() tu goi
+    // lai de tiep tuc sau auto-page/resume) - xem detectCatIdFromUrl()/setSessionCatId().
+    document.getElementById('sc-start-btn').addEventListener('click', () => {
+      setSessionCatId(detectCatIdFromUrl());
+      updateUI();
+      startCollecting();
+    });
     document.getElementById('sc-stop-btn').addEventListener('click', stopCollecting);
     document.getElementById('sc-clear-btn').addEventListener('click', clearStorage);
     document.getElementById('sc-exp-txt').addEventListener('click', exportTXT);
@@ -573,6 +748,8 @@
     document.getElementById('sc-exp-csv').addEventListener('click', exportCSV);
     document.getElementById('sc-db-url').addEventListener('change', (e) => setServerUrl(e.target.value.trim()));
     document.getElementById('sc-push-db-btn').addEventListener('click', pushToDb);
+    document.getElementById('sc-check-update-btn').addEventListener('click', () => checkForUpdate(true));
+    document.getElementById('sc-update-badge').addEventListener('click', openUpdatePage);
 
     // Toggle Ẩn/Hiện Panel
     const header = document.getElementById('shopee-collector-header');
@@ -592,6 +769,7 @@
     });
 
     updateUI();
+    maybeAutoCheckForUpdate();
 
     // Tự động chạy tiếp nếu trước đó đang ở trạng thái IsRunning (chuyển trang vừa xảy ra)
     if (isRunning) {
@@ -611,6 +789,14 @@
     if (countEl) {
       const links = getStoredLinks();
       countEl.innerText = links.length;
+    }
+
+    const catLineEl = document.getElementById('sc-cat-line');
+    if (catLineEl) {
+      const catId = getSessionCatId();
+      catLineEl.innerHTML = catId
+        ? `Danh mục phiên: <b>cat_id ${catId}</b>`
+        : 'Danh mục phiên: <b>không có</b>';
     }
 
     if (startBtn && stopBtn && indicator) {

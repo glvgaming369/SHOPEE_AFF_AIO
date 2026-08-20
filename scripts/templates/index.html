@@ -182,6 +182,11 @@
   .accounts-actions { display: flex; flex-wrap: wrap; gap: 6px; }
   .accounts-actions button { padding: 7px 12px; font-size: 12.5px; }
 
+  /* Thanh ty le trong bang "Thong ke nganh hang" - CSS thuan, khong can thu vien chart */
+  .cat-bar-wrap { position: relative; background: var(--surface-2); border-radius: 6px; height: 22px; overflow: hidden; border: 1px solid var(--border); }
+  .cat-bar-fill { position: absolute; top: 0; left: 0; height: 100%; background: var(--accent-ring); border-right: 2px solid var(--accent); }
+  .cat-bar-label { position: relative; z-index: 1; display: block; font-size: 11.5px; font-weight: 600; color: var(--ink-soft); padding-left: 8px; line-height: 22px; }
+
   /* Form Elements */
   input, textarea, button, select { font-family: var(--font-sans); font-size: 13.5px; }
   input[type=text], input[type=number], input[type=password] {
@@ -221,7 +226,7 @@
   button.danger:hover { background: var(--danger-text); box-shadow: 0 4px 10px rgba(220,38,38,0.3); }
 
   .row { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
-  .row input { flex: 1; min-width: 200px; }
+  .row input[type="text"], .row input[type="number"], .row input[type="password"] { flex: 1; min-width: 200px; }
   .muted { color: var(--ink-faint); font-size: 12.5px; line-height: 1.5; }
 
   /* Nhom checkbox chon market (thay cho dropdown) */
@@ -233,7 +238,7 @@
     background: var(--surface); transition: all 0.15s ease; user-select: none;
   }
   .market-check:hover { border-color: var(--ink-faint); color: var(--ink); }
-  .market-check input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; margin: 0; }
+  .market-check input { flex: none; accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; margin: 0; }
   .market-check:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-dark); }
   .members-box {
     background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius);
@@ -411,9 +416,12 @@
   <section>
     <h2>Tổng quan hệ thống</h2>
     <div class="stats-bar" id="stats-bar">Đang tải dữ liệu...</div>
-    <div style="margin-top:14px;">
-      <button class="danger" onclick="resetAll()">Xóa toàn bộ dữ liệu cào</button>
-      <span class="muted">(Chỉ xóa dữ liệu root/related đã cào - KHÔNG xóa danh sách tài khoản/profile)</span>
+    <div class="row" style="margin-top:14px; margin-bottom:0;">
+      <select id="reset-market-sel" style="max-width:200px;">
+        <option value="">-- Tất cả thị trường --</option>
+      </select>
+      <button class="danger" onclick="resetAll()">Xóa dữ liệu cào</button>
+      <span class="muted">(Chỉ xóa dữ liệu root/related đã cào theo thị trường chọn ở trên - KHÔNG xóa danh sách tài khoản/profile)</span>
     </div>
   </section>
 
@@ -469,6 +477,27 @@
   </section>
 
   <section>
+    <h2>Thống kê ngành hàng (Danh mục)</h2>
+    <div class="muted" style="margin-bottom:10px;">Tổng số sản phẩm (Root + Related) đã thu thập được, gom theo danh mục Shopee - đo lường quy mô từng ngành hàng để biết nên tập trung cào thêm ở đâu.</div>
+    <div class="row" style="margin-bottom:10px;">
+      <label style="white-space:nowrap;font-weight:500;">Thị trường:</label>
+      <select id="cat-stats-market-sel" onchange="loadCategoryStats()" style="max-width:200px;">
+        <option value="">-- Tất cả thị trường --</option>
+      </select>
+      <span class="muted" id="cat-stats-total"></span>
+    </div>
+    <div class="table-wrap"><table>
+      <colgroup>
+        <col>
+        <col style="width:100px;">
+        <col style="width:220px;">
+      </colgroup>
+      <thead><tr><th>Danh mục</th><th>Số lượng</th><th>Tỷ lệ</th></tr></thead>
+      <tbody id="cat-stats-tbody"></tbody>
+    </table></div>
+  </section>
+
+  <section>
     <h2>Danh sách Root</h2>
     <div class="row" style="background:var(--surface-2); padding:12px; border-radius:var(--radius-sm); border:1px solid var(--border);">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;">
@@ -491,7 +520,7 @@
       <button class="secondary" onclick="resetInsufficientAll()">Đặt lại TẤT CẢ Root thiếu</button>
     </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Mã SP (item_id)</th><th>Thị trường</th><th>Trạng thái</th><th>Thành viên</th><th>Giao cho</th><th>Liên kết</th><th>Thao tác</th></tr></thead>
+      <thead><tr><th>Mã SP (item_id)</th><th>Thị trường</th><th>Danh mục</th><th>Trạng thái</th><th>Thành viên</th><th>Giao cho</th><th>Liên kết</th><th>Thao tác</th></tr></thead>
       <tbody id="roots-tbody"></tbody>
     </table></div>
     <div id="members-panel"></div>
@@ -518,6 +547,9 @@
         <option value="done">done</option>
         <option value="fail">fail</option>
       </select>
+      <select id="item-filter-market" onchange="loadItems()">
+        <option value="">-- Thị trường: Tất cả --</option>
+      </select>
       <input type="text" id="item-filter-search" placeholder="Tìm theo itemid / tên / shop..." onkeydown="if(event.key==='Enter') loadItems()">
       <input type="text" id="item-filter-groupid" placeholder="Lọc theo groupId..." onkeydown="if(event.key==='Enter') loadItems()">
       <button class="secondary" onclick="loadItems()">Lọc sản phẩm</button>
@@ -525,7 +557,7 @@
     </div>
     <div class="muted" style="margin-bottom:10px;" id="items-count"></div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Mã SP (item_id)</th><th>Tên sản phẩm</th><th>Đã bán (30d)</th><th>KOL 7 ngày</th><th>Hoa hồng nhà bán</th><th>Loại</th><th>Trạng thái</th><th>Nhóm</th><th>Gộp link</th><th>Thao tác</th></tr></thead>
+      <thead><tr><th>Mã SP (item_id)</th><th>Tên sản phẩm</th><th>Đã bán (30d)</th><th>KOL 7 ngày</th><th>Hoa hồng nhà bán</th><th>Loại</th><th>Trạng thái</th><th>Danh mục</th><th>Nhóm</th><th>Gộp link</th><th>Thao tác</th></tr></thead>
       <tbody id="items-tbody"></tbody>
     </table></div>
   </section>
@@ -817,9 +849,11 @@ async function saveSettings() {
 }
 
 async function resetAll() {
-  if (!(await customConfirm('Xóa TOÀN BỘ dữ liệu root/related đã cào? Không thể hoàn tác. Danh sách tài khoản/profile vẫn được giữ nguyên.', { danger: true }))) return;
-  const { deleted } = await api('POST', '/api/reset');
-  await customAlert(`Đã xóa thành công ${deleted} bản ghi.`);
+  const market = document.getElementById('reset-market-sel').value;
+  const scope = market ? `CỦA RIÊNG thị trường "${market}"` : 'TOÀN BỘ (TẤT CẢ thị trường)';
+  if (!(await customConfirm(`Xóa ${scope} dữ liệu root/related đã cào? Không thể hoàn tác. Danh sách tài khoản/profile vẫn được giữ nguyên.`, { danger: true }))) return;
+  const { deleted } = await api('POST', '/api/reset', { market });
+  await customAlert(`Đã xóa thành công ${deleted} bản ghi${market ? ' (thị trường ' + market + ')' : ''}.`);
   refreshAll();
 }
 
@@ -847,6 +881,37 @@ async function loadRootMarketStats() {
   const knownMarkets = markets.filter(m => m.market);
   fillMarketSelectOptions(document.getElementById('auto-assign-market-sel'), knownMarkets, '-- Tất cả thị trường --');
   fillMarketSelectOptions(document.getElementById('root-filter-market'), knownMarkets, '-- Tất cả thị trường --');
+  fillMarketSelectOptions(document.getElementById('item-filter-market'), knownMarkets, '-- Thị trường: Tất cả --');
+  fillMarketSelectOptions(document.getElementById('cat-stats-market-sel'), knownMarkets, '-- Tất cả thị trường --');
+  fillMarketSelectOptions(document.getElementById('reset-market-sel'), knownMarkets, '-- Tất cả thị trường --');
+}
+
+// "Thong ke nganh hang" (tab Van hanh) - GROUP BY toan bang products (khong loc
+// link_type/status_link), nen KHONG dua vao vong poll 5s nhu cac bang khac cung tab (xem
+// setInterval() o duoi file) de tranh tai khong can thiet - chi tai luc vao trang + luc
+// nguoi dung doi filter market.
+async function loadCategoryStats() {
+  const market = document.getElementById('cat-stats-market-sel').value;
+  const qs = market ? `?market=${encodeURIComponent(market)}` : '';
+  const { total, categories } = await api('GET', `/api/items/category_stats${qs}`);
+  document.getElementById('cat-stats-total').textContent =
+    `Tổng ${total} sản phẩm đã thu thập${market ? ' ở thị trường ' + market : ' (tất cả thị trường)'}.`;
+  const tbody = document.getElementById('cat-stats-tbody');
+  tbody.innerHTML = categories.map(c => {
+    const pct = total ? (c.count / total * 100) : 0;
+    const label = c.cat_name || (c.cat_id ? `cat_id ${c.cat_id} (chưa rõ tên)` : 'Chưa gán danh mục');
+    return `
+    <tr>
+      <td>${label}</td>
+      <td><b>${c.count}</b></td>
+      <td>
+        <div class="cat-bar-wrap">
+          <div class="cat-bar-fill" style="width:${pct.toFixed(1)}%"></div>
+          <span class="cat-bar-label">${pct.toFixed(1)}%</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="3" class="muted">Chưa có dữ liệu.</td></tr>';
 }
 
 async function loadStats() {
@@ -1042,6 +1107,16 @@ function rootStatusBadge(r) {
   return `<span class="badge idle">${r.status_link}</span>`;
 }
 
+// cat_id/cat_name: gan luc Shopee Product Link Collector cao root tu 1 tab danh muc (xem
+// shopee_collector.user.js) roi ke thua xuong san pham tuong tu cung nhom - co the chi co
+// cat_id (chua tra duoc ten, vd category moi hon lan xuat file cat-db gan nhat) hoac ca hai
+// deu rong (cao ngoai tab danh muc, dung nhu thiet ke).
+function categoryCell(row) {
+  if (row.cat_name) return `<span title="cat_id ${row.cat_id}">${row.cat_name}</span>`;
+  if (row.cat_id) return `<code>${row.cat_id}</code>`;
+  return '<span class="muted">-</span>';
+}
+
 async function loadRoots() {
   const market = document.getElementById('root-filter-market').value;
   const qs = market ? `?market=${encodeURIComponent(market)}` : '';
@@ -1051,6 +1126,7 @@ async function loadRoots() {
     <tr>
       <td><code>${r.itemid}</code></td>
       <td><b>${r.market || '-'}</b></td>
+      <td>${categoryCell(r)}</td>
       <td>${rootStatusBadge(r)}</td>
       <td><b>${r.member_count}</b>/60</td>
       <td>${r.assigned_key || '-'}</td>
@@ -1066,7 +1142,7 @@ async function loadRoots() {
         <button class="secondary" onclick="showMembers('${r.itemid}', '${r.market}')">Xem thành viên</button>
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="7" class="muted">Chưa có Root nào.</td></tr>';
+  `).join('') || '<tr><td colspan="8" class="muted">Chưa có Root nào.</td></tr>';
 }
 
 async function recomputeMerged(itemid, market) {
@@ -1135,10 +1211,12 @@ async function loadItems() {
   const params = new URLSearchParams();
   const linkType = document.getElementById('item-filter-linktype').value;
   const status = document.getElementById('item-filter-status').value;
+  const market = document.getElementById('item-filter-market').value;
   const search = document.getElementById('item-filter-search').value.trim();
   const groupid = document.getElementById('item-filter-groupid').value.trim();
   if (linkType) params.set('link_type', linkType);
   if (status) params.set('status_link', status);
+  if (market) params.set('market', market);
   if (search) params.set('search', search);
   if (groupid) params.set('groupid', groupid);
   params.set('limit', '200');
@@ -1167,6 +1245,7 @@ async function loadItems() {
       <td>${metricCell(it.seller_commission, commPasses)}</td>
       <td><span class="badge ${it.link_type === 'root' ? 'pending' : 'idle'}">${it.link_type || '-'}</span></td>
       <td>${it.status_link ? `<span class="badge ${it.status_link}">${it.status_link}</span>` : '-'}</td>
+      <td>${categoryCell(it)}</td>
       <td>${it.groupid ? `<a href="#" onclick="filterByGroup('${it.groupid}'); return false;" title="Lọc theo nhóm này"><code>${it.groupid}</code></a>` : '-'}</td>
       <td>
         ${it.merged_link
@@ -1180,7 +1259,7 @@ async function loadItems() {
       </td>
     </tr>
   `;
-  }).join('') || '<tr><td colspan="10" class="muted">Không có sản phẩm nào khớp bộ lọc.</td></tr>';
+  }).join('') || '<tr><td colspan="11" class="muted">Không có sản phẩm nào khớp bộ lọc.</td></tr>';
 }
 
 async function deleteItem(itemid, market) {
@@ -1583,7 +1662,7 @@ async function clearMailAccounts() {
 async function refreshAll() {
   await loadAccounts();
   await loadRootMarketStats();
-  await Promise.all([loadStats(), loadRoots(), loadSettings(), loadWorkers(), loadUserscripts()]);
+  await Promise.all([loadStats(), loadRoots(), loadSettings(), loadWorkers(), loadUserscripts(), loadCategoryStats()]);
 }
 refreshAll();
 setInterval(() => { loadStats(); loadRoots(); loadWorkers(); loadRootMarketStats(); }, 5000);

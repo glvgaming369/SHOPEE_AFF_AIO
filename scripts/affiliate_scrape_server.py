@@ -196,7 +196,15 @@ def import_roots():
     links = body.get("links")
     if not isinstance(links, list) or not links:
         return _bad_request("thieu 'links' (danh sach string)")
-    added = shopee_db.import_roots_as_pending(DB_PATH, links)
+    cat_id = body.get("cat_id")
+    if cat_id not in (None, ""):
+        try:
+            cat_id = int(cat_id)
+        except (TypeError, ValueError):
+            return _bad_request("'cat_id' phai la so nguyen")
+    else:
+        cat_id = None
+    added = shopee_db.import_roots_as_pending(DB_PATH, links, cat_id=cat_id)
     return jsonify({"added": added})
 
 
@@ -377,10 +385,11 @@ def list_items():
     status_link = request.args.get("status_link") or None
     search = request.args.get("search") or None
     groupid = request.args.get("groupid") or None
+    market = request.args.get("market") or None
     limit = request.args.get("limit", 200, type=int)
     items = shopee_db.fetch_all_items(
         DB_PATH, link_type=link_type, status_link=status_link, search=search,
-        groupid=groupid, limit=limit,
+        groupid=groupid, market=market, limit=limit,
     )
     return jsonify({"items": items})
 
@@ -409,6 +418,12 @@ def group_count(groupid):
 def list_roots():
     market = request.args.get("market") or None
     return jsonify({"roots": shopee_db.list_roots_with_counts(DB_PATH, market=market)})
+
+
+@app.route("/api/items/category_stats", methods=["GET"])
+def items_category_stats():
+    market = request.args.get("market") or None
+    return jsonify(shopee_db.category_stats(DB_PATH, market=market))
 
 
 @app.route("/api/roots/market_stats", methods=["GET"])
@@ -808,10 +823,13 @@ def mail_accounts_get_code(account_id):
 
 @app.route("/api/reset", methods=["POST"])
 def reset_all():
-    """Xoa toan bo du lieu san pham (khong dong tai khoan/profile) - dung cho nut "Xoa
-    toan bo du lieu" tren UI."""
-    deleted = shopee_db.clear_all_items(DB_PATH)
-    return jsonify({"ok": True, "deleted": deleted})
+    """Xoa du lieu san pham (khong dong tai khoan/profile) - dung cho nut "Xoa toan bo du
+    lieu" tren UI. market optional trong body: '' hoac thieu = xoa TAT CA (hanh vi cu), 1
+    ma market cu the = CHI xoa dong cua thi truong do."""
+    body = request.get_json(force=True, silent=True) or {}
+    market = body.get("market") or None
+    deleted = shopee_db.clear_all_items(DB_PATH, market=market)
+    return jsonify({"ok": True, "deleted": deleted, "market": market})
 
 
 @app.route("/api/stats", methods=["GET"])
@@ -840,7 +858,15 @@ def main():
     DB_PATH = args.db_path
     shopee_db.init_db(DB_PATH)  # dam bao bang/cot ton tai truoc khi nhan request dau tien
     print(f"[affiliate_scrape_server] DB: {DB_PATH} | http://127.0.0.1:{args.port}")
-    app.run(host="127.0.0.1", port=args.port, debug=False)
+    # threaded=True QUAN TRONG: mac dinh Werkzeug dev server xu ly TUAN TU tung request 1
+    # (single-threaded) - voi so luong tab Tampermonkey (worker) chay song song + dashboard
+    # tu poll 4 API moi 5s, request nao cung phai xep hang cho request truoc xong. Nguoi
+    # dung bao cao trieu chung "bam nut tren dashboard khong phan hoi, giong mat mang" - dung
+    # la hien tuong request bi ket trong hang doi nay, KHONG phai loi mang that. An toan bat
+    # thread vi tang du lieu (shopee_db.py) da thiet ke san cho ghi song song: moi ham tu mo
+    # 1 connection SQLite RIENG (_connect(), khong dung chung giua cac request/thread) + WAL
+    # mode + BEGIN IMMEDIATE cho cac giao dich ghi quan trong (xem init_db()/try_assign_verified()).
+    app.run(host="127.0.0.1", port=args.port, debug=False, threaded=True)
 
 
 if __name__ == "__main__":

@@ -52,7 +52,7 @@ COLUMNS = [
     "merged_link", "historical_sold", "shop_name", "description", "status_link",
     "created_at", "market", "category_group", "original_price", "review_count",
     "assigned_key", "claimed_at", "job_id", "cache_uploaded",
-    "affiliate_promoted_last_7days", "xtra", "fail_reason",
+    "affiliate_promoted_last_7days", "xtra", "fail_reason", "cat_id", "cat_name",
 ]
 
 CREATE_DEVICES_TABLE_SQL = """
@@ -168,6 +168,8 @@ create table if not exists products (
     affiliate_promoted_last_7days integer,
     xtra integer,
     fail_reason text,
+    cat_id integer,
+    cat_name text,
     unique(market, itemid)
 );
 """
@@ -247,6 +249,14 @@ def init_db(db_path=DB_PATH_DEFAULT):
         conn.execute("alter table products add column xtra integer")
     if "fail_reason" not in existing_cols:
         conn.execute("alter table products add column fail_reason text")
+    # Cot 'cat_id'/'cat_name' them sau - danh muc Shopee (tu URL '-cat.<id>' khi cao bang
+    # Shopee Product Link Collector, xem shopee_collector.user.js) gan cho root, san pham
+    # tuong tu ke thua lai cua root (xem try_assign_verified()). NULL = cao ngoai tab danh
+    # muc (dung nhu thiet ke, khong phai loi).
+    if "cat_id" not in existing_cols:
+        conn.execute("alter table products add column cat_id integer")
+    if "cat_name" not in existing_cols:
+        conn.execute("alter table products add column cat_name text")
     conn.execute(
         "create index if not exists idx_products_claim "
         "on products(status_link, affiliate_promoted_last_7days, sold)"
@@ -279,6 +289,12 @@ def init_db(db_path=DB_PATH_DEFAULT):
     # theo itemid nhu search LIKE trong fetch_all_items()/list_roots_with_counts()) - can
     # index rieng.
     conn.execute("create index if not exists idx_products_itemid on products(itemid)")
+    # Thong ke nganh hang (category_stats(), tab "Van hanh") GROUP BY (market, cat_id) tren
+    # TOAN BO bang products (khong loc link_type/status_link truoc nhu cac truy van khac) -
+    # can index rieng de tranh quet toan bang (~900k+ dong o quy mo thuc te du an nay) moi
+    # lan goi, cung tinh than voi cac index idx_products_* khac o tren (da do dac gap van
+    # de tuong tu voi /api/roots/list, /api/stats truoc khi co index).
+    conn.execute("create index if not exists idx_products_cat on products(market, cat_id)")
     conn.execute(CREATE_DEVICES_TABLE_SQL)
     conn.execute(CREATE_SETTINGS_TABLE_SQL)
     conn.execute(CREATE_WORKERS_TABLE_SQL)
@@ -579,14 +595,18 @@ def upsert_item(db_path, row: dict):
         conn.close()
 
 
-def clear_all_items(db_path=DB_PATH_DEFAULT):
-    """Xoa TOAN BO du lieu san pham (root + related, moi trang thai) - dung khi nguoi
-    dung bam "Xoa toan bo du lieu" tren UI de lam sach test/chay lai tu dau. KHONG dong
-    bang 'devices' (tai khoan/profile la cau hinh, khong phai du lieu cao duoc). Tra ve so
-    dong da xoa."""
+def clear_all_items(db_path=DB_PATH_DEFAULT, market=None):
+    """Xoa du lieu san pham (root + related, moi trang thai) - dung khi nguoi dung bam "Xoa
+    toan bo du lieu" tren UI de lam sach test/chay lai tu dau. market: None/'' xoa TOAN BO
+    (hanh vi cu, moi thi truong); truyen 1 ma market cu the (vd 'ph') chi xoa DUNG thi
+    truong do, giu nguyen du lieu cac thi truong khac. KHONG dong bang 'devices' (tai
+    khoan/profile la cau hinh, khong phai du lieu cao duoc). Tra ve so dong da xoa."""
     conn = _connect(db_path)
     try:
-        cur = conn.execute("delete from products")
+        if market:
+            cur = conn.execute("delete from products where market=?", (market,))
+        else:
+            cur = conn.execute("delete from products")
         conn.commit()
         return cur.rowcount
     finally:
@@ -621,15 +641,16 @@ def get_item(db_path=DB_PATH_DEFAULT, itemid=None, market=None):
 
 
 def fetch_all_items(db_path=DB_PATH_DEFAULT, link_type=None, status_link=None, search=None,
-                     groupid=None, limit=500):
+                     groupid=None, market=None, limit=500):
     """Doc lai danh sach item da luu trong DB - dung cho tab 'Xem DB' cua Streamlit UI.
     link_type: loc theo 'root'/'related' (None/'' = tat ca). status_link: loc theo
     'pending'/'done'/'fail' (None/'' = tat ca). search: loc itemid/name/shop_name co chua
     chuoi nay (khong phan biet hoa thuong). groupid: loc DUNG 1 nhom (khop chinh xac,
     khong phai LIKE - groupid la khoa nhom, khong can tim gan dung) - dung cho tab 'San
-    pham da cao' khi nguoi dung muon xem het thanh vien cua 1 nhom cu the. Dung tham so hoa
-    (?) cho ca gia tri loc lan LIMIT - khong noi chuoi nguoi dung truc tiep vao cau SQL
-    (tranh SQL injection)."""
+    pham da cao' khi nguoi dung muon xem het thanh vien cua 1 nhom cu the. market: loc DUNG
+    1 thi truong (None/'' = tat ca) - dung cho dropdown loc o tab 'San pham da cao'. Dung
+    tham so hoa (?) cho ca gia tri loc lan LIMIT - khong noi chuoi nguoi dung truc tiep vao
+    cau SQL (tranh SQL injection)."""
     conn = _connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
@@ -644,6 +665,9 @@ def fetch_all_items(db_path=DB_PATH_DEFAULT, link_type=None, status_link=None, s
         if groupid:
             where.append("groupid = ?")
             params.append(str(groupid))
+        if market:
+            where.append("market = ?")
+            params.append(market)
         if search:
             where.append("(itemid LIKE ? OR name LIKE ? OR shop_name LIKE ?)")
             like = f"%{search}%"
@@ -864,12 +888,20 @@ def release_claims_for_device(db_path, device_key):
 # 1 group - itemid TRAN khong con la khoa duy nhat (2 market khac nhau co the trung so).
 # =====================================================================================
 
-def import_roots_as_pending(db_path, links):
+def import_roots_as_pending(db_path, links, cat_id=None):
     """Nap link root -> insert link_type='root', status='pending', groupid=itemid, market
     suy tu domain cua chinh link (market_from_link). Bo qua (market, itemid) da ton tai
     (insert or ignore) - 2 link cung itemid nhung KHAC market (vd shopee.ph vs shopee.co.th)
     van duoc luu thanh 2 dong rieng biet, khong con bi de len nhau nhu truoc. Tra ve so root
-    MOI them."""
+    MOI them.
+
+    cat_id: 1 gia tri DUY NHAT ap dung cho CA LO link nay (Shopee Product Link Collector tu
+    phat hien tu URL '-cat.<id>' luc bam Start, gan chung cho toan bo root cao duoc trong
+    phien do - xem shopee_collector.user.js). None neu phien cao KHONG o tab danh muc (dung
+    nhu thiet ke, khong phai loi/thieu du lieu). cat_name tra cuu RIENG cho tung link theo
+    market cua chinh link do (shopee_categories.cat_name_for) - phong truong hop hiem lo
+    link lay tu nhieu domain khac nhau du cung 1 phien."""
+    import shopee_categories
     conn = _connect(db_path)
     try:
         added = 0
@@ -879,10 +911,12 @@ def import_roots_as_pending(db_path, links):
                 continue
             itemid = m.group(1)
             market = market_from_link(link)
+            cat_name = shopee_categories.cat_name_for(market, cat_id) if cat_id is not None else None
             cur = conn.execute(
-                "insert or ignore into products (itemid, product_link, link_type, groupid, status_link, market) "
-                "values (?, ?, 'root', ?, 'pending', ?)",
-                (itemid, link, itemid, market),
+                "insert or ignore into products "
+                "(itemid, product_link, link_type, groupid, status_link, market, cat_id, cat_name) "
+                "values (?, ?, 'root', ?, 'pending', ?, ?, ?)",
+                (itemid, link, itemid, market, cat_id, cat_name),
             )
             added += cur.rowcount
         conn.commit()
@@ -1113,6 +1147,16 @@ def try_assign_verified(db_path, row: dict, groupid, promoted_7d_max=None, sold_
             "select status_link, groupid, link_type from products where itemid=? and market=?",
             (itemid, market),
         ).fetchone()
+        # Ke thua cat_id/cat_name cua CHINH root (groupid=itemid cua root) cho san pham
+        # tuong tu khi no thuc su duoc gan vao group (2 nhanh 'member' ben duoi) - root
+        # khong co danh muc (cao ngoai tab danh muc) thi cac dong nay cung NULL, dung nhu
+        # thiet ke (xem import_roots_as_pending()).
+        root_cat = conn.execute(
+            "select cat_id, cat_name from products where itemid=? and market=? and link_type='root'",
+            (groupid, market),
+        ).fetchone()
+        root_cat_id = root_cat["cat_id"] if root_cat else None
+        root_cat_name = root_cat["cat_name"] if root_cat else None
 
         if not passes:
             if ex is None:
@@ -1137,7 +1181,8 @@ def try_assign_verified(db_path, row: dict, groupid, promoted_7d_max=None, sold_
 
         if ex is None:
             r = dict(row)
-            r.update(link_type="related", groupid=groupid, status_link="member")
+            r.update(link_type="related", groupid=groupid, status_link="member",
+                      cat_id=root_cat_id, cat_name=root_cat_name)
             cols = [c for c in COLUMNS if c in r]
             conn.execute(
                 f"insert into products ({', '.join(cols)}) values ({', '.join('?' for _ in cols)})",
@@ -1165,7 +1210,8 @@ def try_assign_verified(db_path, row: dict, groupid, promoted_7d_max=None, sold_
             return {"outcome": "claimed_by_other", "group_member_count": None}
 
         r = dict(row)
-        r.update(link_type="related", groupid=groupid, status_link="member")
+        r.update(link_type="related", groupid=groupid, status_link="member",
+                  cat_id=root_cat_id, cat_name=root_cat_name)
         setcols = [c for c in COLUMNS if c in r and c != "itemid"]
         conn.execute(
             f"update products set {', '.join(f'{c}=?' for c in setcols)} where itemid=? and market=?",
@@ -1400,6 +1446,28 @@ def count_roots_by_market(db_path):
             }
             for market, total, pending, claimed, done, fail in rows
         ]
+    finally:
+        conn.close()
+
+
+def category_stats(db_path, market=None):
+    """Tong so san pham (ca root lan related, moi status_link) theo TUNG danh muc
+    (cat_id/cat_name) - dung cho khoi 'Thong ke nganh hang' o tab 'Van hanh'. market: gioi
+    han 1 thi truong cu the (None/'' = tat ca). Cac dong cat_id IS NULL (cao ngoai tab danh
+    muc) gom chung thanh 1 nhom - SQLite coi NULL = NULL khi GROUP BY nen tu nhien gop dung,
+    KHONG can xu ly rieng. Sap giam dan theo so luong (nganh hang nhieu nhat len dau)."""
+    conn = _connect(db_path)
+    try:
+        where = "where market=?" if market else ""
+        params = [market] if market else []
+        rows = conn.execute(
+            f"select cat_id, cat_name, count(*) as total from products {where} "
+            "group by cat_id, cat_name order by total desc",
+            params,
+        ).fetchall()
+        categories = [{"cat_id": cat_id, "cat_name": cat_name, "count": total} for cat_id, cat_name, total in rows]
+        total_all = sum(c["count"] for c in categories)
+        return {"total": total_all, "categories": categories}
     finally:
         conn.close()
 
