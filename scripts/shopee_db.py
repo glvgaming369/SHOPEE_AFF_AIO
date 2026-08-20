@@ -416,6 +416,19 @@ def list_devices(db_path):
         conn.close()
 
 
+def update_device(db_path, device_id, name, serial):
+    """Cap nhat ten va/hoac duong dan profile (serial) cho 1 account da dang ky, theo id."""
+    conn = _connect(db_path)
+    try:
+        conn.execute(
+            "update devices set name = ?, serial = ? where id = ?",
+            (name, serial, device_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def remove_device(db_path, serial):
     """Xoa 1 account khoi danh sach dang ky (KHONG anh huong toi cac dong 'products'
     da claim boi 'serial' (profile path) nay truoc do - assigned_key la du lieu lich su,

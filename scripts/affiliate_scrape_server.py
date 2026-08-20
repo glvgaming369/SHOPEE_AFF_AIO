@@ -448,6 +448,17 @@ def remove_account(profile_path):
     return jsonify({"ok": True})
 
 
+@app.route("/api/accounts/<int:device_id>", methods=["PUT"])
+def update_account(device_id):
+    body = request.get_json(force=True, silent=True) or {}
+    name = body.get("name")
+    profile_path = body.get("profile_path")
+    if not name or not profile_path:
+        return _bad_request("thieu 'name' hoac 'profile_path'")
+    shopee_db.update_device(DB_PATH, device_id, name, profile_path)
+    return jsonify({"ok": True})
+
+
 @app.route("/api/accounts/<name>/launch", methods=["POST"])
 def launch_account(name):
     accounts = shopee_db.list_devices(DB_PATH)

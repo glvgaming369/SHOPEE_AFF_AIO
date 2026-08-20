@@ -343,7 +343,8 @@
     <div class="row">
       <input type="text" id="acc-name" placeholder="Tên tài khoản (Ví dụ: shop_ph_01)">
       <input type="text" id="acc-path" placeholder="Đường dẫn thư mục Chrome profile (Ví dụ: C:\Users\...\User Data\Profile 7)">
-      <button onclick="addAccount(this)">Thêm tài khoản</button>
+      <button id="acc-save-btn" onclick="saveAccount(this)">Thêm tài khoản</button>
+      <button id="acc-cancel-btn" class="secondary" onclick="cancelEditAccount()" style="display:none;">Hủy sửa</button>
     </div>
     <div class="row" style="margin-bottom:10px;">
       <label style="white-space:nowrap;font-weight:500;">Market khi mở Chrome:</label>
@@ -833,6 +834,7 @@ async function loadStats() {
 }
 
 let knownAccounts = [];
+let editingAccountId = null;
 let lastItemsList = [];
 
 function copyMergedLink(idx) {
@@ -848,13 +850,14 @@ async function loadAccounts() {
   const { accounts } = await api('GET', '/api/accounts');
   knownAccounts = accounts;
   const tbody = document.getElementById('accounts-tbody');
-  tbody.innerHTML = accounts.map(a => `
+  tbody.innerHTML = accounts.map((a, idx) => `
     <tr>
       <td><b>${a.name}</b></td>
       <td><code>${a.serial}</code></td>
       <td>
-        <button onclick="launchAccount('${a.name}')">Mở Chrome (Launch)</button>
-        <button class="secondary" onclick="removeAccount('${a.serial}')">Xóa</button>
+        <button onclick="launchAccount(${idx})">Mở Chrome (Launch)</button>
+        <button class="secondary" onclick="editAccount(${idx})">Sửa</button>
+        <button class="secondary" onclick="removeAccount(${idx})">Xóa</button>
       </td>
     </tr>
   `).join('') || '<tr><td colspan="3" class="muted">Chưa có tài khoản nào.</td></tr>';
@@ -866,21 +869,43 @@ async function toggleAutoAssign() {
   await api('POST', '/api/settings', { auto_assign: checked, auto_assign_market: market });
 }
 
-async function addAccount(btn) {
+async function saveAccount(btn) {
   const name = document.getElementById('acc-name').value.trim();
   const path = document.getElementById('acc-path').value.trim();
   if (!name || !path) { await customAlert('Vui lòng nhập đầy đủ Tên tài khoản và Đường dẫn Profile.', { danger: true }); return; }
   await withBusy(btn, async () => {
-    await api('POST', '/api/accounts', { name, profile_path: path });
-    document.getElementById('acc-name').value = '';
-    document.getElementById('acc-path').value = '';
+    if (editingAccountId != null) {
+      await api('PUT', '/api/accounts/' + editingAccountId, { name, profile_path: path });
+    } else {
+      await api('POST', '/api/accounts', { name, profile_path: path });
+    }
+    cancelEditAccount();
     await loadAccounts();
   });
 }
 
-async function removeAccount(profilePath) {
+function editAccount(idx) {
+  const a = knownAccounts[idx];
+  editingAccountId = a.id;
+  document.getElementById('acc-name').value = a.name;
+  document.getElementById('acc-path').value = a.serial;
+  document.getElementById('acc-save-btn').textContent = 'Lưu thay đổi';
+  document.getElementById('acc-cancel-btn').style.display = '';
+}
+
+function cancelEditAccount() {
+  editingAccountId = null;
+  document.getElementById('acc-name').value = '';
+  document.getElementById('acc-path').value = '';
+  document.getElementById('acc-save-btn').textContent = 'Thêm tài khoản';
+  document.getElementById('acc-cancel-btn').style.display = 'none';
+}
+
+async function removeAccount(idx) {
   if (!(await customConfirm('Bạn có chắc chắn muốn xóa tài khoản này?', { danger: true }))) return;
-  await api('DELETE', '/api/accounts/' + encodeURIComponent(profilePath));
+  const a = knownAccounts[idx];
+  await api('DELETE', '/api/accounts/' + encodeURIComponent(a.serial));
+  if (editingAccountId === a.id) cancelEditAccount();
   loadAccounts();
 }
 
@@ -893,12 +918,13 @@ const AFF_MARKET_DOMAINS = {
   SG: 'affiliate.shopee.sg',
 };
 
-async function launchAccount(name) {
+async function launchAccount(idx) {
+  const a = knownAccounts[idx];
   const market = document.getElementById('acc-launch-market-sel').value;
   const domain = AFF_MARKET_DOMAINS[market] || AFF_MARKET_DOMAINS.PH;
   const url = `https://${domain}/offer/product_offer`;
   try {
-    await api('POST', `/api/accounts/${encodeURIComponent(name)}/launch`, { url });
+    await api('POST', `/api/accounts/${encodeURIComponent(a.name)}/launch`, { url });
   } catch (e) {
     await customAlert('Không thể mở Chrome profile: ' + e.message, { danger: true });
   }
