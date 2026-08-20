@@ -175,6 +175,13 @@
   th.sortable { cursor: pointer; user-select: none; white-space: nowrap; transition: color 0.15s; }
   th.sortable:hover { color: var(--accent-dark); background: var(--border); }
 
+  /* Bang tai khoan - can chinh cot cho can doi, duong dan dai xuong dong gon gang */
+  .accounts-table td { vertical-align: top; }
+  .accounts-table td:first-child, .accounts-table td:last-child { vertical-align: middle; }
+  .accounts-table code { word-break: break-all; }
+  .accounts-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .accounts-actions button { padding: 7px 12px; font-size: 12.5px; }
+
   /* Form Elements */
   input, textarea, button, select { font-family: var(--font-sans); font-size: 13.5px; }
   input[type=text], input[type=number], input[type=password] {
@@ -216,6 +223,18 @@
   .row { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
   .row input { flex: 1; min-width: 200px; }
   .muted { color: var(--ink-faint); font-size: 12.5px; line-height: 1.5; }
+
+  /* Nhom checkbox chon market (thay cho dropdown) */
+  .market-check-group { display: flex; gap: 8px; flex-wrap: wrap; }
+  .market-check {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 14px; border: 1px solid var(--border-strong); border-radius: 20px;
+    font-size: 13px; font-weight: 600; color: var(--ink-soft); cursor: pointer;
+    background: var(--surface); transition: all 0.15s ease; user-select: none;
+  }
+  .market-check:hover { border-color: var(--ink-faint); color: var(--ink); }
+  .market-check input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; margin: 0; }
+  .market-check:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-dark); }
   .members-box {
     background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 14px; margin-top: 12px; font-size: 12.5px; max-height: 220px; overflow: auto;
@@ -348,23 +367,28 @@
     </div>
     <div class="row" style="margin-bottom:10px;">
       <label style="white-space:nowrap;font-weight:500;">Market khi mở Chrome:</label>
-      <select id="acc-launch-market-sel" style="max-width:160px;">
-        <option value="PH">PH</option>
-        <option value="TH">TH</option>
-        <option value="MY">MY</option>
-        <option value="ID">ID</option>
-        <option value="VN">VN</option>
-        <option value="SG">SG</option>
-      </select>
+      <div class="market-check-group" id="acc-launch-market-group">
+        <label class="market-check"><input type="checkbox" value="PH" checked onchange="onLaunchMarketCheck(this)"> PH</label>
+        <label class="market-check"><input type="checkbox" value="TH" onchange="onLaunchMarketCheck(this)"> TH</label>
+        <label class="market-check"><input type="checkbox" value="MY" onchange="onLaunchMarketCheck(this)"> MY</label>
+        <label class="market-check"><input type="checkbox" value="ID" onchange="onLaunchMarketCheck(this)"> ID</label>
+        <label class="market-check"><input type="checkbox" value="VN" onchange="onLaunchMarketCheck(this)"> VN</label>
+        <label class="market-check"><input type="checkbox" value="SG" onchange="onLaunchMarketCheck(this)"> SG</label>
+      </div>
     </div>
     <div class="muted" style="margin-bottom:12px;">
       Bấm <b>AFF-SHOPEE</b> để mở trang <code>https://affiliate.shopee.&lt;market&gt;/offer/product_offer</code>,
       hoặc <b>HOME-SHOPEE</b> để mở trang chủ <code>https://shopee.&lt;market&gt;/</code>,
-      đúng theo market chọn ở trên -
+      đúng theo market đang tick ở trên -
       Cài sẵn Tampermonkey + script <code>tampermonkey_affiliate_group_scraper.user.js</code> trong đúng Profile đó trước,
       sau đó nhập "Device key" = tên tài khoản này trong panel điều khiển của script.
     </div>
-    <div class="table-wrap"><table>
+    <div class="table-wrap"><table class="accounts-table">
+      <colgroup>
+        <col style="width:180px;">
+        <col>
+        <col style="width:280px;">
+      </colgroup>
       <thead><tr><th>Tên tài khoản</th><th>Đường dẫn Profile</th><th>Thao tác</th></tr></thead>
       <tbody id="accounts-tbody"></tbody>
     </table></div>
@@ -856,10 +880,12 @@ async function loadAccounts() {
       <td><b>${a.name}</b></td>
       <td><code>${a.serial}</code></td>
       <td>
-        <button onclick="launchAccount(${idx}, 'home')">HOME-SHOPEE</button>
-        <button onclick="launchAccount(${idx}, 'aff')">AFF-SHOPEE</button>
-        <button class="secondary" onclick="editAccount(${idx})">Sửa</button>
-        <button class="secondary" onclick="removeAccount(${idx})">Xóa</button>
+        <div class="accounts-actions">
+          <button onclick="launchAccount(${idx}, 'home')">HOME-SHOPEE</button>
+          <button onclick="launchAccount(${idx}, 'aff')">AFF-SHOPEE</button>
+          <button class="secondary" onclick="editAccount(${idx})">Sửa</button>
+          <button class="secondary" onclick="removeAccount(${idx})">Xóa</button>
+        </div>
       </td>
     </tr>
   `).join('') || '<tr><td colspan="3" class="muted">Chưa có tài khoản nào.</td></tr>';
@@ -929,9 +955,21 @@ const HOME_MARKET_DOMAINS = {
   SG: 'shopee.sg',
 };
 
+function onLaunchMarketCheck(checkbox) {
+  if (!checkbox.checked) { checkbox.checked = true; return; }
+  document.querySelectorAll('#acc-launch-market-group input[type="checkbox"]').forEach(cb => {
+    if (cb !== checkbox) cb.checked = false;
+  });
+}
+
+function getSelectedLaunchMarket() {
+  const checked = document.querySelector('#acc-launch-market-group input[type="checkbox"]:checked');
+  return checked ? checked.value : 'PH';
+}
+
 async function launchAccount(idx, mode) {
   const a = knownAccounts[idx];
-  const market = document.getElementById('acc-launch-market-sel').value;
+  const market = getSelectedLaunchMarket();
   const url = mode === 'home'
     ? `https://${HOME_MARKET_DOMAINS[market] || HOME_MARKET_DOMAINS.PH}/`
     : `https://${AFF_MARKET_DOMAINS[market] || AFF_MARKET_DOMAINS.PH}/offer/product_offer`;
