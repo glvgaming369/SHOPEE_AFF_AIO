@@ -358,7 +358,8 @@
       </select>
     </div>
     <div class="muted" style="margin-bottom:12px;">
-      Sau khi bấm <b>Launch</b>, Chrome sẽ mở trang <code>https://affiliate.shopee.&lt;market&gt;/offer/product_offer</code>
+      Bấm <b>AFF-SHOPEE</b> để mở trang <code>https://affiliate.shopee.&lt;market&gt;/offer/product_offer</code>,
+      hoặc <b>HOME-SHOPEE</b> để mở trang chủ <code>https://shopee.&lt;market&gt;/</code>,
       đúng theo market chọn ở trên -
       Cài sẵn Tampermonkey + script <code>tampermonkey_affiliate_group_scraper.user.js</code> trong đúng Profile đó trước,
       sau đó nhập "Device key" = tên tài khoản này trong panel điều khiển của script.
@@ -855,7 +856,8 @@ async function loadAccounts() {
       <td><b>${a.name}</b></td>
       <td><code>${a.serial}</code></td>
       <td>
-        <button onclick="launchAccount(${idx})">Mở Chrome (Launch)</button>
+        <button onclick="launchAccount(${idx}, 'home')">HOME-SHOPEE</button>
+        <button onclick="launchAccount(${idx}, 'aff')">AFF-SHOPEE</button>
         <button class="secondary" onclick="editAccount(${idx})">Sửa</button>
         <button class="secondary" onclick="removeAccount(${idx})">Xóa</button>
       </td>
@@ -918,11 +920,21 @@ const AFF_MARKET_DOMAINS = {
   SG: 'affiliate.shopee.sg',
 };
 
-async function launchAccount(idx) {
+const HOME_MARKET_DOMAINS = {
+  PH: 'shopee.ph',
+  TH: 'shopee.co.th',
+  MY: 'shopee.com.my',
+  ID: 'shopee.co.id',
+  VN: 'shopee.vn',
+  SG: 'shopee.sg',
+};
+
+async function launchAccount(idx, mode) {
   const a = knownAccounts[idx];
   const market = document.getElementById('acc-launch-market-sel').value;
-  const domain = AFF_MARKET_DOMAINS[market] || AFF_MARKET_DOMAINS.PH;
-  const url = `https://${domain}/offer/product_offer`;
+  const url = mode === 'home'
+    ? `https://${HOME_MARKET_DOMAINS[market] || HOME_MARKET_DOMAINS.PH}/`
+    : `https://${AFF_MARKET_DOMAINS[market] || AFF_MARKET_DOMAINS.PH}/offer/product_offer`;
   try {
     await api('POST', `/api/accounts/${encodeURIComponent(a.name)}/launch`, { url });
   } catch (e) {
