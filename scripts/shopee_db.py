@@ -888,35 +888,40 @@ def release_claims_for_device(db_path, device_key):
 # 1 group - itemid TRAN khong con la khoa duy nhat (2 market khac nhau co the trung so).
 # =====================================================================================
 
-def import_roots_as_pending(db_path, links, cat_id=None):
+def import_roots_as_pending(db_path, links, cat_id=None, cat_ids=None):
     """Nap link root -> insert link_type='root', status='pending', groupid=itemid, market
     suy tu domain cua chinh link (market_from_link). Bo qua (market, itemid) da ton tai
     (insert or ignore) - 2 link cung itemid nhung KHAC market (vd shopee.ph vs shopee.co.th)
     van duoc luu thanh 2 dong rieng biet, khong con bi de len nhau nhu truoc. Tra ve so root
     MOI them.
 
-    cat_id: 1 gia tri DUY NHAT ap dung cho CA LO link nay (Shopee Product Link Collector tu
-    phat hien tu URL '-cat.<id>' luc bam Start, gan chung cho toan bo root cao duoc trong
-    phien do - xem shopee_collector.user.js). None neu phien cao KHONG o tab danh muc (dung
-    nhu thiet ke, khong phai loi/thieu du lieu). cat_name tra cuu RIENG cho tung link theo
-    market cua chinh link do (shopee_categories.cat_name_for) - phong truong hop hiem lo
-    link lay tu nhieu domain khac nhau du cung 1 phien."""
+    cat_id: 1 gia tri DUY NHAT ap dung cho CA LO link nay - dung khi khong co cat_ids (vd
+    dashboard dan link thu cong, luon None). cat_ids: danh sach SONG SONG voi links (cung
+    do dai) - cat_id RIENG cho TUNG link, uu tien hon cat_id neu duoc truyen. Can thiet vi
+    Shopee Product Link Collector co the cao NHIEU danh muc lien tiep truoc khi bam "Đẩy vao
+    DB" 1 lan - neu chi dung 1 cat_id chung cho ca lo se gan SAI cat_id (lay danh muc cuoi
+    cung) cho cac link cao tu danh muc truoc do (xem shopee_collector.user.js, gan cat_id
+    ngay luc quet tung link thay vi luc day vao DB). cat_name tra cuu RIENG cho tung link
+    theo market cua chinh link do (shopee_categories.cat_name_for)."""
     import shopee_categories
+    if cat_ids is not None and len(cat_ids) != len(links):
+        raise ValueError("cat_ids phai cung do dai voi links")
     conn = _connect(db_path)
     try:
         added = 0
-        for link in links:
+        for idx, link in enumerate(links):
             m = re.search(r"/product/\d+/(\d+)", link) or re.search(r"(\d+)\s*$", str(link).strip())
             if not m:
                 continue
             itemid = m.group(1)
             market = market_from_link(link)
-            cat_name = shopee_categories.cat_name_for(market, cat_id) if cat_id is not None else None
+            item_cat_id = cat_ids[idx] if cat_ids is not None else cat_id
+            cat_name = shopee_categories.cat_name_for(market, item_cat_id) if item_cat_id is not None else None
             cur = conn.execute(
                 "insert or ignore into products "
                 "(itemid, product_link, link_type, groupid, status_link, market, cat_id, cat_name) "
                 "values (?, ?, 'root', ?, 'pending', ?, ?, ?)",
-                (itemid, link, itemid, market, cat_id, cat_name),
+                (itemid, link, itemid, market, item_cat_id, cat_name),
             )
             added += cur.rowcount
         conn.commit()

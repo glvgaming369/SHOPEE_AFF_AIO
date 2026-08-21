@@ -190,20 +190,37 @@ def _handle_error(e):
     return jsonify({"error": str(e)}), 500
 
 
+def _parse_cat_id(value):
+    if value in (None, ""):
+        return None
+    return int(value)
+
+
 @app.route("/api/roots/import", methods=["POST"])
 def import_roots():
     body = request.get_json(force=True, silent=True) or {}
     links = body.get("links")
     if not isinstance(links, list) or not links:
         return _bad_request("thieu 'links' (danh sach string)")
-    cat_id = body.get("cat_id")
-    if cat_id not in (None, ""):
+
+    # cat_ids: cat_id RIENG cho tung link (danh sach song song voi links) - Shopee Product
+    # Link Collector gui theo dinh dang nay khi cao nhieu danh muc truoc khi day vao DB 1
+    # lan, tranh gan sai cat_id cuoi cung cho toan bo lo (xem shopee_db.import_roots_as_pending).
+    cat_ids_raw = body.get("cat_ids")
+    if cat_ids_raw is not None:
+        if not isinstance(cat_ids_raw, list) or len(cat_ids_raw) != len(links):
+            return _bad_request("'cat_ids' phai la danh sach cung do dai voi 'links'")
         try:
-            cat_id = int(cat_id)
+            cat_ids = [_parse_cat_id(v) for v in cat_ids_raw]
         except (TypeError, ValueError):
-            return _bad_request("'cat_id' phai la so nguyen")
-    else:
-        cat_id = None
+            return _bad_request("'cat_ids' chi duoc chua so nguyen hoac null")
+        added = shopee_db.import_roots_as_pending(DB_PATH, links, cat_ids=cat_ids)
+        return jsonify({"added": added})
+
+    try:
+        cat_id = _parse_cat_id(body.get("cat_id"))
+    except (TypeError, ValueError):
+        return _bad_request("'cat_id' phai la so nguyen")
     added = shopee_db.import_roots_as_pending(DB_PATH, links, cat_id=cat_id)
     return jsonify({"added": added})
 

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Shopee Product Link Collector
 // @namespace    http://tampermonkey.net/
-// @version      1.6.0
-// @description  Thu thập link sản phẩm Shopee tự động với tính năng cuộn trang thông minh, tự động chuyển trang SPA, tự nhận diện domain quốc gia, xuất dữ liệu và đẩy thẳng vào DB (root) của dashboard affiliate offer scraper.
+// @version      1.7.0
+// @description  Thu thập link sản phẩm Shopee tự động với tính năng cuộn trang thông minh, tự động chuyển trang SPA, tự nhận diện domain quốc gia, xuất dữ liệu và đẩy thẳng vào DB (root) của dashboard affiliate offer scraper. Gán cat_id riêng cho từng link ngay lúc cào, đảm bảo đúng danh mục kể cả khi cào nhiều danh mục trước khi đẩy vào DB.
 // @author       Antigravity
 // @match        https://shopee.vn/*
 // @match        https://shopee.ph/*
@@ -29,7 +29,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = 'v1.6.0';
+  const SCRIPT_VERSION = 'v1.7.0';
   const STORAGE_KEY = 'shopee_collected_links';
   const RUNNING_STATE_KEY = 'shopee_collector_is_running';
   const AUTO_PAGE_KEY = 'shopee_collector_auto_page';
@@ -49,11 +49,15 @@
   let lastScrollY = -1;
   let sameScrollCount = 0;
 
-  // Lấy danh sách link đã lưu
+  // Lấy danh sách link đã lưu - moi phan tu la {url, catId}, catId gan NGAY luc quet
+  // (scanLinks) theo danh muc dang cao tai thoi diem do, KHONG con dung 1 cat_id chung cho
+  // ca phien nua - xem ghi chu o pushToDb(). Tu dong migrate dinh dang cu (mang string thuan,
+  // ban script <1.7.0) sang {url, catId: null} khi doc, tranh vo du lieu dang cao do.
   function getStoredLinks() {
     try {
       const data = localStorage.getItem(STORAGE_KEY);
-      return data ? JSON.parse(data) : [];
+      const parsed = data ? JSON.parse(data) : [];
+      return parsed.map((item) => (typeof item === 'string' ? { url: item, catId: null } : item));
     } catch (e) {
       return [];
     }
@@ -108,9 +112,10 @@
 
   // cat_id cua PHIEN thu thap hien tai - CHI duoc dat lai khi nguoi dung bam nut Start THAT
   // (khong phai luc script tu goi lai startCollecting() de tiep tuc sau khi tu chuyen trang
-  // hoac tu resume luc load lai trang) - xem gan su kien nut Start ben duoi. Ap dung cho
-  // TOAN BO link dang co trong bo nho dem tai thoi diem bam "Đẩy vào DB" (pushToDb()), kha
-  // nang trung voi cach nguoi dung mo ta luong lam viec (1 phien = 1 danh muc).
+  // hoac tu resume luc load lai trang) - xem gan su kien nut Start ben duoi. Duoc GAN NGAY
+  // vao TUNG link moi ngay luc quet (scanLinks()) thay vi ap dung chung cho ca lo luc bam
+  // "Đẩy vào DB" - dam bao link cao tu danh muc A khong bi "an theo" cat_id cua danh muc B
+  // neu nguoi dung cao nhieu danh muc lien tiep truoc khi day vao DB 1 lan (xem pushToDb()).
   function getSessionCatId() {
     return localStorage.getItem(CAT_ID_KEY) || null;
   }
@@ -119,17 +124,23 @@
     else localStorage.removeItem(CAT_ID_KEY);
   }
 
-  // Quét các link trên trang hiện tại
+  // Quét các link trên trang hiện tại - gán catId NGAY cho link MOI theo danh muc phien hien
+  // tai (getSessionCatId(), dat luc bam Start - xem detectCatIdFromUrl()). Lam vay de link cao
+  // tu danh muc A giu dung cat_id A ngay ca khi sau do nguoi dung chuyen sang danh muc B va
+  // bam Start lai (ghi de session cat_id) roi moi bam "Đẩy vao DB" 1 lan cho ca 2 danh muc.
   function scanLinks() {
     const anchors = Array.from(document.querySelectorAll('a[href*="-i."]'));
     let currentLinks = getStoredLinks();
     let initialCount = currentLinks.length;
+    const existingUrls = new Set(currentLinks.map((item) => item.url));
+    const catId = getSessionCatId();
 
     anchors.forEach((a) => {
       const rawHref = a.getAttribute('href');
       const cleanUrl = normalizeShopeeUrl(rawHref);
-      if (cleanUrl && !currentLinks.includes(cleanUrl)) {
-        currentLinks.push(cleanUrl);
+      if (cleanUrl && !existingUrls.has(cleanUrl)) {
+        currentLinks.push({ url: cleanUrl, catId });
+        existingUrls.add(cleanUrl);
       }
     });
 
@@ -302,11 +313,11 @@
   function exportTXT() {
     const links = getStoredLinks();
     if (links.length === 0) return alert('Chưa có link nào được thu thập!');
-    const content = links.join('\n');
+    const content = links.map((item) => item.url).join('\n');
     downloadFile(content, 'shopee_links.txt', 'text/plain');
   }
 
-  // Xuất file JSON
+  // Xuất file JSON - giu ca catId de doi chieu dung danh muc khi can
   function exportJSON() {
     const links = getStoredLinks();
     if (links.length === 0) return alert('Chưa có link nào được thu thập!');
@@ -314,11 +325,11 @@
     downloadFile(content, 'shopee_links.json', 'application/json');
   }
 
-  // Xuất file CSV (mở được bằng Excel / XLSX)
+  // Xuất file CSV (mở được bằng Excel / XLSX) - co them cot cat_id de doi chieu
   function exportCSV() {
     const links = getStoredLinks();
     if (links.length === 0) return alert('Chưa có link nào được thu thập!');
-    const content = '﻿URL\n' + links.map((l) => `"${l}"`).join('\n');
+    const content = '﻿URL,cat_id\n' + links.map((item) => `"${item.url}",${item.catId || ''}`).join('\n');
     downloadFile(content, 'shopee_links.csv', 'text/csv;charset=utf-8;');
   }
 
@@ -431,21 +442,32 @@
   // Day toan bo link da thu thap thang vao DB (bang 'products', lam root) qua
   // affiliate_scrape_server.py - KHAC origin voi shopee.* nen bat buoc GM_xmlhttpRequest
   // de ne CORS (server khong bat CORS, xem affiliate_scrape_server.py).
+  //
+  // Gui cat_ids RIENG cho TUNG link (khong con gui 1 cat_id chung cho ca lo) - vi bo nho dem
+  // co the chua link tu NHIEU danh muc khac nhau (cao danh muc A, chuyen sang danh muc B bam
+  // Start lai, roi moi bam "Đẩy vao DB" 1 lan). Moi link da duoc gan dung cat_id rieng ngay
+  // luc quet (xem scanLinks()), nen gui song song mang cat_ids la du de server luu dung, khong
+  // can gop/nhom lai o day. Xem affiliate_scrape_server.py (/api/roots/import) va
+  // shopee_db.import_roots_as_pending().
   function pushToDb() {
     const links = getStoredLinks();
     if (links.length === 0) return alert('Chưa có link nào để đẩy vào DB!');
     const serverUrl = getServerUrl();
-    const catId = getSessionCatId();
+    const urls = links.map((item) => item.url);
+    const catIds = links.map((item) => item.catId || null);
     GM_xmlhttpRequest({
       method: 'POST',
       url: serverUrl + '/api/roots/import',
       headers: { 'Content-Type': 'application/json' },
-      data: JSON.stringify({ links, cat_id: catId }),
+      data: JSON.stringify({ links: urls, cat_ids: catIds }),
       onload: (resp) => {
         try {
           const json = JSON.parse(resp.responseText);
           if (resp.status >= 200 && resp.status < 300) {
-            const catMsg = catId ? ` (danh mục cat_id=${catId})` : ' (không có danh mục)';
+            const distinctCats = Array.from(new Set(catIds.filter(Boolean)));
+            const catMsg = distinctCats.length > 0
+              ? ` (${distinctCats.length} danh mục: cat_id ${distinctCats.join(', ')})`
+              : ' (không có danh mục)';
             alert(`Đã đẩy vào DB: ${json.added} root mới (${links.length - json.added} đã có sẵn/không hợp lệ)${catMsg}.`);
           } else {
             alert('Server báo lỗi: ' + (json.error || resp.responseText));
@@ -793,10 +815,14 @@
 
     const catLineEl = document.getElementById('sc-cat-line');
     if (catLineEl) {
-      const catId = getSessionCatId();
-      catLineEl.innerHTML = catId
-        ? `Danh mục phiên: <b>cat_id ${catId}</b>`
-        : 'Danh mục phiên: <b>không có</b>';
+      const sessionCatId = getSessionCatId();
+      const sessionMsg = sessionCatId
+        ? `Đang cào: <b>cat_id ${sessionCatId}</b>`
+        : 'Đang cào: <b>không có danh mục</b>';
+      const links = getStoredLinks();
+      const distinctCount = new Set(links.map((item) => item.catId || null)).size;
+      const totalMsg = links.length > 0 ? ` · Đã lưu <b>${distinctCount}</b> danh mục` : '';
+      catLineEl.innerHTML = sessionMsg + totalMsg;
     }
 
     if (startBtn && stopBtn && indicator) {
