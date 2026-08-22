@@ -717,18 +717,25 @@ async function withBusy(btn, fn) {
   }
 }
 
-// Timeout 15s cho MOI request - truoc day fetch() khong co gioi han thoi gian, neu 1 request
-// bi ket (vd server dung 2 tien trinh cung chiem 1 port tren Windows - request bi dinh tuyen
-// nham vao tien trinh "chet", hoac SQLite dang bi khoa lau) thi promise cua no KHONG BAO GIO
-// resolve/reject. Vi setInterval() phia duoi khong cho request truoc xong roi moi goi tiep,
-// cac request bi ket se chong chat va chiem het 6 ket noi dong thoi/domain cua trinh duyet,
-// khien MOI thao tac khac (ke ca click nut) cung "im lang khong phan hoi" cho den khi F5 lai
-// trang. Timeout dam bao 1 request loi se TU giai phong sau 15s thay vi treo vinh vien.
+// Timeout MAC DINH 15s cho request - truoc day fetch() khong co gioi han thoi gian, neu 1
+// request bi ket (vd server dung 2 tien trinh cung chiem 1 port tren Windows - request bi
+// dinh tuyen nham vao tien trinh "chet", hoac SQLite dang bi khoa lau) thi promise cua no
+// KHONG BAO GIO resolve/reject. Vi setInterval() phia duoi khong cho request truoc xong roi
+// moi goi tiep, cac request bi ket se chong chat va chiem het 6 ket noi dong thoi/domain cua
+// trinh duyet, khien MOI thao tac khac (ke ca click nut) cung "im lang khong phan hoi" cho
+// den khi F5 lai trang. Timeout dam bao 1 request loi se TU giai phong thay vi treo vinh vien.
+//
+// CHI dung lam mac dinh cho cac API NHE (poll stats, CRUD don gian) - cac thao tac HANG LOAT
+// THAT SU can lau hon 15s (vd /api/videos/push xu ly toi da 200 item goi API VideoAI that,
+// /api/mail_accounts/buy goi API mua mail ngoai, /api/roots/recompute_merged_all quet lai
+// TOAN BO root) phai truyen rieng timeoutMs dai hon o noi goi api() - da tung gap bug that:
+// timeout 15s ap dung nham cho /api/videos/push khien lo dau tien (toi da 200 video) luon bi
+// huy giua chung, dashboard bao "Đã xử lý 0" du server van dang xu ly binh thuong.
 const API_TIMEOUT_MS = 15000;
 
-async function api(method, path, body) {
+async function api(method, path, body, timeoutMs = API_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   let resp;
   try {
     resp = await fetch(path, {
@@ -738,7 +745,7 @@ async function api(method, path, body) {
       signal: controller.signal,
     });
   } catch (e) {
-    if (e.name === 'AbortError') throw new Error('Server không phản hồi sau ' + (API_TIMEOUT_MS / 1000) + 's (timeout).');
+    if (e.name === 'AbortError') throw new Error('Server không phản hồi sau ' + (timeoutMs / 1000) + 's (timeout).');
     throw e;
   } finally {
     clearTimeout(timer);
@@ -1176,7 +1183,9 @@ async function recomputeMerged(itemid, market) {
 
 async function recomputeMergedAll() {
   try {
-    const { roots_processed, total_links } = await api('POST', '/api/roots/recompute_merged_all');
+    // Timeout dai (3 phut) - quet lai TOAN BO root trong DB (hang chuc nghin dong), co the
+    // lau hon 15s mac dinh, xem ghi chu o api().
+    const { roots_processed, total_links } = await api('POST', '/api/roots/recompute_merged_all', undefined, 180000);
     await customAlert(`Đã gộp lại cho ${roots_processed} Root (tổng ${total_links} link) - Xem kết quả tại tab Sản phẩm đã cào.`);
   } catch (e) {
     await customAlert('Lỗi: ' + e.message, { danger: true });
@@ -1186,7 +1195,9 @@ async function recomputeMergedAll() {
 async function resetInsufficientAll() {
   if (!(await customConfirm('Đưa VỀ "pending" toàn bộ Root đã làm xong nhưng chưa đủ 60/60 để giao lại? (KHÔNG xóa sản phẩm đã gom trước đó)'))) return;
   try {
-    const { reset_count } = await api('POST', '/api/roots/reset_insufficient_all');
+    // Timeout dai (1 phut) - truy van tren TOAN BO root 'done' (co subquery dem member cho
+    // tung dong), co the lau hon 15s mac dinh voi DB lon, xem ghi chu o api().
+    const { reset_count } = await api('POST', '/api/roots/reset_insufficient_all', undefined, 60000);
     await customAlert(`Đã đặt lại ${reset_count} Root thiếu về trạng thái "pending".`);
     loadRoots();
   } catch (e) {
@@ -1434,7 +1445,9 @@ async function pushMarketBatchLoop(machineId, market, target) {
     const want = Math.min(200, target - totalDone);
     let data;
     try {
-      data = await api('POST', '/api/videos/push', { limit: want, machine_id: Number(machineId), market: market || undefined });
+      // Timeout dai (2 phut) - 1 lo toi da 200 video goi API VideoAI THAT, co the lau hon
+      // 15s mac dinh, xem ghi chu o api()/push_videos() (affiliate_scrape_server.py).
+      data = await api('POST', '/api/videos/push', { limit: want, machine_id: Number(machineId), market: market || undefined }, 120000);
     } catch (e) {
       videoLog('Lỗi: ' + e.message);
       break;
@@ -1570,7 +1583,9 @@ async function buyMailAccounts(btn) {
   const quantity = Math.max(1, parseInt(document.getElementById('mailacc-qty').value, 10) || 1);
   await withBusy(btn, async () => {
     try {
-      const r = await api('POST', '/api/mail_accounts/buy', { account_type, quantity });
+      // Timeout dai (1 phut) - goi API mua mail ben ngoai (dongvanfb), co the lau hon 15s
+      // mac dinh voi so luong lon, xem ghi chu o api().
+      const r = await api('POST', '/api/mail_accounts/buy', { account_type, quantity }, 60000);
       document.getElementById('mailacc-buy-result').textContent =
         `Đã mua thành công ${r.added} Email (Tổng ${r.total_amount}, Số dư còn ${r.balance}).`;
       await loadMailAccounts();
