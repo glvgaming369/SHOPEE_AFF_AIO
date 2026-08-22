@@ -17,7 +17,9 @@ import argparse
 import io
 import os
 import re
+import socket
 import subprocess
+import sys
 import threading
 import time
 from datetime import datetime
@@ -27,6 +29,7 @@ from openpyxl import Workbook
 
 import chrome_launcher
 import dongvanfb_client
+import shopee_categories
 import shopee_db
 import videoai_client
 
@@ -441,6 +444,22 @@ def list_roots():
 def items_category_stats():
     market = request.args.get("market") or None
     return jsonify(shopee_db.category_stats(DB_PATH, market=market))
+
+
+@app.route("/api/categories/name", methods=["GET"])
+def category_name():
+    # Dung cho Shopee Product Link Collector (shopee_collector.user.js) - hien ten danh muc
+    # (vd "Pets") thay vi chi cat_id tho tren panel, ngay luc dang cao. Nhan 'url' (trang
+    # Shopee hien tai) thay vi 'market' truc tiep - suy market qua market_from_link() DUNG
+    # HAM CHUNG voi phan import root, tranh trung logic map domain->market o phia client.
+    url = request.args.get("url") or ""
+    market = shopee_db.market_from_link(url)
+    try:
+        cat_id = int(request.args.get("cat_id")) if request.args.get("cat_id") not in (None, "") else None
+    except (TypeError, ValueError):
+        return _bad_request("'cat_id' phai la so nguyen")
+    cat_name = shopee_categories.cat_name_for(market, cat_id) if cat_id is not None else None
+    return jsonify({"market": market, "cat_name": cat_name})
 
 
 @app.route("/api/roots/market_stats", methods=["GET"])
@@ -866,6 +885,36 @@ def stats():
     })
 
 
+def _ensure_port_free(host, port):
+    """Bind THAT (roi dong ngay) truoc khi giao cho Werkzeug - phat hien SOM va bao loi RO
+    RANG neu port da co server khac dang chay, thay vi de Werkzeug tu bind. Ly do: da xac
+    nhan THAT tren may nay Windows cho phep 2 tien trinh CUNG bind duoc 1 port TCP ma KHONG
+    bao loi "address already in use" (hanh vi bind mac dinh cua Werkzeug tren Windows) - khi
+    do request tu trinh duyet bi he dieu hanh dinh tuyen NGAU NHIEN vao 1 trong 2 tien trinh.
+    Neu tien trinh con lai "chet"/ket (vd dang cho 1 giao dich SQLite khong bao gio commit),
+    request roi vao no se treo VINH VIEN - dung trieu chung nguoi dung bao cao: dashboard im
+    lang khong phan hoi sau 1 luc, phai F5 lai. SO_EXCLUSIVEADDRUSE la co RIENG Windows ep he
+    dieu hanh tu choi thang lan bind thu 2, bien loi ngam thanh loi ro rang ngay luc khoi
+    dong thay vi lam hong ngau nhien luc dang dung (start_affiliate_scraper.bat da tung co
+    kiem tra tuong tu qua netstat, nhung khong bao ve duoc neu server duoc khoi dong theo
+    cach khac ngoai file .bat do)."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        probe.bind((host, port))
+    except OSError:
+        print(
+            f"[affiliate_scrape_server] LOI: port {port} DA CO server khac dang chay san "
+            f"(vd mo .bat 2 lan, hoac 1 cua so terminal khac chua dong). Dung 2 tien trinh "
+            f"cung chiem 1 port se gay loi 'dashboard khong phan hoi ngau nhien'. Dong server "
+            f"cu (hoac dung cua so dang chay san) truoc khi mo cai moi."
+        )
+        sys.exit(1)
+    finally:
+        probe.close()
+
+
 def main():
     global DB_PATH
     ap = argparse.ArgumentParser()
@@ -873,6 +922,7 @@ def main():
     ap.add_argument("--db-path", default=shopee_db.DB_PATH_DEFAULT)
     args = ap.parse_args()
     DB_PATH = args.db_path
+    _ensure_port_free("127.0.0.1", args.port)
     shopee_db.init_db(DB_PATH)  # dam bao bang/cot ton tai truoc khi nhan request dau tien
     print(f"[affiliate_scrape_server] DB: {DB_PATH} | http://127.0.0.1:{args.port}")
     # threaded=True QUAN TRONG: mac dinh Werkzeug dev server xu ly TUAN TU tung request 1

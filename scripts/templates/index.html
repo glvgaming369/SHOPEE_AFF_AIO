@@ -717,12 +717,32 @@ async function withBusy(btn, fn) {
   }
 }
 
+// Timeout 15s cho MOI request - truoc day fetch() khong co gioi han thoi gian, neu 1 request
+// bi ket (vd server dung 2 tien trinh cung chiem 1 port tren Windows - request bi dinh tuyen
+// nham vao tien trinh "chet", hoac SQLite dang bi khoa lau) thi promise cua no KHONG BAO GIO
+// resolve/reject. Vi setInterval() phia duoi khong cho request truoc xong roi moi goi tiep,
+// cac request bi ket se chong chat va chiem het 6 ket noi dong thoi/domain cua trinh duyet,
+// khien MOI thao tac khac (ke ca click nut) cung "im lang khong phan hoi" cho den khi F5 lai
+// trang. Timeout dam bao 1 request loi se TU giai phong sau 15s thay vi treo vinh vien.
+const API_TIMEOUT_MS = 15000;
+
 async function api(method, path, body) {
-  const resp = await fetch(path, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  let resp;
+  try {
+    resp = await fetch(path, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('Server không phản hồi sau ' + (API_TIMEOUT_MS / 1000) + 's (timeout).');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
   const json = await resp.json();
   if (!resp.ok) throw new Error(json.error || 'Lỗi không xác định từ máy chủ');
   return json;
@@ -1665,7 +1685,23 @@ async function refreshAll() {
   await Promise.all([loadStats(), loadRoots(), loadSettings(), loadWorkers(), loadUserscripts(), loadCategoryStats()]);
 }
 refreshAll();
-setInterval(() => { loadStats(); loadRoots(); loadWorkers(); loadRootMarketStats(); }, 5000);
+
+// Chan chong tick: neu lan poll truoc CHUA xong (vd dang cho 1 request timeout 15s) thi bo
+// qua lan nay thay vi ban them 4 request nua chong len - tranh chiem het 6 ket noi dong
+// thoi/domain cua trinh duyet (xem ghi chu o api()). Bat ky loi nao (kmm ca timeout) deu bi
+// nuot rieng trong tick nay, KHONG lam vo vong lap setInterval cho cac lan sau.
+let pollInFlight = false;
+setInterval(async () => {
+  if (pollInFlight) return;
+  pollInFlight = true;
+  try {
+    await Promise.all([loadStats(), loadRoots(), loadWorkers(), loadRootMarketStats()]);
+  } catch (e) {
+    console.warn('[poll] Bo qua loi khi tu dong lam moi:', e);
+  } finally {
+    pollInFlight = false;
+  }
+}, 5000);
 </script>
 </body>
 </html>

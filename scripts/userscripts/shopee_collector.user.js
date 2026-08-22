@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee Product Link Collector
 // @namespace    http://tampermonkey.net/
-// @version      1.7.0
+// @version      1.8.1
 // @description  Thu thập link sản phẩm Shopee tự động với tính năng cuộn trang thông minh, tự động chuyển trang SPA, tự nhận diện domain quốc gia, xuất dữ liệu và đẩy thẳng vào DB (root) của dashboard affiliate offer scraper. Gán cat_id riêng cho từng link ngay lúc cào, đảm bảo đúng danh mục kể cả khi cào nhiều danh mục trước khi đẩy vào DB.
 // @author       Antigravity
 // @match        https://shopee.vn/*
@@ -29,12 +29,13 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = 'v1.7.0';
+  const SCRIPT_VERSION = 'v1.8.1';
   const STORAGE_KEY = 'shopee_collected_links';
   const RUNNING_STATE_KEY = 'shopee_collector_is_running';
   const AUTO_PAGE_KEY = 'shopee_collector_auto_page';
   const SERVER_URL_KEY = 'shopee_collector_server_url';
   const CAT_ID_KEY = 'shopee_collector_cat_id';
+  const CAT_NAME_KEY = 'shopee_collector_cat_name';
   const SERVER_URL_DEFAULT = 'http://127.0.0.1:8877';
   const OWN_SCRIPT_FILE = 'shopee_collector.user.js';
   const LAST_UPDATE_CHECK_KEY = 'shopee_collector_last_update_check';
@@ -110,6 +111,25 @@
     return m ? m[1] : null;
   }
 
+  // Doan ten danh muc THO tu chinh slug trong URL (vd ".../Pets-cat.11044947" -> "Pets") -
+  // Shopee LUON nhung slug ten danh muc ngay truoc "-cat.<id>", ke ca voi danh muc CON (cap
+  // 2+) ma artifacts/cat-db/*.xlsx chua co (file do chi liet ke 25 danh muc cap 1 moi thi
+  // truong - xem shopee_categories.py). Dung lam ten hien thi NGAY LAP TUC (khong can cho
+  // server) va cho MOI cat_id, khong chi 25 danh muc cap 1 - resolveCatName() se ghi de bang
+  // ten "dep" hon tu cat-db (co dau &, dau phay dung chuan) NEU server tra duoc, con khong
+  // thi giu nguyen ten tu URL nay thay vi hien cat_id tho. Chi thay "-" bang khoang trang nen
+  // co the khac 1 chut so voi ten hien thi that cua Shopee (vd mat dau &) nhung van de doc.
+  function detectCatNameFromUrl() {
+    const m = location.href.match(/\/([^/?#]+)-cat\.\d+/);
+    if (!m) return null;
+    try {
+      const slug = decodeURIComponent(m[1]).replace(/-/g, ' ').trim();
+      return slug || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   // cat_id cua PHIEN thu thap hien tai - CHI duoc dat lai khi nguoi dung bam nut Start THAT
   // (khong phai luc script tu goi lai startCollecting() de tiep tuc sau khi tu chuyen trang
   // hoac tu resume luc load lai trang) - xem gan su kien nut Start ben duoi. Duoc GAN NGAY
@@ -122,6 +142,48 @@
   function setSessionCatId(catId) {
     if (catId) localStorage.setItem(CAT_ID_KEY, catId);
     else localStorage.removeItem(CAT_ID_KEY);
+    // cat_name cu (neu co) thuoc ve cat_id TRUOC do - xoa ngay de khong hien nham ten sai
+    // trong luc cho ket qua tra cuu moi (xem resolveCatName()).
+    setSessionCatName(null);
+  }
+
+  // Ten hien thi (vd "Pets") cua cat_id phien hien tai - tra cuu tu server (cat-db xlsx,
+  // xem shopee_categories.py), khong the tu tra tren trinh duyet vi du lieu nam o server.
+  function getSessionCatName() {
+    return localStorage.getItem(CAT_NAME_KEY) || null;
+  }
+  function setSessionCatName(catName) {
+    if (catName) localStorage.setItem(CAT_NAME_KEY, catName);
+    else localStorage.removeItem(CAT_NAME_KEY);
+  }
+
+  // Goi server tra cat_name cho catId hien tai - cap nhat localStorage + UI khi co ket qua.
+  // Am tham bo qua neu loi/khong tim thay ten (panel se fallback hien "cat_id <id>" - xem
+  // updateUI()), khong lam gian doan luong cao link chinh.
+  function resolveCatName(catId) {
+    if (!catId) return;
+    const serverUrl = getServerUrl();
+    GM_xmlhttpRequest({
+      method: 'GET',
+      url: serverUrl + '/api/categories/name?url=' + encodeURIComponent(location.href) + '&cat_id=' + encodeURIComponent(catId),
+      onload: (resp) => {
+        try {
+          const json = JSON.parse(resp.responseText);
+          // Phong truong hop nguoi dung da bam Start o danh muc KHAC trong luc cho phan hoi
+          // - chi ap dung ket qua neu van dang la catId minh vua hoi. CHI ghi de khi server
+          // THAT SU co ten (cat-db co dau &, dau phay dung chuan hon) - neu server khong co
+          // (vd danh muc con chua duoc liet ke trong cat-db), GIU NGUYEN ten fallback tu URL
+          // slug da hien tu luc bam Start (xem detectCatNameFromUrl()), khong xoa ve rong.
+          if (resp.status >= 200 && resp.status < 300 && getSessionCatId() === String(catId) && json.cat_name) {
+            setSessionCatName(json.cat_name);
+            updateUI();
+          }
+        } catch (e) {
+          // Bo qua - giu nguyen ten fallback tu URL (neu co) hoac cat_id tho.
+        }
+      },
+      onerror: () => {},
+    });
   }
 
   // Quét các link trên trang hiện tại - gán catId NGAY cho link MOI theo danh muc phien hien
@@ -759,8 +821,13 @@
     // Chi phat hien lai cat_id luc bam Start THAT (khong phai luc startCollecting() tu goi
     // lai de tiep tuc sau auto-page/resume) - xem detectCatIdFromUrl()/setSessionCatId().
     document.getElementById('sc-start-btn').addEventListener('click', () => {
-      setSessionCatId(detectCatIdFromUrl());
+      const catId = detectCatIdFromUrl();
+      setSessionCatId(catId); // xoa ten cu (thuoc cat_id truoc do), xem setSessionCatId()
+      // Hien NGAY ten doan tu slug URL (khong can cho server) - resolveCatName() se ghi de
+      // bang ten "dep" hon tu cat-db NEU co, con khong thi giu nguyen ten nay.
+      if (catId) setSessionCatName(detectCatNameFromUrl());
       updateUI();
+      resolveCatName(catId);
       startCollecting();
     });
     document.getElementById('sc-stop-btn').addEventListener('click', stopCollecting);
@@ -793,6 +860,14 @@
     updateUI();
     maybeAutoCheckForUpdate();
 
+    // Bu lai cat_name neu trang vua duoc tai lai (vd sau auto-page) ma cat_id phien van con
+    // nhung chua co ten hien thi (vd lan resolve truoc do loi mang) - khong goi lai neu da co
+    // san ten, tranh goi API du thua moi lan chuyen trang.
+    const pendingCatId = getSessionCatId();
+    if (pendingCatId && !getSessionCatName()) {
+      resolveCatName(pendingCatId);
+    }
+
     // Tự động chạy tiếp nếu trước đó đang ở trạng thái IsRunning (chuyển trang vừa xảy ra)
     if (isRunning) {
       setTimeout(() => {
@@ -816,8 +891,11 @@
     const catLineEl = document.getElementById('sc-cat-line');
     if (catLineEl) {
       const sessionCatId = getSessionCatId();
+      const sessionCatName = getSessionCatName();
+      // Uu tien hien ten (vd "Pets") - fallback ve cat_id tho neu chua tra duoc ten (dang
+      // cho resolveCatName() phan hoi, hoac khong tim thay ten trong cat-db).
       const sessionMsg = sessionCatId
-        ? `Đang cào: <b>cat_id ${sessionCatId}</b>`
+        ? `Đang cào: <b>${sessionCatName || 'cat_id ' + sessionCatId}</b>`
         : 'Đang cào: <b>không có danh mục</b>';
       const links = getStoredLinks();
       const distinctCount = new Set(links.map((item) => item.catId || null)).size;
