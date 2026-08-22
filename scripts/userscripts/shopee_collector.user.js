@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee Product Link Collector
 // @namespace    http://tampermonkey.net/
-// @version      1.8.1
+// @version      1.8.2
 // @description  Thu thập link sản phẩm Shopee tự động với tính năng cuộn trang thông minh, tự động chuyển trang SPA, tự nhận diện domain quốc gia, xuất dữ liệu và đẩy thẳng vào DB (root) của dashboard affiliate offer scraper. Gán cat_id riêng cho từng link ngay lúc cào, đảm bảo đúng danh mục kể cả khi cào nhiều danh mục trước khi đẩy vào DB.
 // @author       Antigravity
 // @match        https://shopee.vn/*
@@ -29,7 +29,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = 'v1.8.1';
+  const SCRIPT_VERSION = 'v1.8.2';
   const STORAGE_KEY = 'shopee_collected_links';
   const RUNNING_STATE_KEY = 'shopee_collector_is_running';
   const AUTO_PAGE_KEY = 'shopee_collector_auto_page';
@@ -714,6 +714,13 @@
           margin-bottom: 10px;
         }
         .sc-btn-clear:hover { background: #5a6268; }
+        .sc-btn-top {
+          background: #495057;
+          color: white;
+          width: 100%;
+          margin-bottom: 10px;
+        }
+        .sc-btn-top:hover { background: #343a40; }
         .sc-export-title {
           font-size: 12px;
           color: #495057;
@@ -796,6 +803,7 @@
           <button class="sc-btn sc-btn-start" id="sc-start-btn">Start</button>
           <button class="sc-btn sc-btn-stop" id="sc-stop-btn" style="display:none;">Stop</button>
         </div>
+        <button class="sc-btn sc-btn-top" id="sc-scroll-top-btn">⬆ Lên đầu trang</button>
         <button class="sc-btn sc-btn-clear" id="sc-clear-btn">Xóa bộ nhớ đệm</button>
         <div class="sc-export-title">Xuất dữ liệu:</div>
         <div class="sc-export-group">
@@ -831,6 +839,9 @@
       startCollecting();
     });
     document.getElementById('sc-stop-btn').addEventListener('click', stopCollecting);
+    document.getElementById('sc-scroll-top-btn').addEventListener('click', () => {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
     document.getElementById('sc-clear-btn').addEventListener('click', clearStorage);
     document.getElementById('sc-exp-txt').addEventListener('click', exportTXT);
     document.getElementById('sc-exp-json').addEventListener('click', exportJSON);
