@@ -1744,7 +1744,10 @@ async function getMailCode(btn, id) {
   codeCell.innerHTML = '<span class="muted">Đang lấy mã...</span>';
   await withBusy(btn, async () => {
     try {
-      const { code, note } = await api('POST', `/api/mail_accounts/${id}/get_code`);
+      // Timeout dai (1 phut) - duong chinh (Graph truc tiep) thuong nhanh, nhung neu phai
+      // fallback ve dongvanfb (chuoi 4 lenh goi TUAN TU ra ngoai, xem affiliate_scrape_server.py)
+      // co the vuot 15s mac dinh du van dang xu ly binh thuong, xem ghi chu o api().
+      const { code, note } = await api('POST', `/api/mail_accounts/${id}/get_code`, undefined, 60000);
       await loadMailAccounts();
       if (!code) await customAlert('Chưa lấy được mã Shopee.\n' + (note || ''), { danger: true });
     } catch (e) {
