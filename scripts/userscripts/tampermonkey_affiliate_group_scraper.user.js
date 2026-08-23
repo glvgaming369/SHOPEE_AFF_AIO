@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee Affiliate Offer Group Scraper
 // @namespace    shopee-crawl
-// @version      0.9
+// @version      0.10
 // @description  BFS tu 1 link goc (root) qua "san pham tuong tu" cua offer/product, gom du 60 san pham dat 3 tieu chi (aff_7days/sold/seller_commission) cho 1 group_id, dong bo qua local server (affiliate_scrape_server.py) de gan group nguyen tu khi chay nhieu Chrome profile song song.
 // @match        https://affiliate.shopee.vn/*
 // @match        https://affiliate.shopee.sg/*
@@ -23,7 +23,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.9'; // khop @version o header - doi ca 2 cho khi sua script
+  const SCRIPT_VERSION = '0.10'; // khop @version o header - doi ca 2 cho khi sua script
   const ENDPOINT_MARKER = '/api/v3/offer/product';
   const GROUP_TARGET = 60;
   const CALL_CAP_PER_ROOT = 500;
@@ -211,6 +211,29 @@
     checkForUpdate(false);
   }
 
+  // Lay dieu kien loc (promoted_7d_max/sold_min/seller_commission_vnd_min) tu CHINH server
+  // dang dung de xac minh that (khong hardcode o day) - dung nguon + nhan chu y het tab
+  // "Vận hành" tren dashboard (xem section "Điều kiện lọc sản phẩm" trong index.html) de
+  // nguoi van hanh doi chieu dung, khong can doan/nho lai tu dong log rai rac. Cap nhat ca
+  // khoi hien thi #aog-filter-content (thay trong luc dang render) LAN goi khi bam Start
+  // (runLoopInner) - tra ve settings de tai su dung cho soldMin, tranh goi API 2 lan.
+  async function loadFilterSettings() {
+    const box = document.getElementById('aog-filter-content');
+    try {
+      const settings = await serverRequest('GET', '/api/settings');
+      if (box) {
+        box.innerHTML =
+          `Số lượng KOL quảng bá 7 ngày &lt; <b>${settings.promoted_7d_max}</b><br>` +
+          `Số đã bán trong 30 ngày &gt; <b>${settings.sold_min}</b><br>` +
+          `Hoa hồng nhà bán hàng &gt; <b>${settings.seller_commission_vnd_min}</b>`;
+      }
+      return settings;
+    } catch (e) {
+      if (box) box.textContent = 'Không lấy được điều kiện lọc: ' + e.message;
+      return null;
+    }
+  }
+
   // ---- BFS chinh cho 1 root ----
   async function runBfsForRoot(root, log, soldMin) {
     const groupid = root.itemid;
@@ -366,14 +389,12 @@
       return;
     }
     activeDeviceKey = deviceKey;
-    let settings;
-    try {
-      settings = await serverRequest('GET', '/api/settings');
-      log(`Dieu kien loc dang ap dung: aff7d<${settings.promoted_7d_max}, sold>${settings.sold_min}, seller_commission_vnd>${settings.seller_commission_vnd_min}`);
-    } catch (e) {
-      log('Khong lay duoc dieu kien loc tu server: ' + e.message);
+    const settings = await loadFilterSettings();
+    if (!settings) {
+      log('Khong lay duoc dieu kien loc tu server - kiem tra lai URL server roi bam Start lai.');
       return;
     }
+    log(`Dieu kien loc dang ap dung: aff7d<${settings.promoted_7d_max}, sold>${settings.sold_min}, seller_commission_vnd>${settings.seller_commission_vnd_min}`);
     log(`Da vao trang thai cho viec (device_key="${deviceKey}") - giao root cho tai khoan nay tren dashboard.`);
     await heartbeat('idle');
     while (!isStopped()) {
@@ -430,6 +451,10 @@
         <button id="aog-check-update-btn" style="padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer;background:#f2f2f2;color:#222;border:1px solid #ccc;border-radius:4px;">🔄 Kiểm tra cập nhật</button>
         <span id="aog-update-badge" style="display:none;font-size:10px;font-weight:700;color:#d8431f;background:#fff5f2;border:1px solid #ee4d2d;padding:4px 8px;border-radius:4px;cursor:pointer;"></span>
       </div>
+      <div id="aog-filter-box" style="background:#f8f9fa;border:1px solid #eee;border-radius:4px;padding:6px 8px;margin-bottom:6px;font-size:11px;line-height:1.6;color:#444;">
+        <div style="font-weight:700;color:#333;margin-bottom:2px;">Điều kiện lọc đang áp dụng (theo tab "Vận hành"):</div>
+        <div id="aog-filter-content">Đang tải...</div>
+      </div>
       <div style="display:flex;gap:6px;margin-bottom:4px;">
         <input id="aog-server" type="text" placeholder="Local server URL"
           style="flex:1;padding:4px 6px;border:1px solid #ccc;border-radius:4px;">
@@ -461,6 +486,7 @@
     document.getElementById('aog-check-update-btn').addEventListener('click', () => checkForUpdate(true));
     document.getElementById('aog-update-badge').addEventListener('click', openUpdatePage);
     maybeAutoCheckForUpdate();
+    loadFilterSettings(); // hien dieu kien loc NGAY luc mo panel, khong can doi bam Start
   }
 
   if (document.readyState === 'loading') {
