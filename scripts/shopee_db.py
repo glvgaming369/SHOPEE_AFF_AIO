@@ -91,6 +91,28 @@ create table if not exists video_machines (
 );
 """
 
+# Nhat ky 1 dong / 1 lan goi POST /api/videos/push (1 lo toi da 200 video) - luu LAI TREN DB
+# (khong chi hien tam thoi tren dashboard) de nguoi dung truy xuat lai lich su tao video sau
+# nay (vd qua ngay hom sau, hoac mo tu may khac) - truoc day chi co videoLog() phia client
+# (bien mat khi F5/dong tab). Ghi trong chinh push_videos() (affiliate_scrape_server.py),
+# KHONG phai tu dashboard tu goi rieng - dam bao ghi dung dung 1 lan/lo bat ke ai/cach nao
+# goi API nay (dashboard, script khac, hay goi tay qua curl).
+CREATE_VIDEO_PUSH_LOG_TABLE_SQL = """
+create table if not exists video_push_log (
+    id integer primary key autoincrement,
+    created_at timestamp default current_timestamp,
+    market text,
+    machine_id integer,
+    machine_name text,
+    requested_limit integer,
+    done integer default 0,
+    pushed integer default 0,
+    created integer default 0,
+    error_count integer default 0,
+    error_detail text
+);
+"""
+
 # Mail mua tu dongvanfb dung de dang ky tai khoan Shopee (tab "Tao tai khoan Shopee") - xem
 # dongvanfb_client.py. full_info luu NGUYEN dong "email|password|refresh_token|client_id"
 # dongvanfb tra ve (yeu cau cua nguoi dung: giu du lieu goc), cac cot email/password tach
@@ -318,6 +340,8 @@ def init_db(db_path=DB_PATH_DEFAULT):
     if "auto_assign_market" not in existing_settings_cols:
         conn.execute("alter table settings add column auto_assign_market text default ''")
     conn.execute(CREATE_VIDEO_MACHINES_TABLE_SQL)
+    conn.execute(CREATE_VIDEO_PUSH_LOG_TABLE_SQL)
+    conn.execute("create index if not exists idx_video_push_log_created on video_push_log(created_at)")
     conn.execute(CREATE_MAIL_ACCOUNTS_TABLE_SQL)
     # Cot 'slot' them sau - DB cu (tao truoc khi co dong nay trong
     # CREATE_MAIL_ACCOUNTS_TABLE_SQL) can ALTER TABLE rieng, cung ly do nhu xtra/fail_reason.
@@ -1855,6 +1879,47 @@ def mark_video_jobs(db_path, itemid_market_jobid_triples):
             [(job_id, str(itemid), market) for itemid, market, job_id in itemid_market_jobid_triples],
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def log_video_push(db_path, market, machine_id, machine_name, requested_limit, done, pushed, created, errors):
+    """Ghi 1 dong nhat ky cho 1 lan goi POST /api/videos/push - xem CREATE_VIDEO_PUSH_LOG_TABLE_SQL.
+    errors: list [{itemid, reason}, ...] tu push_videos() - luu nguyen dang JSON (list rong ->
+    '[]', khong luu null) de tab "Tao Video" hien lai chi tiet loi khi truy xuat sau nay."""
+    import json
+    conn = _connect(db_path)
+    try:
+        conn.execute(
+            "insert into video_push_log "
+            "(market, machine_id, machine_name, requested_limit, done, pushed, created, error_count, error_detail) "
+            "values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (market, machine_id, machine_name, requested_limit, done, pushed, created,
+             len(errors or []), json.dumps(errors or [], ensure_ascii=False)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_video_push_log(db_path, market=None, limit=100, offset=0):
+    """Lich su tao video (moi dong = 1 lan goi push_videos()), moi nhat truoc - dung cho tab
+    "Tao Video" tra cuu lai lich su qua nhieu phien lam viec (khac videoLog() phia client,
+    chi song trong bo nho tab, mat khi F5). Tra ve {"rows": [...], "total": n} de dashboard
+    tu ve phan trang."""
+    conn = _connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        market_sql = " where market=?" if market else ""
+        params = [market] if market else []
+        total = conn.execute(
+            f"select count(*) from video_push_log{market_sql}", params
+        ).fetchone()[0]
+        rows = conn.execute(
+            f"select * from video_push_log{market_sql} order by id desc limit ? offset ?",
+            params + [limit, offset],
+        ).fetchall()
+        return {"rows": [dict(r) for r in rows], "total": total}
     finally:
         conn.close()
 

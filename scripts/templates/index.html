@@ -605,7 +605,7 @@
 
     <div class="row" style="margin-top:14px;">
       <select id="video-machine-sel" style="min-width:200px;"></select>
-      <select id="video-market-sel" style="min-width:160px;">
+      <select id="video-market-sel" style="min-width:160px;" onchange="loadVideoPushLog(true)">
         <option value="">Tất cả thị trường</option>
       </select>
       <label style="white-space:nowrap;font-weight:500;">Số lượng:</label>
@@ -620,6 +620,23 @@
     </div>
 
     <pre id="video-log" class="console-log" style="max-height:280px;"></pre>
+  </section>
+
+  <section>
+    <div class="row" style="align-items:center;justify-content:space-between;">
+      <h2 style="margin:0;">Nhật ký tạo video</h2>
+      <button class="secondary" onclick="loadVideoPushLog(true)">Làm mới</button>
+    </div>
+    <div class="muted" style="margin-bottom:10px;">
+      Lịch sử từng lô đã xử lý (lưu trên server, không mất khi tải lại trang) - lọc theo thị trường đang chọn ở trên. Bấm số lỗi để xem chi tiết.
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Thời gian</th><th>Thị trường</th><th>Máy tạo</th><th>Yêu cầu</th><th>Đẩy cache</th><th>Tạo video</th><th>Lỗi</th></tr></thead>
+      <tbody id="video-log-tbody"><tr><td colspan="7" class="muted">Đang tải...</td></tr></tbody>
+    </table></div>
+    <div class="row" style="margin-top:10px;justify-content:center;">
+      <button class="secondary" id="video-log-more-btn" onclick="loadVideoPushLog(false)" style="display:none;">Tải thêm</button>
+    </div>
   </section>
 
 </div>
@@ -695,7 +712,7 @@ function switchTab(name) {
   document.getElementById('tab-' + name).classList.add('active');
   document.getElementById('tabbtn-' + name).classList.add('active');
   if (name === 'products') loadItems();
-  if (name === 'video') { loadVideoMachines(); loadVideoStats(); }
+  if (name === 'video') { loadVideoMachines(); loadVideoStats(); loadVideoPushLog(true); }
   if (name === 'mailacc') {
     document.getElementById('mailacc-apikey').value = (currentSettings && currentSettings.dongvanfb_api_key) || '';
     loadMailAccountTypes();
@@ -1504,10 +1521,70 @@ async function runVideoPush() {
     document.getElementById('video-stop-btn').disabled = true;
     videoLog(`HOÀN TẤT (hoặc đã dừng). Tổng kết: Đã xử lý ${grandDone}, Đẩy cache ${grandPushed}, Tạo video ${grandCreated}, Lỗi ${grandErrors}.`);
     loadVideoStats();
+    loadVideoPushLog(true);
   }
 }
 
 function stopVideoPush() { videoStop = true; }
+
+// ---- Nhat ky tao video (luu server, xem video_push_log trong shopee_db.py) ----
+let videoLogRows = [];
+let videoLogOffset = 0;
+const VIDEO_LOG_PAGE_SIZE = 50;
+
+async function loadVideoPushLog(reset) {
+  if (reset) {
+    videoLogOffset = 0;
+    videoLogRows = [];
+  }
+  const market = document.getElementById('video-market-sel').value;
+  const params = new URLSearchParams({ limit: VIDEO_LOG_PAGE_SIZE, offset: videoLogOffset });
+  if (market) params.set('market', market);
+  let data;
+  try {
+    data = await api('GET', `/api/videos/log?${params}`);
+  } catch (e) {
+    document.getElementById('video-log-tbody').innerHTML = `<tr><td colspan="7" class="muted">Lỗi tải nhật ký: ${e.message}</td></tr>`;
+    return;
+  }
+  videoLogRows = videoLogRows.concat(data.rows);
+  videoLogOffset += data.rows.length;
+  renderVideoPushLog();
+  document.getElementById('video-log-more-btn').style.display = videoLogOffset < data.total ? 'inline-block' : 'none';
+}
+
+function fmtLogTime(isoLike) {
+  return new Date(isoLike.replace(' ', 'T') + 'Z').toLocaleString('vi-VN');
+}
+
+function renderVideoPushLog() {
+  const tbody = document.getElementById('video-log-tbody');
+  tbody.innerHTML = videoLogRows.map(r => `
+    <tr>
+      <td class="muted" style="white-space:nowrap;">${fmtLogTime(r.created_at)}</td>
+      <td><b>${r.market || '(không rõ)'}</b></td>
+      <td>${r.machine_name || '-'}</td>
+      <td>${r.requested_limit}</td>
+      <td>${r.pushed}</td>
+      <td>${r.created}</td>
+      <td>${r.error_count > 0
+        ? `<a href="#" onclick="showVideoLogErrorDetail(${r.id});return false;" style="color:var(--danger-text);font-weight:700;">${r.error_count}</a>`
+        : '0'}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="7" class="muted">Chưa có lịch sử.</td></tr>';
+}
+
+async function showVideoLogErrorDetail(id) {
+  const row = videoLogRows.find(r => r.id === id);
+  if (!row) return;
+  let detail = [];
+  try { detail = JSON.parse(row.error_detail || '[]'); } catch (e) { /* giu detail rong */ }
+  const text = detail.length
+    ? detail.slice(0, 30).map(e => `- ${e.itemid || ''} ${e.reason || ''}`.trim()).join('\n') +
+      (detail.length > 30 ? `\n... và ${detail.length - 30} lỗi khác` : '')
+    : 'Không có chi tiết.';
+  await customAlert(`Chi tiết lỗi (lô lúc ${fmtLogTime(row.created_at)}):\n\n${text}`, { danger: true });
+}
 
 // ---- Tab "Tạo tài khoản Shopee" ----
 

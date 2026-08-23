@@ -739,12 +739,27 @@ def push_videos():
                 if job_updates:
                     shopee_db.mark_video_jobs(DB_PATH, job_updates)
 
+    shopee_db.log_video_push(
+        DB_PATH, market, machine_id, machine["name"], limit,
+        len(candidates), total_pushed, total_created, errors,
+    )
     return jsonify({
         "done": len(candidates),
         "pushed": total_pushed,
         "created": total_created,
         "errors": errors,
     })
+
+
+@app.route("/api/videos/log", methods=["GET"])
+def videos_log():
+    market = request.args.get("market") or None
+    try:
+        limit = min(max(1, int(request.args.get("limit") or 50)), 500)
+        offset = max(0, int(request.args.get("offset") or 0))
+    except (TypeError, ValueError):
+        return _bad_request("'limit'/'offset' phai la so nguyen")
+    return jsonify(shopee_db.list_video_push_log(DB_PATH, market=market, limit=limit, offset=offset))
 
 
 # ---- Tab "Tao tai khoan Shopee" (mua mail dongvanfb + doc code) ----
