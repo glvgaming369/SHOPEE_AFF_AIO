@@ -29,6 +29,7 @@ from openpyxl import Workbook
 
 import chrome_launcher
 import dongvanfb_client
+import microsoft_mail_client
 import shopee_categories
 import shopee_db
 import videoai_client
@@ -867,7 +868,20 @@ def mail_accounts_get_code(account_id):
     row = shopee_db.get_mail_account(DB_PATH, account_id)
     if not row:
         return _bad_request(f"khong tim thay mail id={account_id}")
-    code, note = dongvanfb_client.fetch_shopee_code(row["email"], row["refresh_token"], row["client_id"])
+    # Doc TRUC TIEP qua Graph (microsoft_mail_client) la duong CHINH - khong ton phi/khong
+    # phu thuoc dich vu ngoai. Fallback ve dongvanfb CHI khi duong truc tiep loi (vd token
+    # nay co van de rieng voi cach goi cua ta) - dongvanfb co 2 nhanh Graph/IMAP rieng, da
+    # tung ghi nhan thuc te co tai khoan 1 nhanh loi nhung nhanh kia van doc duoc (xem
+    # dongvanfb_client.py). Van luu lai refresh_token moi (Microsoft cap kem moi lan goi) nhu
+    # thoi quen an toan - KHONG bat buoc, da kiem chung token cu van dung duoc binh thuong
+    # sau khi "bi thay" (xem ghi chu dau file microsoft_mail_client.py).
+    try:
+        code, note, new_refresh_token = microsoft_mail_client.fetch_shopee_code(row["refresh_token"], row["client_id"])
+        if new_refresh_token and new_refresh_token != row["refresh_token"]:
+            shopee_db.update_mail_account_refresh_token(DB_PATH, account_id, new_refresh_token)
+    except microsoft_mail_client.MicrosoftMailError as e:
+        code, note = dongvanfb_client.fetch_shopee_code(row["email"], row["refresh_token"], row["client_id"])
+        note = f"[Graph trực tiếp lỗi: {e}] Fallback dongvanfb -> {note}"
     shopee_db.set_mail_account_code(DB_PATH, account_id, code)
     return jsonify({"code": code, "note": note})
 

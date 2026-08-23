@@ -2128,6 +2128,22 @@ def set_mail_account_code(db_path, account_id, code):
         conn.close()
 
 
+def update_mail_account_refresh_token(db_path, account_id, refresh_token):
+    """Ghi de refresh_token MOI ma Microsoft cap kem moi lan doc mail thanh cong qua Graph
+    truc tiep (xem microsoft_mail_client.fetch_shopee_code()). Chi la thoi quen an toan -
+    da kiem chung THAT (2026-08-24) token CU van dung duoc binh thuong sau khi "bi thay" boi
+    ban moi (Microsoft khong thu hoi ngay), nen KHONG goi ham nay cung khong sao."""
+    conn = _connect(db_path)
+    try:
+        conn.execute(
+            "update mail_accounts set refresh_token=? where id=?",
+            (refresh_token, account_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def delete_mail_account(db_path, account_id):
     conn = _connect(db_path)
     try:
