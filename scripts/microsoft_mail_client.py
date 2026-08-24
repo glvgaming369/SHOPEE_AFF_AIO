@@ -31,9 +31,15 @@ from dongvanfb_client import extract_otp_code
 
 TOKEN_URL = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
 GRAPH_MESSAGES_URL = "https://graph.microsoft.com/v1.0/me/messages"
-# offline_access BAT BUOC de Microsoft kem refresh_token MOI trong response - thieu no co
-# the chi tra access_token, khien token cu "chet dan" sau vai lan dung ma khong ai cap nhat.
-SCOPE = "https://graph.microsoft.com/Mail.Read offline_access"
+# Dung '.default' (xin lai DUNG NHUNG QUYEN da tung duoc cap khi mail nay duoc tao/ban) thay
+# vi xin ten quyen cu the (vd 'Mail.Read offline_access') - da gap that te (2026-08-24): xin
+# ten quyen cu the bi Microsoft tu choi voi loi AADSTS70000 "scopes requested are
+# unauthorized" cho 1 so tai khoan (co le do lo mail duoc ban voi bo quyen consent khac
+# nhau tuy dot), TRONG KHI '.default' luon thanh cong voi CUNG refresh_token do. Danh doi:
+# '.default' KHONG kem 'offline_access' nen response se KHONG co refresh_token moi - chap
+# nhan duoc vi da xac nhan token cu van dung binh thuong nhieu lan (xem ghi chu duoi ham
+# fetch_shopee_code()).
+SCOPE = "https://graph.microsoft.com/.default"
 
 
 class MicrosoftMailError(RuntimeError):
@@ -109,6 +115,49 @@ def _find_shopee_code(messages):
         if found:
             return found, subject
     return None, None
+
+
+# Link rut gon dang "kich hoat dang nhap" cua Shopee (vd https://th.shp.ee/dlink/q7281kd5)
+# - subdomain (th/vn/ph/...) TU THAN link da the hien market, khong can bang tra market
+# rieng de tong quat hoa cho nhieu thi truong (xac nhan qua test that voi mail TH, 2026-08-24).
+_LOGIN_LINK_PATTERN = re.compile(r"https?://[\w-]+\.shp\.ee/dlink/[\w-]+", re.I)
+
+# Nguoi gui email "co lan dang nhap moi" cua Shopee - GIA DINH dung chung cau truc
+# "info@security.shopee.<tld>" cho MOI thi truong (cung pattern voi affiliate@mail.shopee.<tld>
+# da xac nhan o dongvanfb_client.py/shopee_collector.user.js, chi khac tld), da xac nhan
+# THAT voi 1 mail TH (info@security.shopee.co.th, 2026-08-24). Neu Shopee dung dia chi khac
+# o thi truong khac, can bo sung vi du that truoc khi tin tuong hoan toan cho market do.
+_SECURITY_SENDER_RE = re.compile(r"^info@security\.shopee\.", re.I)
+
+
+def _find_login_link(messages):
+    """Tim email 'co lan dang nhap moi' + trich link kich hoat - xem 2 pattern tren."""
+    for m in messages:
+        from_addr = ((m.get("from") or {}).get("emailAddress") or {}).get("address") or ""
+        if not _SECURITY_SENDER_RE.match(from_addr):
+            continue
+        subject = m.get("subject") or ""
+        content = (m.get("body") or {}).get("content") or ""
+        match = _LOGIN_LINK_PATTERN.search(content) or _LOGIN_LINK_PATTERN.search(subject)
+        if match:
+            return match.group(0), subject
+    return None, None
+
+
+def fetch_login_link(refresh_token, client_id):
+    """Tim link kich hoat dang nhap TRUC TIEP qua Microsoft Graph - cung co che voi
+    fetch_shopee_code() (refresh token roi quet Inbox), chi khac dieu kien tim: sender +
+    dinh dang link thay vi ma OTP. Tra ve (link, note, new_refresh_token) - xem
+    fetch_shopee_code() ve y nghia new_refresh_token (nen luu, khong bat buoc)."""
+    token_data = refresh_access_token(refresh_token, client_id)
+    new_refresh_token = token_data.get("refresh_token") or refresh_token
+    messages = list_recent_messages(token_data["access_token"])
+    link, subject = _find_login_link(messages)
+    if link:
+        note = f'Graph API trực tiếp - tìm thấy link trong "{subject}"'
+    else:
+        note = f"Graph API trực tiếp - không tìm thấy email xác nhận đăng nhập trong {len(messages)} tin nhắn gần nhất"
+    return link, note, new_refresh_token
 
 
 def fetch_shopee_code(refresh_token, client_id):

@@ -63,3 +63,17 @@ def launch_profile(profile_path, url, chrome_exe=None):
         url,
     ]
     return subprocess.Popen(args)
+
+
+def launch_default(url, chrome_exe=None):
+    """Mo Chrome MAC DINH (khong --user-data-dir/--profile-directory rieng) - dung khi
+    khong can gan cung 1 profile/tai khoan cu the, vd nut "Kích hoạt link đăng nhập" (chi
+    can mo link ra de xu ly, khong phu thuoc phien Shopee dang dang nhap o profile nao).
+    Tra ve subprocess.Popen (khong cho). Nem loi neu khong tim thay chrome.exe."""
+    chrome_exe = chrome_exe or find_chrome_exe()
+    if not chrome_exe:
+        raise RuntimeError(
+            "Khong tim thay chrome.exe (da thu PATH va cac vi tri cai dat thuong gap). "
+            "Kiem tra Chrome da cai dung chuan chua, hoac sua COMMON_CHROME_PATHS."
+        )
+    return subprocess.Popen([chrome_exe, url])

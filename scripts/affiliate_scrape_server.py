@@ -886,6 +886,31 @@ def mail_accounts_get_code(account_id):
     return jsonify({"code": code, "note": note})
 
 
+@app.route("/api/mail_accounts/<int:account_id>/activate_login", methods=["POST"])
+def mail_accounts_activate_login(account_id):
+    """Doc mail 'co lan dang nhap moi' cua Shopee (tu info@security.shopee.<tld>), trich
+    link kich hoat dang "https://<tld>.shp.ee/dlink/<code>", roi mo bang Chrome MAC DINH
+    (khong gan profile/tai khoan cu the - chi can mo link ra de xu ly, khong phu thuoc
+    phien Shopee dang dang nhap o dau). CHUA co fallback dongvanfb cho tinh nang nay
+    (dongvanfb khong co endpoint rieng cho link kich hoat, chi co endpoint doc ma OTP)."""
+    row = shopee_db.get_mail_account(DB_PATH, account_id)
+    if not row:
+        return _bad_request(f"khong tim thay mail id={account_id}")
+    try:
+        link, note, new_refresh_token = microsoft_mail_client.fetch_login_link(row["refresh_token"], row["client_id"])
+        if new_refresh_token and new_refresh_token != row["refresh_token"]:
+            shopee_db.update_mail_account_refresh_token(DB_PATH, account_id, new_refresh_token)
+    except microsoft_mail_client.MicrosoftMailError as e:
+        return jsonify({"error": f"Lỗi đọc mail: {e}"}), 500
+    if not link:
+        return jsonify({"link": None, "note": note})
+    try:
+        proc = chrome_launcher.launch_default(link)
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"link": link, "note": note, "pid": proc.pid})
+
+
 @app.route("/api/reset", methods=["POST"])
 def reset_all():
     """Xoa du lieu san pham (khong dong tai khoan/profile) - dung cho nut "Xoa toan bo du

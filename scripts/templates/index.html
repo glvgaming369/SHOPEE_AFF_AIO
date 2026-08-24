@@ -1713,6 +1713,7 @@ function renderMailAccounts() {
       <td>${a.shopee_code ? `<b style="color:var(--success); font-size:14px;">${a.shopee_code}</b>` : (a.checked_at ? '<span class="muted">Chưa có</span>' : '-')}</td>
       <td style="white-space:nowrap;">
         <button onclick="getMailCode(this, ${a.id})">Lấy mã (Get code)</button>
+        <button class="secondary" onclick="activateLoginLink(this, ${a.id})">Kích hoạt link đăng nhập</button>
         <button class="secondary" onclick="deleteMailAccount(${a.id})">Xóa</button>
       </td>
       <td class="muted" style="white-space:nowrap;">${a.created_at || '-'}</td>
@@ -1753,6 +1754,18 @@ async function getMailCode(btn, id) {
     } catch (e) {
       await customAlert('Lỗi lấy mã: ' + e.message, { danger: true });
       await loadMailAccounts();
+    }
+  });
+}
+
+async function activateLoginLink(btn, id) {
+  await withBusy(btn, async () => {
+    try {
+      // Timeout dai (1 phut) - cung ly do voi getMailCode() o tren (doc mail qua Graph).
+      const { link, note } = await api('POST', `/api/mail_accounts/${id}/activate_login`, undefined, 60000);
+      if (!link) await customAlert('Chưa tìm thấy email xác nhận đăng nhập.\n' + (note || ''), { danger: true });
+    } catch (e) {
+      await customAlert('Lỗi kích hoạt link đăng nhập: ' + e.message, { danger: true });
     }
   });
 }
