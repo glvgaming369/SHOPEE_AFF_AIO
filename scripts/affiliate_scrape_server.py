@@ -889,10 +889,14 @@ def mail_accounts_get_code(account_id):
 @app.route("/api/mail_accounts/<int:account_id>/activate_login", methods=["POST"])
 def mail_accounts_activate_login(account_id):
     """Doc mail 'co lan dang nhap moi' cua Shopee (tu info@security.shopee.<tld>), trich
-    link kich hoat dang "https://<tld>.shp.ee/dlink/<code>", roi mo bang Chrome MAC DINH
-    (khong gan profile/tai khoan cu the - chi can mo link ra de xu ly, khong phu thuoc
-    phien Shopee dang dang nhap o dau). CHUA co fallback dongvanfb cho tinh nang nay
-    (dongvanfb khong co endpoint rieng cho link kich hoat, chi co endpoint doc ma OTP)."""
+    link kich hoat dang "https://<tld>.shp.ee/dlink/<code>", roi mo link do bang Chrome.
+    Uu tien mo DUNG profile Shopee da dang ky (cot 'Thiết bị' o tab Mail Accounts, khop ten
+    voi 1 dong trong 'devices' - hop ly hon vi link kich hoat thuong can dang nhap dung
+    tai khoan Shopee lien quan) - NEU khong dien 'Thiết bị' hoac khong khop dong nao, fallback
+    ve 1 cua so Chrome RIENG co dinh (chrome_launcher.launch_activation_link()) de KHONG
+    dieu huong tab/cua so nguoi dung dang lam viec (xem ghi chu ham do). CHUA co fallback
+    dongvanfb cho tinh nang nay (dongvanfb khong co endpoint rieng cho link kich hoat, chi
+    co endpoint doc ma OTP)."""
     row = shopee_db.get_mail_account(DB_PATH, account_id)
     if not row:
         return _bad_request(f"khong tim thay mail id={account_id}")
@@ -904,11 +908,19 @@ def mail_accounts_activate_login(account_id):
         return jsonify({"error": f"Lỗi đọc mail: {e}"}), 500
     if not link:
         return jsonify({"link": None, "note": note})
+    device_name = (row.get("device") or "").strip()
+    matched_device = None
+    if device_name:
+        devices = shopee_db.list_devices(DB_PATH)
+        matched_device = next((d for d in devices if d["name"] == device_name), None)
     try:
-        proc = chrome_launcher.launch_default(link)
-    except RuntimeError as e:
+        if matched_device:
+            proc = chrome_launcher.launch_profile(matched_device["serial"], link)
+        else:
+            proc = chrome_launcher.launch_activation_link(link)
+    except (RuntimeError, ValueError) as e:
         return jsonify({"error": str(e)}), 500
-    return jsonify({"link": link, "note": note, "pid": proc.pid})
+    return jsonify({"link": link, "note": note, "pid": proc.pid, "profile": matched_device["name"] if matched_device else "ActivationLinks"})
 
 
 @app.route("/api/reset", methods=["POST"])
