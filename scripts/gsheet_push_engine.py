@@ -42,19 +42,19 @@ def allocate_sequential(
 def to_sheet_row(row: ProductRow, video_folder: str) -> list[str]:
     """Map a matched product row onto the A..L columns of a per-account sheet.
 
-    Per update.txt: only A(SP ID)->B, B(product name)->C, and P(merge links)->F are
-    pushed; every other product-data column (A, D, E, G, H, I, J, K) stays blank. Column
-    L is not part of that product-data mapping — it exists solely so
+    A(SP ID)->B, B(product name)->G, and P(merge links)->F are pushed; every other
+    product-data column (A, C, D, E, H, I, J, K) stays blank. Column L is not part of
+    that product-data mapping — it exists solely so
     gsheet_sheets_client.get_used_video_ids() can stay folder-scoped for dedup.
     """
     return [
         "",                   # A - Link Sản Phẩm làm Video (khong push)
         row.sp_id,            # B - Tên Sản Phẩm  <- SP ID
-        row.product_name,     # C - Tên Video      <- Tên sản phẩm
+        "",                   # C - Tên Video
         "",                   # D - Nội Dung Video
         "",                   # E - Prompt Tạo Video Ai
         row.merge_links,      # F - Link Sản Phẩm Muốn Gắn Giỏ
-        "",                   # G - Caption Cho Sản Phẩm
+        row.product_name,     # G - Caption Cho Sản Phẩm  <- Tên sản phẩm
         "",                   # H - Thứ Tự Ảnh
         "",                   # I - Report
         "",                   # J - Report 1

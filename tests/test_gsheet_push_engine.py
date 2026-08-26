@@ -45,5 +45,5 @@ def test_allocate_sequential_leaves_later_accounts_empty_once_pool_is_exhausted(
 def test_to_sheet_row_maps_columns_per_spec():
     row = to_sheet_row(_row("999"), video_folder="D:/videos")
 
-    assert row == ["", "999", "P999", "", "", "merge999", "", "", "", "", "", "D:/videos"]
-    # B = SP ID, C = product name, F = merge links, L = folder (dedup only); A/D/E/G/H/I/J/K blank
+    assert row == ["", "999", "", "", "", "merge999", "P999", "", "", "", "", "D:/videos"]
+    # B = SP ID, F = merge links, G = product name, L = folder (dedup only); A/C/D/E/H/I/J/K blank

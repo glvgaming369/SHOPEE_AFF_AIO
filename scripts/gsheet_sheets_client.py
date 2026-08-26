@@ -12,8 +12,8 @@ from gsheet_paths import normalize_folder
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 # 0-based positions of the SP ID column and the video-folder tracking column within an
-# account sheet's A..L range. Per update.txt's mapping, SP ID lives in column B ("Tên Sản
-# Phẩm") and the product name lives in column C ("Tên Video") - NOT the reverse. The
+# account sheet's A..L range. SP ID lives in column B ("Tên Sản Phẩm"); the product name
+# lives in column G ("Caption Cho Sản Phẩm") - see gsheet_push_engine.to_sheet_row(). The
 # folder column (L) exists purely so get_used_video_ids() can stay folder-scoped - it's
 # not part of the A..K product-data mapping in to_sheet_row().
 _ACCOUNT_COL_SP_ID = 1
