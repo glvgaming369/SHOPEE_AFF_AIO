@@ -29,12 +29,14 @@ from openpyxl import Workbook
 
 import chrome_launcher
 import dongvanfb_client
+import gsheet_push_api
 import microsoft_mail_client
 import shopee_categories
 import shopee_db
 import videoai_client
 
 app = Flask(__name__)
+gsheet_push_api.register(app)  # tab "Push Sheet" - xem scripts/gsheet_push_api.py
 DB_PATH = shopee_db.DB_PATH_DEFAULT  # ghi de qua --db-path luc khoi dong, xem main()
 LAUNCH_URL_DEFAULT = "https://affiliate.shopee.ph/offer/product_offer"
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))

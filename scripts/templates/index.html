@@ -344,6 +344,10 @@
       <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 6l10 7 10-7"/></svg></span>
       Tạo tài khoản Shopee
     </button>
+    <button class="tab-btn" id="tabbtn-sheets" onclick="switchTab('sheets')">
+      <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="9" x2="9" y2="21"/></svg></span>
+      Push Sheet
+    </button>
   </nav>
 </div>
 
@@ -703,6 +707,85 @@
 
 </div>
 
+<!-- Tab 6: Push Sheet -->
+<div id="tab-sheets" class="tab-panel">
+
+  <section>
+    <h2>Cấu hình</h2>
+    <div class="row">
+      <input type="text" id="sheets-cfg-url" placeholder="Đường dẫn spreadsheet (URL Google Sheet)">
+    </div>
+    <div class="row">
+      <input type="text" id="sheets-cfg-creds" placeholder="Đường dẫn file Service Account JSON (Ví dụ: D:\credentials.json)">
+    </div>
+    <div class="row">
+      <input type="text" id="sheets-cfg-folder" placeholder="Thư mục video + _results.xlsx (Ví dụ: D:\videos\batch01)">
+    </div>
+    <div class="row">
+      <button onclick="saveSheetsConfig(this)">Lưu cấu hình</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Import tài khoản</h2>
+    <div class="muted" style="margin-bottom:10px;">Dán tên tài khoản Shopee, mỗi dòng một tài khoản.</div>
+    <textarea id="sheets-import-text" placeholder="ten_tai_khoan_1&#10;ten_tai_khoan_2"></textarea>
+    <div class="row" style="margin-top:10px;">
+      <button onclick="importSheetsAccounts(this)">Import tài khoản</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Quản lý dữ liệu</h2>
+    <div class="row">
+      <button class="secondary" onclick="clearSheetsFolderCache()">Xoá cache job đã push</button>
+      <button class="danger" onclick="cleanupSheetsData()">Dọn dẹp dữ liệu trên Sheet</button>
+      <button class="danger" onclick="deletePushedSheetsFiles()">Xoá vĩnh viễn video đã push</button>
+    </div>
+    <div class="muted">
+      "Xoá cache" chỉ xoá bộ nhớ chống trùng cục bộ cho thư mục đang nhập ở Cấu hình.
+      "Dọn dẹp dữ liệu trên Sheet" xoá dữ liệu (giữ tiêu đề) của các tài khoản đang tick chọn +
+      đang hiển thị trong bảng bên dưới. "Xoá vĩnh viễn video" đối chiếu trực tiếp Google Sheet
+      (không dùng cache) để tìm video đã push thành công rồi xoá file .mp4 tương ứng khỏi ổ đĩa
+      - không qua Thùng rác, không thể hoàn tác.
+    </div>
+  </section>
+
+  <section>
+    <div class="row" style="justify-content:space-between;">
+      <h2 style="margin:0;">Tài khoản</h2>
+      <span class="muted" id="sheets-accounts-summary">Tổng: 0 tài khoản</span>
+    </div>
+    <div class="row">
+      <button class="secondary" onclick="reloadSheetsAccounts()">Tải lại danh sách từ Sheet</button>
+      <button class="danger" onclick="clearSheetsAccountsList()">Xoá danh sách</button>
+      <input type="text" id="sheets-accounts-filter" placeholder="Lọc theo tên tài khoản..." oninput="renderSheetsAccountsTable()">
+    </div>
+    <div class="row">
+      <button class="secondary" onclick="sheetsBulkSelect(true)">Chọn tất cả</button>
+      <button class="secondary" onclick="sheetsBulkSelect(false)">Bỏ chọn tất cả</button>
+      <label style="white-space:nowrap;font-weight:500;">Số lượng áp dụng hàng loạt:</label>
+      <input type="number" id="sheets-bulk-qty" min="0" value="0" style="max-width:100px;">
+      <button onclick="applySheetsBulkQty()">Áp dụng cho các dòng đã chọn</button>
+    </div>
+    <div class="table-wrap"><table class="accounts-table">
+      <thead><tr><th>Chọn</th><th>Tài khoản</th><th>Số lượng</th><th>Hiện có</th><th>Hoàn thành</th><th>Đang chờ</th></tr></thead>
+      <tbody id="sheets-accounts-tbody"></tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>Chạy</h2>
+    <div class="row">
+      <button id="sheets-scan-btn" onclick="scanSheetsData(this)">Quét dữ liệu</button>
+      <button id="sheets-push-btn" onclick="pushSheetsData(this)" disabled>Push dữ liệu</button>
+      <span class="muted" id="sheets-scan-status">Chưa quét dữ liệu.</span>
+    </div>
+    <pre id="sheets-log" class="console-log"></pre>
+  </section>
+
+</div>
+
 </main>
 
 <script>
@@ -719,6 +802,7 @@ function switchTab(name) {
     loadMailBalance();
     loadMailAccounts();
   }
+  if (name === 'sheets') { loadSheetsConfig(); loadSheetsAccounts(); }
 }
 
 async function withBusy(btn, fn) {
@@ -1785,6 +1869,223 @@ async function clearMailAccounts() {
   const { deleted } = await api('POST', '/api/mail_accounts/clear');
   await customAlert(`Đã xóa ${deleted} dòng.`);
   loadMailAccounts();
+}
+
+// ---- Tab "Push Sheet" - port tu app desktop D:\push_data_to_ggsheet, xem gsheet_push_api.py ----
+let sheetsAccounts = [];
+let sheetsScannedFolder = null;
+
+function sheetsLog(msg) {
+  const box = document.getElementById('sheets-log');
+  box.textContent = `[${new Date().toLocaleTimeString('vi-VN')}] ${msg}\n` + box.textContent;
+}
+
+function sheetsLogAll(lines) {
+  (lines || []).forEach(sheetsLog);
+}
+
+function escSheetsAttr(s) {
+  return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+async function loadSheetsConfig() {
+  const cfg = await api('GET', '/api/gsheet/config');
+  document.getElementById('sheets-cfg-url').value = cfg.spreadsheet_url || '';
+  document.getElementById('sheets-cfg-creds').value = cfg.credentials_path || '';
+  document.getElementById('sheets-cfg-folder').value = cfg.video_folder || '';
+  updateSheetsPushButtonState();
+}
+
+async function saveSheetsConfig(btn) {
+  await withBusy(btn, async () => {
+    await api('POST', '/api/gsheet/config', {
+      spreadsheet_url: document.getElementById('sheets-cfg-url').value.trim(),
+      credentials_path: document.getElementById('sheets-cfg-creds').value.trim(),
+      video_folder: document.getElementById('sheets-cfg-folder').value.trim(),
+    });
+    updateSheetsPushButtonState();
+  });
+}
+
+async function loadSheetsAccounts() {
+  const { accounts } = await api('GET', '/api/gsheet/accounts');
+  sheetsAccounts = accounts;
+  renderSheetsAccountsTable();
+}
+
+function sheetsVisibleAccounts() {
+  const q = (document.getElementById('sheets-accounts-filter').value || '').trim().toLowerCase();
+  return q ? sheetsAccounts.filter(a => a.profile.toLowerCase().includes(q)) : sheetsAccounts;
+}
+
+function renderSheetsAccountsTable() {
+  const visible = sheetsVisibleAccounts();
+  const tbody = document.getElementById('sheets-accounts-tbody');
+  tbody.innerHTML = visible.map(a => `
+    <tr>
+      <td><input type="checkbox" ${a.selected ? 'checked' : ''} onchange="updateSheetsAccountField('${escSheetsAttr(a.profile)}', 'selected', this.checked)"></td>
+      <td><b>${a.profile}</b></td>
+      <td><input type="number" min="0" value="${a.qty}" style="max-width:100px;" onchange="updateSheetsAccountField('${escSheetsAttr(a.profile)}', 'qty', this.value)"></td>
+      <td>${a.current_jobs}</td>
+      <td><span class="badge done">${a.completed_jobs}</span></td>
+      <td><span class="badge pending">${a.pending_jobs}</span></td>
+    </tr>
+  `).join('') || '<tr><td colspan="6" class="muted">Chưa có tài khoản nào.</td></tr>';
+
+  const total = sheetsAccounts.length;
+  const summary = document.getElementById('sheets-accounts-summary');
+  summary.textContent = visible.length !== total
+    ? `Tổng: ${total} tài khoản (đang hiển thị: ${visible.length})`
+    : `Tổng: ${total} tài khoản`;
+}
+
+async function updateSheetsAccountField(profile, field, value) {
+  try {
+    await api('POST', '/api/gsheet/accounts/update', { profile, field, value });
+    const row = sheetsAccounts.find(a => a.profile === profile);
+    if (row) row[field] = field === 'qty' ? Math.max(0, parseInt(value, 10) || 0) : !!value;
+  } catch (e) {
+    await customAlert('Lỗi lưu dữ liệu: ' + e.message, { danger: true });
+    renderSheetsAccountsTable();
+  }
+}
+
+function sheetsBulkSelect(selected) {
+  const profiles = sheetsVisibleAccounts().map(a => a.profile);
+  if (!profiles.length) return;
+  api('POST', '/api/gsheet/accounts/bulk', { profiles, field: 'selected', value: selected })
+    .then(({ accounts }) => { sheetsAccounts = accounts; renderSheetsAccountsTable(); })
+    .catch(e => customAlert('Lỗi: ' + e.message, { danger: true }));
+}
+
+async function applySheetsBulkQty() {
+  const qty = Math.max(0, parseInt(document.getElementById('sheets-bulk-qty').value, 10) || 0);
+  const profiles = sheetsVisibleAccounts().filter(a => a.selected).map(a => a.profile);
+  if (!profiles.length) { await customAlert('Vui lòng tick chọn ít nhất một tài khoản đang hiển thị.', { danger: true }); return; }
+  try {
+    const { accounts } = await api('POST', '/api/gsheet/accounts/bulk', { profiles, field: 'qty', value: qty });
+    sheetsAccounts = accounts;
+    renderSheetsAccountsTable();
+  } catch (e) {
+    await customAlert('Lỗi: ' + e.message, { danger: true });
+  }
+}
+
+async function importSheetsAccounts(btn) {
+  const text = document.getElementById('sheets-import-text').value;
+  const profiles = text.split('\n').map(s => s.trim()).filter(Boolean);
+  if (!profiles.length) { await customAlert('Vui lòng dán ít nhất một tên tài khoản.', { danger: true }); return; }
+  await withBusy(btn, async () => {
+    try {
+      const { added, accounts } = await api('POST', '/api/gsheet/accounts/import', { profiles }, 60000);
+      sheetsAccounts = accounts;
+      renderSheetsAccountsTable();
+      document.getElementById('sheets-import-text').value = '';
+      sheetsLog(`Đã thêm ${added.length} tài khoản mới: ${added.length ? added.join(', ') : '(không có)'}`);
+    } catch (e) {
+      await customAlert('Lỗi import: ' + e.message, { danger: true });
+    }
+  });
+}
+
+async function reloadSheetsAccounts() {
+  try {
+    const { accounts } = await api('POST', '/api/gsheet/accounts/reload', undefined, 60000);
+    sheetsAccounts = accounts;
+    renderSheetsAccountsTable();
+    sheetsLog(`Đã tải ${accounts.length} tài khoản từ sheet.`);
+  } catch (e) {
+    await customAlert('Lỗi tải danh sách: ' + e.message, { danger: true });
+  }
+}
+
+async function clearSheetsAccountsList() {
+  if (!sheetsAccounts.length) return;
+  if (!(await customConfirm('Xoá toàn bộ danh sách tài khoản đang hiển thị trong tool?\n\nChỉ xoá khỏi tool (bộ nhớ local) - dữ liệu tài khoản trên Google Sheet không bị ảnh hưởng. Bạn có thể bấm "Tải lại danh sách từ Sheet" để lấy lại bất cứ lúc nào.'))) return;
+  await api('POST', '/api/gsheet/accounts/clear_list');
+  document.getElementById('sheets-accounts-filter').value = '';
+  sheetsAccounts = [];
+  renderSheetsAccountsTable();
+  sheetsLog('Đã xoá danh sách tài khoản khỏi tool (dữ liệu trên Sheet không đổi).');
+}
+
+function updateSheetsPushButtonState() {
+  const folder = document.getElementById('sheets-cfg-folder').value.trim();
+  document.getElementById('sheets-push-btn').disabled = !(sheetsScannedFolder && folder && folder === sheetsScannedFolder);
+}
+
+async function scanSheetsData(btn) {
+  const folder = document.getElementById('sheets-cfg-folder').value.trim();
+  if (!folder) { await customAlert('Vui lòng nhập thư mục chứa video + _results.xlsx.', { danger: true }); return; }
+  await withBusy(btn, async () => {
+    await api('POST', '/api/gsheet/config', {
+      spreadsheet_url: document.getElementById('sheets-cfg-url').value.trim(),
+      credentials_path: document.getElementById('sheets-cfg-creds').value.trim(),
+      video_folder: folder,
+    });
+    try {
+      const data = await api('POST', '/api/gsheet/scan', { video_folder: folder }, 60000);
+      sheetsScannedFolder = data.folder;
+      document.getElementById('sheets-scan-status').textContent = `Đã quét: ${data.pool_size} job sẵn sàng để push (thư mục: ${data.folder})`;
+      sheetsLogAll(data.log);
+    } catch (e) {
+      await customAlert('Lỗi khi quét dữ liệu: ' + e.message, { danger: true });
+    } finally {
+      updateSheetsPushButtonState();
+    }
+  });
+}
+
+async function pushSheetsData(btn) {
+  const selected = sheetsAccounts.filter(a => a.selected && a.qty > 0).map(a => ({ profile: a.profile, qty: a.qty }));
+  if (!selected.length) { await customAlert('Vui lòng chọn ít nhất một tài khoản với số lượng job > 0.', { danger: true }); return; }
+  await withBusy(btn, async () => {
+    try {
+      // Timeout dai (3 phut) - push nhieu tai khoan goi lien tiep Google Sheets API that,
+      // tuong tu ly do /api/videos/push dung 120000ms (xem ghi chu o api()).
+      const data = await api('POST', '/api/gsheet/push', { accounts: selected }, 180000);
+      sheetsAccounts = data.accounts;
+      renderSheetsAccountsTable();
+      sheetsLogAll(data.log);
+    } catch (e) {
+      await customAlert('Lỗi khi push dữ liệu: ' + e.message, { danger: true });
+    }
+  });
+}
+
+async function clearSheetsFolderCache() {
+  const folder = document.getElementById('sheets-cfg-folder').value.trim();
+  if (!folder) { await customAlert('Vui lòng nhập thư mục trước.', { danger: true }); return; }
+  if (!(await customConfirm(`Xoá cache chống trùng cho thư mục:\n${folder}\n\nLần chạy tiếp theo có thể push lại các job đã push từ thư mục này trước đó (trừ job nào vẫn còn nằm trong Google Sheet - vẫn được loại trừ như bình thường). Tiếp tục?`))) return;
+  const { log } = await api('POST', '/api/gsheet/clear_folder_cache', { video_folder: folder });
+  sheetsLogAll(log);
+}
+
+async function cleanupSheetsData() {
+  const targets = sheetsVisibleAccounts().filter(a => a.selected).map(a => a.profile);
+  if (!targets.length) { await customAlert('Vui lòng tick chọn ít nhất một tài khoản cần dọn dẹp dữ liệu.', { danger: true }); return; }
+  if (!(await customConfirm(`Sẽ XOÁ TOÀN BỘ dữ liệu (hàng 2 trở đi, giữ nguyên tiêu đề) trên Google Sheet của ${targets.length} tài khoản sau:\n\n${targets.join(', ')}\n\nHành động này không thể hoàn tác. Tiếp tục?`, { danger: true }))) return;
+  try {
+    const data = await api('POST', '/api/gsheet/cleanup', { profiles: targets }, 60000);
+    sheetsAccounts = data.accounts;
+    renderSheetsAccountsTable();
+    sheetsLogAll(data.log);
+    sheetsLog(`Đã dọn dẹp xong dữ liệu cho ${data.cleared.length} tài khoản.`);
+  } catch (e) {
+    await customAlert('Lỗi khi dọn dẹp dữ liệu: ' + e.message, { danger: true });
+  }
+}
+
+async function deletePushedSheetsFiles() {
+  const folder = document.getElementById('sheets-cfg-folder').value.trim();
+  if (!folder) { await customAlert('Vui lòng nhập thư mục trước.', { danger: true }); return; }
+  if (!(await customConfirm(`Sẽ đối chiếu trực tiếp với Google Sheet (dữ liệu thật, không dùng cache local) để tìm các video đã push thành công từ thư mục:\n${folder}\n\nSau đó XOÁ VĨNH VIỄN file .mp4 tương ứng khỏi ổ đĩa - KHÔNG qua Thùng rác, KHÔNG THỂ HOÀN TÁC.\n\nBạn có chắc chắn muốn tiếp tục?`, { danger: true }))) return;
+  try {
+    const data = await api('POST', '/api/gsheet/delete_pushed_files', { video_folder: folder, confirm: true }, 120000);
+    sheetsLogAll(data.log);
+  } catch (e) {
+    await customAlert('Lỗi khi xoá file video: ' + e.message, { danger: true });
+  }
 }
 
 async function refreshAll() {
