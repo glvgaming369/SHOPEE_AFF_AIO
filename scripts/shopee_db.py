@@ -2116,6 +2116,29 @@ def update_mail_account_fields(db_path, account_id, shopee_id=None, device=None,
     return get_mail_account(db_path, account_id)
 
 
+def find_mail_accounts_by_shopee_id(db_path, shopee_id, exclude_id=None):
+    """Danh sach cac mail KHAC (loai tru exclude_id - chinh dong dang sua) dang dung CUNG
+    shopee_id nay - dung cho canh bao chong nhap trung o UI (tab 'Tạo tài khoản Shopee').
+    shopee_id rong khong tinh la trung (nhieu dong cung de trong la binh thuong)."""
+    if not shopee_id:
+        return []
+    conn = _connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        if exclude_id is not None:
+            rows = conn.execute(
+                "select id, email from mail_accounts where shopee_id=? and id<>?",
+                (shopee_id, exclude_id),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "select id, email from mail_accounts where shopee_id=?", (shopee_id,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 def set_mail_account_code(db_path, account_id, code):
     conn = _connect(db_path)
     try:

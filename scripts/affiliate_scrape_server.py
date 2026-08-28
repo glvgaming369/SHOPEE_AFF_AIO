@@ -838,6 +838,16 @@ def export_mail_accounts_xlsx():
     )
 
 
+@app.route("/api/mail_accounts/check_shopee_id", methods=["GET"])
+def mail_accounts_check_shopee_id():
+    """Tra cac mail KHAC dang dung cung shopee_id nay - dung cho canh bao chong nhap trung
+    (popup xac nhan) o tab 'Tạo tài khoản Shopee' truoc khi luu that su."""
+    shopee_id = (request.args.get("shopee_id") or "").strip()
+    exclude_id = request.args.get("exclude_id", type=int)
+    accounts = shopee_db.find_mail_accounts_by_shopee_id(DB_PATH, shopee_id, exclude_id=exclude_id)
+    return jsonify({"accounts": accounts})
+
+
 @app.route("/api/mail_accounts/<int:account_id>", methods=["POST"])
 def mail_accounts_update(account_id):
     body = request.get_json(force=True, silent=True) or {}

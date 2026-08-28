@@ -1786,7 +1786,7 @@ function renderMailAccounts() {
       <td><b>${a.email}</b>
         <button class="secondary" onclick="copyMailField(${idx}, 'email')">Sao chép</button></td>
       <td><code>${a.password || '-'}</code></td>
-      <td><input type="text" value="${(a.shopee_id || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'shopee_id', this.value)" placeholder="Shopee ID" style="min-width:160px; width:100%;"></td>
+      <td><input type="text" value="${(a.shopee_id || '').replace(/"/g, '&quot;')}" onchange="updateShopeeId(${a.id}, this)" placeholder="Shopee ID" style="min-width:160px; width:100%;"></td>
       <td><input type="text" value="${(a.device || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'device', this.value)" placeholder="Tên thiết bị" style="min-width:160px; width:100%;"></td>
       <td><input type="text" value="${(a.slot || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'slot', this.value)" placeholder="Slot" style="min-width:65px; width:65px; text-align:center;"></td>
       <td>
@@ -1820,6 +1820,40 @@ async function updateMailAccountField(id, field, value) {
   } catch (e) {
     await customAlert('Lỗi lưu dữ liệu: ' + e.message, { danger: true });
   }
+}
+
+// Chong nhap trung Shopee ID: kiem tra CO mail nao khac dang dung cung shopee_id nay
+// truoc khi luu that su - neu co, hien popup xac nhan (customConfirm) liet ke ro cac mail
+// da dung, nguoi dung tu quyet dinh co van luu (chap nhan trung) hay huy (tra ve gia tri cu).
+async function updateShopeeId(id, inputEl) {
+  const newValue = inputEl.value.trim();
+  const original = (lastMailAccountsList.find(r => r.id === id) || {}).shopee_id || '';
+  if (newValue === original) return;
+
+  if (newValue) {
+    let dup;
+    try {
+      dup = await api('GET', `/api/mail_accounts/check_shopee_id?shopee_id=${encodeURIComponent(newValue)}&exclude_id=${id}`);
+    } catch (e) {
+      await customAlert('Lỗi kiểm tra trùng Shopee ID: ' + e.message, { danger: true });
+      inputEl.value = original;
+      return;
+    }
+    if (dup.accounts && dup.accounts.length > 0) {
+      const list = dup.accounts.map(a => `- ${a.email} (id ${a.id})`).join('\n');
+      const ok = await customConfirm(
+        `Shopee ID "${newValue}" đã được dùng cho ${dup.accounts.length} mail khác:\n${list}\n\nBạn có chắc chắn muốn tiếp tục lưu (trùng Shopee ID)?`,
+        { danger: true }
+      );
+      if (!ok) {
+        inputEl.value = original;
+        return;
+      }
+    }
+  }
+  await updateMailAccountField(id, 'shopee_id', newValue);
+  const row = lastMailAccountsList.find(r => r.id === id);
+  if (row) row.shopee_id = newValue;
 }
 
 const MAILACC_CODE_CELL_INDEX = 7;
