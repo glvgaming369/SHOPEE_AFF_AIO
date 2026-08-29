@@ -94,3 +94,17 @@ def cat_name_for(market, cat_id):
     except (TypeError, ValueError):
         return None
     return _get_cache().get(market, {}).get(cat_id_int)
+
+
+def list_categories(market):
+    """Danh sach TAT CA danh muc cap 1 cua 1 market, dang [{"cat_id": int, "cat_name": str}],
+    sap xep theo cat_name (khong phan biet hoa/thuong) - dung cho dropdown chon danh muc o
+    Shopee Product Link Collector khi cao theo tu khoa (nguoi dung 2026-08-30: khong muon
+    link cao tu tu khoa bi "mo coi" khong co danh muc). Tra ve [] neu market khong co trong
+    cat-db (hien tai: tw/cl/br/mx/co chua co file cat-db rieng, xem _FILE_BY_MARKET)."""
+    if not market:
+        return []
+    names = _get_cache().get(market, {})
+    items = [{"cat_id": cid, "cat_name": name} for cid, name in names.items() if name]
+    items.sort(key=lambda it: it["cat_name"].lower())
+    return items

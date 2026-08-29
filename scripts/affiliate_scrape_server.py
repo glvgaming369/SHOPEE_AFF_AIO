@@ -474,6 +474,16 @@ def category_name():
     return jsonify({"market": market, "cat_name": cat_name})
 
 
+@app.route("/api/categories/list", methods=["GET"])
+def categories_list():
+    """Danh sach danh muc cap 1 cua market (suy tu 'url', dung ham chung market_from_link()
+    - xem category_name() o tren) - dung cho dropdown chon danh muc khi cao theo tu khoa o
+    Shopee Product Link Collector (tranh link cao tu tu khoa bi "mo coi" khong co danh muc)."""
+    url = request.args.get("url") or ""
+    market = shopee_db.market_from_link(url)
+    return jsonify({"market": market, "categories": shopee_categories.list_categories(market)})
+
+
 @app.route("/api/roots/market_stats", methods=["GET"])
 def roots_market_stats():
     """Tong hop so root theo tung market - dung cho bang "Root theo market" + dropdown

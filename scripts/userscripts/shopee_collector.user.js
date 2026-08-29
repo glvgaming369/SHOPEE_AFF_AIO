@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Shopee Product Link Collector
 // @namespace    http://tampermonkey.net/
-// @version      1.9.0
-// @description  Thu thập link sản phẩm Shopee tự động với tính năng cuộn trang thông minh, tự động chuyển trang SPA, tự nhận diện domain quốc gia, tùy chọn tự bấm sắp xếp "Top Sales" trước khi cào, xuất dữ liệu và đẩy thẳng vào DB (root) của dashboard affiliate offer scraper. Gán cat_id riêng cho từng link ngay lúc cào, đảm bảo đúng danh mục kể cả khi cào nhiều danh mục trước khi đẩy vào DB.
+// @version      1.13.2
+// @description  Thu thập link sản phẩm Shopee tự động với tính năng cuộn trang thông minh, tự động chuyển trang SPA, tự nhận diện domain quốc gia, tùy chọn tự bấm sắp xếp "Top Sales" trước khi cào, tùy chọn lọc theo lượt bán tối thiểu, cào theo danh sách từ khoá (tự khử trùng, bắt buộc chọn danh mục để không bị "mồ côi"), xuất dữ liệu và đẩy thẳng vào DB (root) của dashboard affiliate offer scraper. Gán cat_id riêng cho từng link ngay lúc cào, đảm bảo đúng danh mục kể cả khi cào nhiều danh mục trước khi đẩy vào DB.
 // @author       Antigravity
 // @match        https://shopee.vn/*
 // @match        https://shopee.ph/*
@@ -29,11 +29,25 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = 'v1.9.0';
+  const SCRIPT_VERSION = 'v1.13.2';
   const STORAGE_KEY = 'shopee_collected_links';
   const RUNNING_STATE_KEY = 'shopee_collector_is_running';
   const AUTO_PAGE_KEY = 'shopee_collector_auto_page';
   const TOP_SALES_KEY = 'shopee_collector_top_sales';
+  const SOLD_FILTER_ENABLED_KEY = 'shopee_collector_sold_filter_enabled';
+  const SOLD_FILTER_MIN_KEY = 'shopee_collector_sold_filter_min';
+  const SOLD_FILTER_MIN_DEFAULT = 100;
+  const KEYWORDS_KEY = 'shopee_collector_keywords';
+  const KEYWORD_MODE_KEY = 'shopee_collector_keyword_mode_running';
+  const KEYWORD_INDEX_KEY = 'shopee_collector_keyword_index';
+  const KEYWORD_CAT_ID_KEY = 'shopee_collector_keyword_cat_id';
+  const KEYWORD_CAT_NAME_KEY = 'shopee_collector_keyword_cat_name';
+  // Delay giua 2 tu khoa (dieu huong sang URL search MOI, la 1 lan tai trang THAT SU chu
+  // khong phai SPA route change nhu Next Page) - can nghi 1 chut tranh dieu huong lien tuc
+  // qua nhieu URL search khac nhau trong thoi gian ngan, giong tinh than delay chong
+  // captcha da them o tampermonkey_affiliate_group_scraper.user.js.
+  const KEYWORD_DELAY_MIN_MS = 2000;
+  const KEYWORD_DELAY_MAX_MS = 5000;
   const SERVER_URL_KEY = 'shopee_collector_server_url';
   const CAT_ID_KEY = 'shopee_collector_cat_id';
   const CAT_NAME_KEY = 'shopee_collector_cat_name';
@@ -45,6 +59,9 @@
   let isRunning = false;
   let autoPage = false;
   let topSalesSort = false;
+  let soldFilterEnabled = false;
+  let soldMinThreshold = SOLD_FILTER_MIN_DEFAULT;
+  let keywordCategories = []; // [{cat_id, cat_name}, ...] cua market hien tai - nap tu server luc mo panel
   let scrollInterval = null;
   let scanInterval = null;
   let isNavigating = false;
@@ -52,24 +69,40 @@
   let lastScrollY = -1;
   let sameScrollCount = 0;
 
-  // Lấy danh sách link đã lưu - moi phan tu la {url, catId}, catId gan NGAY luc quet
-  // (scanLinks) theo danh muc dang cao tai thoi diem do, KHONG con dung 1 cat_id chung cho
-  // ca phien nua - xem ghi chu o pushToDb(). Tu dong migrate dinh dang cu (mang string thuan,
-  // ban script <1.7.0) sang {url, catId: null} khi doc, tranh vo du lieu dang cao do.
-  function getStoredLinks() {
+  // Cache trong bo nho cua danh sach link + Set url tuong ung - TRANH JSON.parse() toan bo
+  // localStorage + dung lai Set tu dau MOI LAN goi getStoredLinks()/scanLinks() (scanLinks
+  // chay ~1.7 lan/giay tu 2 interval cong lai, xem startCollecting()). Voi phien cao dai
+  // (hang tram/nghin link), lam vay MOI TICK gay lag that su cho toan bo trang (nguoi dung
+  // bao cac nut Stop/Xoa bo nho dem/Dat lai tien trinh phan hoi cham - 2026-08-31) vi JS 1
+  // luong, click phai cho tick dang chay xong moi duoc xu ly. linksCacheLoaded rieng voi
+  // kiem tra "linksCache !== null" de phan biet dung "chua tung nap" voi "da nap va la mang
+  // rong that" (khi CHUA co link nao duoc luu).
+  let linksCache = null;
+  let existingUrlsCache = null;
+  let linksCacheLoaded = false;
+
+  function ensureLinksCacheLoaded() {
+    if (linksCacheLoaded) return;
     try {
       const data = localStorage.getItem(STORAGE_KEY);
       const parsed = data ? JSON.parse(data) : [];
-      return parsed.map((item) => (typeof item === 'string' ? { url: item, catId: null } : item));
+      // Tu dong migrate dinh dang cu (mang string thuan, ban script <1.7.0) sang
+      // {url, catId: null} khi doc, tranh vo du lieu dang cao do.
+      linksCache = parsed.map((item) => (typeof item === 'string' ? { url: item, catId: null } : item));
     } catch (e) {
-      return [];
+      linksCache = [];
     }
+    existingUrlsCache = new Set(linksCache.map((item) => item.url));
+    linksCacheLoaded = true;
   }
 
-  // Lưu danh sách link
-  function saveStoredLinks(links) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(links));
-    updateUI();
+  // Lay danh sach link da luu - moi phan tu la {url, catId}, catId gan NGAY luc quet
+  // (scanLinks) theo danh muc dang cao tai thoi diem do, KHONG con dung 1 cat_id chung cho
+  // ca phien nua - xem ghi chu o pushToDb(). Tra ve THANG reference cache (khong copy) -
+  // cac noi CHI DOC (export/pushToDb/updateUI) khong duoc mutate mang tra ve.
+  function getStoredLinks() {
+    ensureLinksCacheLoaded();
+    return linksCache;
   }
 
   // Lấy trạng thái cài đặt
@@ -77,6 +110,9 @@
     isRunning = localStorage.getItem(RUNNING_STATE_KEY) === 'true';
     autoPage = localStorage.getItem(AUTO_PAGE_KEY) === 'true';
     topSalesSort = localStorage.getItem(TOP_SALES_KEY) === 'true';
+    soldFilterEnabled = localStorage.getItem(SOLD_FILTER_ENABLED_KEY) === 'true';
+    const storedMin = parseInt(localStorage.getItem(SOLD_FILTER_MIN_KEY), 10);
+    soldMinThreshold = isNaN(storedMin) || storedMin < 0 ? SOLD_FILTER_MIN_DEFAULT : storedMin;
   }
 
   function setRunningState(state) {
@@ -94,6 +130,169 @@
     localStorage.setItem(TOP_SALES_KEY, state ? 'true' : 'false');
   }
 
+  function setSoldFilterEnabledState(state) {
+    soldFilterEnabled = state;
+    localStorage.setItem(SOLD_FILTER_ENABLED_KEY, state ? 'true' : 'false');
+  }
+
+  function setSoldMinThreshold(rawValue) {
+    const n = parseInt(rawValue, 10);
+    soldMinThreshold = isNaN(n) || n < 0 ? SOLD_FILTER_MIN_DEFAULT : n;
+    localStorage.setItem(SOLD_FILTER_MIN_KEY, String(soldMinThreshold));
+  }
+
+  function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+  function randomDelay(min, max) {
+    return sleep(min + Math.random() * (max - min));
+  }
+
+  // Chuan hoa danh sach tu khoa (moi dong 1 tu khoa): cat khoang trang dau/cuoi tung dong,
+  // bo dong rong, KHU TRUNG khong phan biet hoa/thuong (giu lai dong XUAT HIEN DAU TIEN,
+  // theo dung thu tu nguoi dung nhap) - dung ca luc rai khoi o nhap (blur, xem createUI())
+  // lan luc xay danh sach that su de chay (getKeywordList(), phong truong hop text luu san
+  // trong storage tu ban script cu chua tung duoc khu trung). Tra ve { text, list, removed }.
+  function dedupeKeywordsText(rawText) {
+    const seen = new Set();
+    const list = [];
+    let removed = 0;
+    (rawText || '').split('\n').forEach((rawLine) => {
+      const line = rawLine.trim();
+      if (!line) return;
+      const key = line.toLowerCase();
+      if (seen.has(key)) { removed++; return; }
+      seen.add(key);
+      list.push(line);
+    });
+    return { text: list.join('\n'), list, removed };
+  }
+
+  function saveKeywordsText(text) {
+    localStorage.setItem(KEYWORDS_KEY, text);
+  }
+
+  function getKeywordList() {
+    return dedupeKeywordsText(localStorage.getItem(KEYWORDS_KEY) || '').list;
+  }
+
+  // QUAN TRONG: dung sessionStorage (KHONG PHAI localStorage nhu cac setting khac trong
+  // file nay) cho 2 gia tri nay - day la trang thai CUA 1 LAN CHAY cu the, khong phai cai
+  // dat nguoi dung. localStorage dung chung cho MOI tab CUNG market (vd 2 tab shopee.ph
+  // cung mo) - da gap bug thuc te: 1 tab shopee.ph KHAC (dung dang xem trang bat ky, khong
+  // lien quan) cung doc duoc keywordModeRunning=true tu localStorage, tu "tuong" no phai
+  // tiep tuc cao, khong tim thay nut Next Page tren trang no dang xem (vi khong phai trang
+  // ket qua tim kiem) roi TU Y nhay sang tu khoa ke tiep - lam hong tien trinh cua tab
+  // CHINH dang cao that su. sessionStorage rieng cho TUNG tab (nhung van song sot qua F5/
+  // dieu huong that trong CUNG 1 tab, va qua "mo lai tab vua dong" cua trinh duyet - dung
+  // nhu can cho luong dieu huong sang tu khoa ke tiep cua chinh no).
+  function getKeywordModeState() {
+    return sessionStorage.getItem(KEYWORD_MODE_KEY) === 'true';
+  }
+  function setKeywordModeState(state) {
+    sessionStorage.setItem(KEYWORD_MODE_KEY, state ? 'true' : 'false');
+  }
+
+  function getKeywordIndex() {
+    return parseInt(sessionStorage.getItem(KEYWORD_INDEX_KEY) || '0', 10) || 0;
+  }
+  function setKeywordIndex(n) {
+    sessionStorage.setItem(KEYWORD_INDEX_KEY, String(n));
+  }
+
+  // URL trang ket qua tim kiem cua CHINH market dang mo (dung location.origin thay vi
+  // hardcode domain - tu dong dung cho ca 11 market @match ma khong can liet ke rieng tung
+  // domain, xem trao doi voi nguoi dung 2026-08-30).
+  function buildSearchUrl(keyword) {
+    return `${window.location.origin}/search?keyword=${encodeURIComponent(keyword)}`;
+  }
+
+  // Danh muc da chon cho che do "Cao theo tu khoa" - luu ca cat_id LAN cat_name (khong chi
+  // cat_id) de gan NGAY khi bam Start ma khong can goi lai server tra ten (da co san tu
+  // luc nap dropdown, xem loadKeywordCategories()). Luu ben ngoai 1 lan chon se nho lai cho
+  // lan cao theo tu khoa ke tiep, khong phai chon lai tu dau.
+  function getKeywordCatSelection() {
+    return {
+      catId: localStorage.getItem(KEYWORD_CAT_ID_KEY) || '',
+      catName: localStorage.getItem(KEYWORD_CAT_NAME_KEY) || '',
+    };
+  }
+  function setKeywordCatSelection(catId, catName) {
+    if (catId) {
+      localStorage.setItem(KEYWORD_CAT_ID_KEY, catId);
+      localStorage.setItem(KEYWORD_CAT_NAME_KEY, catName || '');
+    } else {
+      localStorage.removeItem(KEYWORD_CAT_ID_KEY);
+      localStorage.removeItem(KEYWORD_CAT_NAME_KEY);
+    }
+  }
+
+  // Nap danh sach danh muc cap 1 CUA DUNG MARKET tab nay dang mo (server tu suy market qua
+  // location.href, dung chung ham voi resolveCatName() - xem /api/categories/list). Dung
+  // cho dropdown "Cao theo tu khoa": nguoi dung yeu cau KHONG muon link cao tu tu khoa bi
+  // "mo coi" khong co danh muc, nen bat buoc chon 1 danh muc truoc khi bam Start (tru khi
+  // market nay hoan toan CHUA co danh sach danh muc nao trong cat-db - vd tw/cl/br/mx/co).
+  // keywordCategoriesLoaded: PHAN BIET "chua tai xong" (chua biet market co danh muc hay
+  // khong) voi "da tai xong nhung market khong co danh muc nao" (keywordCategories=[] trong
+  // ca 2 truong hop, khong the dua vao length de phan biet) - nut "Bat dau cao theo tu
+  // khoa" bi khoa (disabled) cho toi khi co gia tri nay = true, tranh nguoi dung bam Start
+  // dung luc XHR chua kip tra ve ket qua, vo tinh bo qua yeu cau bat buoc chon danh muc.
+  let keywordCategoriesLoaded = false;
+
+  function loadKeywordCategories() {
+    const sel = document.getElementById('sc-keyword-cat-sel');
+    const startBtn = document.getElementById('sc-keyword-start-btn');
+    if (!sel) return;
+    const serverUrl = getServerUrl();
+    GM_xmlhttpRequest({
+      method: 'GET',
+      url: serverUrl + '/api/categories/list?url=' + encodeURIComponent(location.href),
+      onload: (resp) => {
+        let json;
+        try {
+          json = JSON.parse(resp.responseText);
+        } catch (e) {
+          sel.innerHTML = '<option value="">-- Lỗi tải danh mục (phản hồi không hợp lệ) --</option>';
+          keywordCategoriesLoaded = true;
+          if (startBtn) startBtn.disabled = false;
+          return;
+        }
+        // QUAN TRONG: server (affiliate_scrape_server.py) co 1 error handler TOAN CUC bien
+        // MOI loi (ke ca 404 route khong ton tai - vd server cu chua duoc restart sau khi
+        // them endpoint nay) thanh JSON hop le dang {"error": "..."}. Neu chi kiem tra
+        // JSON.parse() thanh cong roi doc thang json.categories, 1 phan hoi loi se bi hieu
+        // NHAM thanh "danh sach rong that" (json.categories undefined -> || [] -> length=0)
+        // - da gap bug thuc te dung nhu vay (nguoi dung bao "market nay chua co danh sach
+        // danh muc" trong khi dang dung dung shopee.ph, ly do that la server chua restart).
+        // Phai kiem tra status/json.error TRUOC de phan biet loi that voi danh sach rong.
+        if (resp.status < 200 || resp.status >= 300 || json.error) {
+          sel.innerHTML = `<option value="">-- Lỗi tải danh mục: ${json.error || ('HTTP ' + resp.status)} --</option>`;
+          keywordCategoriesLoaded = true;
+          if (startBtn) startBtn.disabled = false;
+          return;
+        }
+        keywordCategories = json.categories || [];
+        keywordCategoriesLoaded = true;
+        if (startBtn) startBtn.disabled = false;
+        const { catId } = getKeywordCatSelection();
+        if (keywordCategories.length === 0) {
+          sel.innerHTML = '<option value="">-- Thị trường này chưa có danh sách danh mục --</option>';
+          return;
+        }
+        const options = ['<option value="">-- Chọn danh mục --</option>']
+          .concat(keywordCategories.map((c) =>
+            `<option value="${c.cat_id}" ${String(c.cat_id) === catId ? 'selected' : ''}>${c.cat_name}</option>`
+          ));
+        sel.innerHTML = options.join('');
+      },
+      onerror: () => {
+        sel.innerHTML = '<option value="">-- Không kết nối được server --</option>';
+        keywordCategoriesLoaded = true;
+        if (startBtn) startBtn.disabled = false;
+      },
+    });
+  }
+
   // Chuyển đổi href thành định dạng URL chuẩn: https://domain/product/shopId/itemId
   function normalizeShopeeUrl(href) {
     if (!href) return null;
@@ -107,6 +306,40 @@
       console.error('Lỗi parse URL Shopee:', e);
     }
     return null;
+  }
+
+  // Lay text hien thi luot ban (vd "1K+ sold", "10K+ Sold/Month") cua 1 the san pham - tim
+  // trong PHAM VI the <a> tuong ung (khong quet toan trang, tranh khop nham sang the khac)
+  // bang XPath tuong doi (context node = chinh anchor), giu dung dieu kien
+  // contains(text(),"old") nguoi dung yeu cau (khop ca "sold" va "Sold" vi ca 2 deu chua
+  // chuoi con "old", KHONG khop "SOLD" viet hoa toan bo - chap nhan theo yeu cau). Tra ve
+  // null neu the nay khong co phan tu luot ban (vd qua cang, hoac Shopee doi cau truc).
+  function getSoldTextFromAnchor(anchor) {
+    const xpathResult = document.evaluate(
+      './/div[contains(text(),"old")]',
+      anchor,
+      null,
+      XPathResult.FIRST_ORDERED_NODE_TYPE,
+      null
+    );
+    const node = xpathResult && xpathResult.singleNodeValue;
+    return node ? node.textContent.trim() : null;
+  }
+
+  // Doi text luot ban Shopee sang so tu nhien. Cac dang da xac nhan (theo yeu cau nguoi
+  // dung): "1 sold"->1, "1K+ sold"->1000, "10K+ sold"->10000, "10K+ Sold/Month"->10000,
+  // "2K+ Sold/Month"->2000, "1 Sold/Month"->1, "1000k+ sold"->1000000. Logic: lay SO DAU
+  // TIEN trong chuoi (co the co phan thap phan), neu ngay sau so (co the cach 1 khoang
+  // trang) la k/K thi nhan 1000 - moi ky tu con lai (+, sold, Sold/Month...) deu bi bo qua.
+  // Khong tim thay so nao (text rong/null/dang la) -> tra ve 0 (coi nhu chua ban, se bi loc
+  // neu nguoi dung dat nguong > 0).
+  function parseSoldCount(text) {
+    if (!text) return 0;
+    const m = text.match(/(\d+(?:\.\d+)?)\s*([kK])?/);
+    if (!m) return 0;
+    let n = parseFloat(m[1]);
+    if (m[2]) n *= 1000;
+    return Math.round(n);
   }
 
   // Phat hien cat_id (danh muc cap 1) tu URL hien tai - Shopee dung dinh dang
@@ -198,24 +431,34 @@
   // tai (getSessionCatId(), dat luc bam Start - xem detectCatIdFromUrl()). Lam vay de link cao
   // tu danh muc A giu dung cat_id A ngay ca khi sau do nguoi dung chuyen sang danh muc B va
   // bam Start lai (ghi de session cat_id) roi moi bam "Đẩy vao DB" 1 lan cho ca 2 danh muc.
+  //
+  // Neu bat "Loc luot ban toi thieu" (soldFilterEnabled): CHI luu link co luot ban >=
+  // soldMinThreshold - kiem tra NGAY luc phat hien link MOI (khong luu link duoi nguong vao
+  // bo nho dem, khac voi cach reset/xoa sau nay - da chot voi nguoi dung: bat filter CHI anh
+  // huong link quet TU LUC BAT tro di, khong loc lai link da co san trong bo nho dem).
   function scanLinks() {
-    const anchors = Array.from(document.querySelectorAll('a[href*="-i."]'));
-    let currentLinks = getStoredLinks();
-    let initialCount = currentLinks.length;
-    const existingUrls = new Set(currentLinks.map((item) => item.url));
+    ensureLinksCacheLoaded(); // linksCache/existingUrlsCache - tranh dung lai Set moi tick, xem ghi chu o tren
+    const anchors = document.querySelectorAll('a[href*="-i."]');
+    const initialCount = linksCache.length;
     const catId = getSessionCatId();
 
     anchors.forEach((a) => {
       const rawHref = a.getAttribute('href');
       const cleanUrl = normalizeShopeeUrl(rawHref);
-      if (cleanUrl && !existingUrls.has(cleanUrl)) {
-        currentLinks.push({ url: cleanUrl, catId });
-        existingUrls.add(cleanUrl);
+      if (!cleanUrl || existingUrlsCache.has(cleanUrl)) return;
+
+      if (soldFilterEnabled) {
+        const soldCount = parseSoldCount(getSoldTextFromAnchor(a));
+        if (soldCount < soldMinThreshold) return;
       }
+
+      linksCache.push({ url: cleanUrl, catId });
+      existingUrlsCache.add(cleanUrl);
     });
 
-    if (currentLinks.length !== initialCount) {
-      saveStoredLinks(currentLinks);
+    if (linksCache.length !== initialCount) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(linksCache));
+      updateUI();
     }
   }
 
@@ -237,19 +480,37 @@
     return span.closest('button[aria-pressed="false"]') || span.closest('button');
   }
 
-  // Bam "Top Sales" (neu tim thay + tuy chon dang bat) roi moi bat dau cao - dung 1 LAN
-  // DUY NHAT ngay luc bam Start (khong ap dung lai moi lan tu chuyen trang/resume, vi Shopee
-  // giu nguyen tieu chi sap xep xuyen suot cac trang cua CUNG 1 lan duyet danh muc). Khong
-  // tim thay nut (khong co bo loc nay, hoac da bat san tu truoc) -> bo qua, cao binh thuong
-  // ngay lap tuc, KHONG bao loi (dung nhu yeu cau nguoi dung).
-  function startWithOptionalTopSalesSort() {
+  // So lan thu lai TIM nut "Top Sales" truoc khi ket luan "khong co nut nay" - CAN THIET
+  // giong het ly do cua NEXT_PAGE_RETRY_COUNT (xem goToNextPage()): ham nay thuong duoc goi
+  // ngay sau 1 lan TAI LAI TRANG THAT SU (dac biet trong che do "Cao theo tu khoa" - moi tu
+  // khoa la 1 lan dieu huong URL that, KHONG PHAI SPA), nut sap xep cua Shopee co the CHUA
+  // KIP RENDER tai thoi diem kiem tra dau tien. Da gap bug thuc te (nguoi dung bao
+  // 2026-08-31): bat "Cao theo Top Sales" trong che do tu khoa nhung khong thay tool bam -
+  // truoc day ham nay chi kiem tra DUY NHAT 1 LAN (khac goToNextPage() da duoc sua co thu
+  // lai), dan toi ket luan nham + bo qua ngay khi nut chua kip xuat hien.
+  const TOP_SALES_RETRY_COUNT = 4;
+  const TOP_SALES_RETRY_DELAY_MS = 1000;
+
+  // Bam "Top Sales" (neu tim thay + tuy chon dang bat) roi moi bat dau cao - goi lai moi
+  // lan trang MOI duoc tai that su (Start, hoac resume sau F5/dieu huong tu khoa - xem
+  // createUI()), KHONG goi lai giua cac lan chuyen trang SPA cung 1 danh muc (Shopee giu
+  // nguyen tieu chi sap xep xuyen suot, xem goToNextPage()). Khong tim thay nut sau khi da
+  // thu lai het (khong co bo loc nay, hoac da bat san tu truoc) -> bo qua, cao binh thuong,
+  // KHONG bao loi (dung nhu yeu cau nguoi dung).
+  function startWithOptionalTopSalesSort(retriesLeft) {
     if (!topSalesSort) {
       startCollecting();
       return;
     }
+    if (retriesLeft === undefined) retriesLeft = TOP_SALES_RETRY_COUNT;
     const btn = getTopSalesButton();
     if (!btn) {
-      console.log('[Shopee Collector] Không thấy nút "Top Sales" (chưa bật) - bỏ qua, cào bình thường.');
+      if (retriesLeft > 0) {
+        console.log(`[Shopee Collector] Chưa thấy nút "Top Sales" - thử lại (còn ${retriesLeft} lần)...`);
+        setTimeout(() => startWithOptionalTopSalesSort(retriesLeft - 1), TOP_SALES_RETRY_DELAY_MS);
+        return;
+      }
+      console.log('[Shopee Collector] Không thấy nút "Top Sales" (chưa bật, hoặc trang không có bộ lọc này) - bỏ qua, cào bình thường.');
       startCollecting();
       return;
     }
@@ -292,13 +553,33 @@
     return null;
   }
 
-  // Chuyển sang trang tiếp theo và reset trạng thái cuộn
-  function goToNextPage() {
-    if (isNavigating) return;
+  // So lan thu lai TIM nut Next Page truoc khi ket luan chac chan "het trang" (khong con
+  // nut nao ca). CAN THIET vi ngay sau 1 lan TAI LAI TRANG THAT SU (F5, mo lai tab vua
+  // dong, hoac dieu huong sang tu khoa moi trong che do "Cao theo tu khoa") - KHAC voi luc
+  // chuyen trang binh thuong trong 1 phien dang chay on dinh (SPA, DOM da render xong tu
+  // truoc) - nut phan trang cua Shopee co the CHUA KIP RENDER tai thoi diem kiem tra dau
+  // tien. Da gap bug thuc te (nguoi dung bao 2026-08-31): dong tab giua chung 1 tu khoa 17
+  // trang (moi xong 2/17), mo lai tab thi bi ket luan nham "het trang" ngay lap tuc roi
+  // nhay sang tu khoa ke tiep, mat toan bo 15 trang con lai - vi goToNextPage() TRUOC DAY
+  // chi kiem tra DUY NHAT 1 LAN, khong co co che thu lai nao.
+  const NEXT_PAGE_RETRY_COUNT = 4;
+  const NEXT_PAGE_RETRY_DELAY_MS = 1000;
+
+  // Chuyển sang trang tiếp theo và reset trạng thái cuộn. QUAN TRONG: isNavigating duoc
+  // khoa (true) NGAY tu lan goi DAU TIEN (retriesLeft con undefined), giu nguyen suot qua
+  // trinh thu lai - tranh scrollInterval (van dang tick moi 700ms trong luc cho thu lai)
+  // goi chong 1 lan goToNextPage() khac de len (isAtBottom() tra ve false khi isNavigating
+  // true, xem ham do). Cac lan goi DE QUY (retriesLeft co gia tri) bo qua kiem tra nay vi
+  // da "so huu" khoa tu lan goi dau.
+  function goToNextPage(retriesLeft) {
+    if (retriesLeft === undefined) {
+      if (isNavigating) return;
+      isNavigating = true;
+      retriesLeft = NEXT_PAGE_RETRY_COUNT;
+    }
     const nextBtn = getNextPageButton();
 
     if (nextBtn) {
-      isNavigating = true;
       console.log('[Shopee Collector] Đã cuộn tới cuối trang -> Tiến hành bấm nút Next Page...');
 
       // Bấm nút chuyển trang
@@ -323,10 +604,48 @@
           startCollecting();
         }
       }, 2000);
+    } else if (retriesLeft > 0) {
+      // Chua chac da THAT SU het trang - co the DOM chua kip render nut phan trang (xem
+      // ghi chu NEXT_PAGE_RETRY_COUNT o tren). Thu lai sau 1 khoang thay vi ket luan ngay.
+      console.log(`[Shopee Collector] Chưa thấy nút Next Page - thử lại (còn ${retriesLeft} lần)...`);
+      setTimeout(() => goToNextPage(retriesLeft - 1), NEXT_PAGE_RETRY_DELAY_MS);
     } else {
       console.log('[Shopee Collector] Không tìm thấy nút Next Page hoặc đã ở trang cuối cùng!');
-      stopCollecting();
+      if (getKeywordModeState()) {
+        advanceToNextKeywordOrStop();
+      } else {
+        stopCollecting();
+      }
     }
+  }
+
+  // Het trang cho tu khoa hien tai (khong con nut Next Page) trong che do "Cao theo tu
+  // khoa" - chuyen sang tu khoa KE TIEP (dieu huong URL search MOI, sau 1 khoang delay
+  // ngan chong captcha) neu con, hoac dung han neu da het danh sach. Luon doc lai danh sach
+  // TU STORAGE (khong dung bien nho tam) vi ham nay co the chay o 1 lan tai trang HOAN TOAN
+  // moi (sau khi dieu huong sang tu khoa truoc do) - xem createUI() (khoi "Tu dong chay
+  // tiep") la noi thuc su goi lai startCollecting() sau khi dieu huong, KHONG PHAI o day.
+  function advanceToNextKeywordOrStop() {
+    if (!isRunning) return; // nguoi dung vua bam Stop giua chung - khong dieu huong tiep
+    const list = getKeywordList();
+    const nextIndex = getKeywordIndex() + 1;
+    if (nextIndex >= list.length) {
+      console.log(`[Shopee Collector] Đã cào xong tất cả ${list.length} từ khoá.`);
+      setKeywordModeState(false);
+      stopCollecting();
+      return;
+    }
+    setKeywordIndex(nextIndex);
+    const nextKeyword = list[nextIndex];
+    console.log(`[Shopee Collector] Hết trang cho từ khoá hiện tại -> chuyển sang từ khoá kế tiếp (${nextIndex + 1}/${list.length}): "${nextKeyword}"`);
+    if (scrollInterval) clearInterval(scrollInterval);
+    if (scanInterval) clearInterval(scanInterval);
+    scrollInterval = null;
+    scanInterval = null;
+    isNavigating = true;
+    randomDelay(KEYWORD_DELAY_MIN_MS, KEYWORD_DELAY_MAX_MS).then(() => {
+      window.location.href = buildSearchUrl(nextKeyword);
+    });
   }
 
   // Kiểm tra xem đã chạm đáy trang chưa
@@ -390,7 +709,11 @@
       if (isAtBottom()) {
         scanLinks(); // Quét nốt lần cuối ở cuối trang
 
-        if (autoPage) {
+        // Che do "Cao theo tu khoa" LUON tu dong chuyen het cac trang cua tung tu khoa
+        // (khong phu thuoc checkbox "Tu dong chuyen trang") - da chot voi nguoi dung
+        // 2026-08-30, vi muc dich la lay DU ket qua cho tung tu khoa truoc khi chuyen
+        // tu khoa tiep theo.
+        if (autoPage || getKeywordModeState()) {
           goToNextPage();
         } else {
           stopCollecting();
@@ -420,6 +743,12 @@
     if (confirm('Bạn có chắc chắn muốn xóa tất cả link đã thu thập không?')) {
       stopCollecting();
       localStorage.removeItem(STORAGE_KEY);
+      // Phai xoa CA cache trong bo nho (linksCache/existingUrlsCache) - khong thi
+      // getStoredLinks()/scanLinks() sau do van tra ve du lieu CU (cache khong tu biet
+      // localStorage vua bi xoa tu ben ngoai chinh no).
+      linksCache = [];
+      existingUrlsCache = new Set();
+      linksCacheLoaded = true;
       updateUI();
     }
   }
@@ -812,6 +1141,34 @@
           font-size: 11px;
           margin-bottom: 6px;
         }
+        .sc-keywords-select {
+          width: 100%;
+          box-sizing: border-box;
+          padding: 6px 8px;
+          border: 1px solid #ced4da;
+          border-radius: 6px;
+          font-size: 11px;
+          margin-bottom: 6px;
+          background: #fff;
+        }
+        .sc-keywords-ta {
+          width: 100%;
+          box-sizing: border-box;
+          padding: 6px 8px;
+          border: 1px solid #ced4da;
+          border-radius: 6px;
+          font-size: 11px;
+          margin-bottom: 4px;
+          resize: vertical;
+          min-height: 60px;
+          font-family: inherit;
+        }
+        .sc-keyword-note {
+          font-size: 10px;
+          color: #ee4d2d;
+          min-height: 12px;
+          margin-bottom: 6px;
+        }
         .sc-btn-push {
           width: 100%;
           background: #ee4d2d;
@@ -857,12 +1214,29 @@
           <span>Cào theo Top Sales</span>
         </label>
 
+        <div class="sc-option-box" style="justify-content:space-between;cursor:default;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="sc-sold-filter-cb" ${soldFilterEnabled ? 'checked' : ''}>
+            <span>Lọc lượt bán tối thiểu</span>
+          </label>
+          <input type="number" id="sc-sold-filter-min" min="0" step="1" value="${soldMinThreshold}"
+            style="width:70px;padding:3px 6px;border:1px solid #ccc;border-radius:4px;" ${soldFilterEnabled ? '' : 'disabled'}>
+        </div>
+
         <div class="sc-btn-group">
-          <button class="sc-btn sc-btn-start" id="sc-start-btn">Start</button>
+          <button class="sc-btn sc-btn-start" id="sc-start-btn">Cào tiêu chuẩn</button>
           <button class="sc-btn sc-btn-stop" id="sc-stop-btn" style="display:none;">Stop</button>
         </div>
         <button class="sc-btn sc-btn-top" id="sc-scroll-top-btn">⬆ Lên đầu trang</button>
         <button class="sc-btn sc-btn-clear" id="sc-clear-btn">Xóa bộ nhớ đệm</button>
+        <div class="sc-db-title">Cào theo từ khoá (mỗi dòng 1 từ khoá):</div>
+        <select id="sc-keyword-cat-sel" class="sc-keywords-select">
+          <option value="">-- Đang tải danh mục... --</option>
+        </select>
+        <textarea id="sc-keywords-ta" class="sc-keywords-ta" rows="4" placeholder="VD:&#10;ao thun nam&#10;quan jean nu"></textarea>
+        <div class="sc-keyword-note" id="sc-keyword-note"></div>
+        <button class="sc-btn sc-btn-top" id="sc-keyword-start-btn" style="margin-bottom:6px;" disabled>🔍 Bắt đầu cào theo từ khoá</button>
+        <button class="sc-btn sc-btn-clear" id="sc-keyword-reset-btn" style="margin-bottom:10px;">↺ Đặt lại tiến trình từ khoá</button>
         <div class="sc-export-title">Xuất dữ liệu:</div>
         <div class="sc-export-group">
           <button class="sc-btn sc-btn-export" id="sc-exp-txt">.TXT</button>
@@ -888,6 +1262,82 @@
       setTopSalesSortState(e.target.checked);
     });
 
+    const soldFilterCb = document.getElementById('sc-sold-filter-cb');
+    const soldFilterMinInput = document.getElementById('sc-sold-filter-min');
+    soldFilterCb.addEventListener('change', (e) => {
+      setSoldFilterEnabledState(e.target.checked);
+      soldFilterMinInput.disabled = !e.target.checked;
+    });
+    soldFilterMinInput.addEventListener('change', (e) => {
+      setSoldMinThreshold(e.target.value);
+      e.target.value = soldMinThreshold; // phan anh lai gia tri da chuan hoa (vd am/rong -> mac dinh)
+    });
+
+    // Tu khoa: nap lai text da luu, tu dong khu trung luc RAI khoi o nhap (blur) - khong
+    // khu trung ngay tren tung phim go (input) de tranh nhay con tro giua luc dang go.
+    const keywordsTa = document.getElementById('sc-keywords-ta');
+    const keywordNote = document.getElementById('sc-keyword-note');
+    keywordsTa.value = localStorage.getItem(KEYWORDS_KEY) || '';
+    keywordsTa.addEventListener('blur', () => {
+      const { text, removed } = dedupeKeywordsText(keywordsTa.value);
+      keywordsTa.value = text;
+      saveKeywordsText(text);
+      keywordNote.textContent = removed > 0 ? `Đã tự động loại ${removed} từ khoá trùng.` : '';
+    });
+
+    // Dropdown danh muc cho tu khoa - nap tu server (dung cho market cua CHINH tab nay),
+    // ghi nho lua chon lan truoc (getKeywordCatSelection()) de khong phai chon lai moi lan.
+    const keywordCatSel = document.getElementById('sc-keyword-cat-sel');
+    loadKeywordCategories();
+    keywordCatSel.addEventListener('change', () => {
+      const catId = keywordCatSel.value;
+      const chosen = keywordCategories.find((c) => String(c.cat_id) === catId);
+      setKeywordCatSelection(catId, chosen ? chosen.cat_name : '');
+    });
+
+    document.getElementById('sc-keyword-start-btn').addEventListener('click', () => {
+      const { text, list, removed } = dedupeKeywordsText(keywordsTa.value);
+      keywordsTa.value = text;
+      saveKeywordsText(text);
+      keywordNote.textContent = removed > 0 ? `Đã tự động loại ${removed} từ khoá trùng.` : '';
+      if (list.length === 0) {
+        alert('Chưa nhập từ khoá nào (mỗi dòng 1 từ khoá).');
+        return;
+      }
+      // Bat buoc chon danh muc TRUOC khi cao (yeu cau nguoi dung 2026-08-30: khong muon link
+      // cao tu tu khoa bi "mo coi" khong co danh muc) - CHI mien neu market nay hoan toan
+      // chua co danh sach danh muc nao (dropdown rong, khong co gi de chon - xem
+      // loadKeywordCategories()).
+      const { catId, catName } = getKeywordCatSelection();
+      if (keywordCategories.length > 0 && !catId) {
+        alert('Vui lòng chọn 1 danh mục cho từ khoá trước khi bắt đầu (tránh link bị "mồ côi" không có danh mục).');
+        return;
+      }
+      // Gan danh muc da chon (hoac null neu market khong co danh sach danh muc nao) cho
+      // TOAN BO link se cao trong lan chay nay - ghi de session cat_id/cat_name CU (neu co,
+      // vd tu lan cao danh muc truoc do) de khong gan nham (xem setSessionCatId()).
+      setSessionCatId(catId || null);
+      if (catId) setSessionCatName(catName);
+      setKeywordModeState(true);
+      setKeywordIndex(0);
+      setRunningState(true);
+      updateUI();
+      console.log(`[Shopee Collector] Bắt đầu cào theo ${list.length} từ khoá (danh mục: ${catName || 'không có'}), bắt đầu từ: "${list[0]}"`);
+      window.location.href = buildSearchUrl(list[0]);
+    });
+
+    // "Dat lai tien trinh tu khoa" - xoa trang thai "dang o tu khoa thu may" (KHONG xoa
+    // danh sach tu khoa/link da thu thap) - dung khi nghi ngo tien trinh bi sai lech (vd
+    // sau 1 lan dong tab giua chung, hoac tab khac vo tinh lam nhay tu khoa - xem ghi chu
+    // NEXT_PAGE_RETRY_COUNT), de lan bam "Bat dau cao theo tu khoa" tiep theo chac chan
+    // chay lai TU DAU danh sach (du nut Start cung da tu dat lai index=0 moi lan bam, nut
+    // nay them 1 lop an tam thu cong + dung dung han ca khi khong dinh bam Start ngay).
+    document.getElementById('sc-keyword-reset-btn').addEventListener('click', () => {
+      setKeywordIndex(0);
+      setKeywordModeState(false);
+      alert('Đã đặt lại tiến trình từ khoá về từ khoá đầu tiên. Bấm "Bắt đầu cào theo từ khoá" để chạy lại (danh sách từ khoá và link đã thu thập không bị ảnh hưởng).');
+    });
+
     // Gán sự kiện nút
     // Chi phat hien lai cat_id luc bam Start THAT (khong phai luc startCollecting() tu goi
     // lai de tiep tuc sau auto-page/resume) - xem detectCatIdFromUrl()/setSessionCatId().
@@ -901,7 +1351,12 @@
       resolveCatName(catId);
       startWithOptionalTopSalesSort();
     });
-    document.getElementById('sc-stop-btn').addEventListener('click', stopCollecting);
+    document.getElementById('sc-stop-btn').addEventListener('click', () => {
+      // Bam Stop nghia la dung HET, ke ca dang o giua chung che do "Cao theo tu khoa" -
+      // khong de advanceToNextKeywordOrStop() tiep tuc dieu huong sang tu khoa ke tiep.
+      setKeywordModeState(false);
+      stopCollecting();
+    });
     document.getElementById('sc-scroll-top-btn').addEventListener('click', () => {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
@@ -942,10 +1397,18 @@
       resolveCatName(pendingCatId);
     }
 
-    // Tự động chạy tiếp nếu trước đó đang ở trạng thái IsRunning (chuyển trang vừa xảy ra)
+    // Tự động chạy tiếp nếu trước đó đang ở trạng thái IsRunning - xay ra sau 1 lan TAI LAI
+    // TRANG THAT SU (vd F5 thu cong, hoac dieu huong sang tu khoa moi trong che do "Cao
+    // theo tu khoa" - xem advanceToNextKeywordOrStop()/nut "Bat dau cao theo tu khoa").
+    // Dung startWithOptionalTopSalesSort() (khong goi thang startCollecting()) de MOI trang
+    // MOI nay cung duoc kiem tra/bam "Top Sales" lai neu tuy chon dang bat - can thiet cho
+    // che do tu khoa vi moi tu khoa la 1 PHIEN tim kiem RIENG, KHONG giu nguyen tieu chi sap
+    // xep nhu khi chuyen trang cung 1 danh muc qua SPA (xem goToNextPage(), truong hop do
+    // KHONG di qua createUI() nen khong bi anh huong o day). Neu tuy chon dang TAT thi ham
+    // nay chi goi thang startCollecting(), hoan toan giong hanh vi cu.
     if (isRunning) {
       setTimeout(() => {
-        startCollecting();
+        startWithOptionalTopSalesSort();
       }, 1500);
     }
   }
@@ -964,13 +1427,22 @@
 
     const catLineEl = document.getElementById('sc-cat-line');
     if (catLineEl) {
-      const sessionCatId = getSessionCatId();
-      const sessionCatName = getSessionCatName();
-      // Uu tien hien ten (vd "Pets") - fallback ve cat_id tho neu chua tra duoc ten (dang
-      // cho resolveCatName() phan hoi, hoac khong tim thay ten trong cat-db).
-      const sessionMsg = sessionCatId
-        ? `Đang cào: <b>${sessionCatName || 'cat_id ' + sessionCatId}</b>`
-        : 'Đang cào: <b>không có danh mục</b>';
+      let sessionMsg;
+      if (getKeywordModeState()) {
+        // Che do "Cao theo tu khoa" - hien tu khoa dang xu ly thay vi danh muc (tim kiem
+        // khong co danh muc, xem setSessionCatId(null) luc bam nut bat dau).
+        const list = getKeywordList();
+        const idx = getKeywordIndex();
+        sessionMsg = `Đang cào từ khoá: <b>${list[idx] || '?'}</b> (${idx + 1}/${list.length})`;
+      } else {
+        const sessionCatId = getSessionCatId();
+        const sessionCatName = getSessionCatName();
+        // Uu tien hien ten (vd "Pets") - fallback ve cat_id tho neu chua tra duoc ten (dang
+        // cho resolveCatName() phan hoi, hoac khong tim thay ten trong cat-db).
+        sessionMsg = sessionCatId
+          ? `Đang cào: <b>${sessionCatName || 'cat_id ' + sessionCatId}</b>`
+          : 'Đang cào: <b>không có danh mục</b>';
+      }
       const links = getStoredLinks();
       const distinctCount = new Set(links.map((item) => item.catId || null)).size;
       const totalMsg = links.length > 0 ? ` · Đã lưu <b>${distinctCount}</b> danh mục` : '';
