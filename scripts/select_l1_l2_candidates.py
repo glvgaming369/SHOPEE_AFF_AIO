@@ -49,6 +49,19 @@ def passes_criteria(metrics, promoted_7d_max=PROMOTED_7D_MAX_DEFAULT, sold_min=S
     )
 
 
+def passes_criteria_related(metrics, sold_min=SOLD_MIN_DEFAULT,
+                             seller_commission_vnd_min=SELLER_COMMISSION_VND_MIN_DEFAULT):
+    """Dieu kien rieng cho 'related' (san pham tuong tu cua root, KHONG PHAI root) - chi
+    can dat sold + seller_commission, BO QUA promoted_7d_max (khac voi root van phai dat
+    du 3 dieu kien qua passes_criteria() o tren, xem verify_root()). Doi theo yeu cau
+    nguoi dung 2026-08-29: related chi can "so da ban" + "hoa hong nha ban hang", khong
+    con xet so KOL da quang ba 7 ngay cho related nua."""
+    return (
+        metrics["sold"] > sold_min
+        and metrics["seller_commission_vnd"] > seller_commission_vnd_min
+    )
+
+
 def select_qualified_related(db_path, root_item_id, top_n=TOP_N_DEFAULT,
                               promoted_7d_max=PROMOTED_7D_MAX_DEFAULT, sold_min=SOLD_MIN_DEFAULT,
                               seller_commission_vnd_min=SELLER_COMMISSION_VND_MIN_DEFAULT):

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Shopee Product Link Collector
 // @namespace    http://tampermonkey.net/
-// @version      1.8.2
-// @description  Thu thập link sản phẩm Shopee tự động với tính năng cuộn trang thông minh, tự động chuyển trang SPA, tự nhận diện domain quốc gia, xuất dữ liệu và đẩy thẳng vào DB (root) của dashboard affiliate offer scraper. Gán cat_id riêng cho từng link ngay lúc cào, đảm bảo đúng danh mục kể cả khi cào nhiều danh mục trước khi đẩy vào DB.
+// @version      1.9.0
+// @description  Thu thập link sản phẩm Shopee tự động với tính năng cuộn trang thông minh, tự động chuyển trang SPA, tự nhận diện domain quốc gia, tùy chọn tự bấm sắp xếp "Top Sales" trước khi cào, xuất dữ liệu và đẩy thẳng vào DB (root) của dashboard affiliate offer scraper. Gán cat_id riêng cho từng link ngay lúc cào, đảm bảo đúng danh mục kể cả khi cào nhiều danh mục trước khi đẩy vào DB.
 // @author       Antigravity
 // @match        https://shopee.vn/*
 // @match        https://shopee.ph/*
@@ -29,10 +29,11 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = 'v1.8.2';
+  const SCRIPT_VERSION = 'v1.9.0';
   const STORAGE_KEY = 'shopee_collected_links';
   const RUNNING_STATE_KEY = 'shopee_collector_is_running';
   const AUTO_PAGE_KEY = 'shopee_collector_auto_page';
+  const TOP_SALES_KEY = 'shopee_collector_top_sales';
   const SERVER_URL_KEY = 'shopee_collector_server_url';
   const CAT_ID_KEY = 'shopee_collector_cat_id';
   const CAT_NAME_KEY = 'shopee_collector_cat_name';
@@ -43,6 +44,7 @@
 
   let isRunning = false;
   let autoPage = false;
+  let topSalesSort = false;
   let scrollInterval = null;
   let scanInterval = null;
   let isNavigating = false;
@@ -74,6 +76,7 @@
   function loadSettings() {
     isRunning = localStorage.getItem(RUNNING_STATE_KEY) === 'true';
     autoPage = localStorage.getItem(AUTO_PAGE_KEY) === 'true';
+    topSalesSort = localStorage.getItem(TOP_SALES_KEY) === 'true';
   }
 
   function setRunningState(state) {
@@ -84,6 +87,11 @@
   function setAutoPageState(state) {
     autoPage = state;
     localStorage.setItem(AUTO_PAGE_KEY, state ? 'true' : 'false');
+  }
+
+  function setTopSalesSortState(state) {
+    topSalesSort = state;
+    localStorage.setItem(TOP_SALES_KEY, state ? 'true' : 'false');
   }
 
   // Chuyển đổi href thành định dạng URL chuẩn: https://domain/product/shopId/itemId
@@ -209,6 +217,51 @@
     if (currentLinks.length !== initialCount) {
       saveStoredLinks(currentLinks);
     }
+  }
+
+  // Tim nut sap xep "Top Sales" (CHUA duoc bat, aria-pressed="false") - Shopee dung <button
+  // aria-pressed="true|false"> chua <span> ten bo loc sap xep, span chua text truc tiep nen
+  // dung XPath text()="Top Sales" thay vi contains() de tranh khop nham nut khac. Tra ve
+  // null neu khong tim thay (trang khong co bo loc nay, hoac da dang bat san - aria-pressed
+  // da la "true") - goi noi tu quyet dinh bo qua, cao binh thuong.
+  function getTopSalesButton() {
+    const xpathResult = document.evaluate(
+      '//button[@aria-pressed="false"]//span[text()="Top Sales"]',
+      document,
+      null,
+      XPathResult.FIRST_ORDERED_NODE_TYPE,
+      null
+    );
+    const span = xpathResult && xpathResult.singleNodeValue;
+    if (!span) return null;
+    return span.closest('button[aria-pressed="false"]') || span.closest('button');
+  }
+
+  // Bam "Top Sales" (neu tim thay + tuy chon dang bat) roi moi bat dau cao - dung 1 LAN
+  // DUY NHAT ngay luc bam Start (khong ap dung lai moi lan tu chuyen trang/resume, vi Shopee
+  // giu nguyen tieu chi sap xep xuyen suot cac trang cua CUNG 1 lan duyet danh muc). Khong
+  // tim thay nut (khong co bo loc nay, hoac da bat san tu truoc) -> bo qua, cao binh thuong
+  // ngay lap tuc, KHONG bao loi (dung nhu yeu cau nguoi dung).
+  function startWithOptionalTopSalesSort() {
+    if (!topSalesSort) {
+      startCollecting();
+      return;
+    }
+    const btn = getTopSalesButton();
+    if (!btn) {
+      console.log('[Shopee Collector] Không thấy nút "Top Sales" (chưa bật) - bỏ qua, cào bình thường.');
+      startCollecting();
+      return;
+    }
+    console.log('[Shopee Collector] Tìm thấy nút "Top Sales" -> bấm để sắp xếp trước khi cào...');
+    btn.click();
+    window.scrollTo(0, 0);
+    // Cho Shopee tai lai danh sach da sap xep (giong thoi gian cho sau goToNextPage()) roi
+    // moi bat dau cuon/quet, tranh quet trung du lieu cu chua kip sap xep lai.
+    setTimeout(() => {
+      window.scrollTo(0, 0);
+      startCollecting();
+    }, 2000);
   }
 
   // Tìm nút Next Page theo XPath hoặc CSS Selector
@@ -799,6 +852,11 @@
           <span>Tự động chuyển trang</span>
         </label>
 
+        <label class="sc-option-box">
+          <input type="checkbox" id="sc-top-sales-cb" ${topSalesSort ? 'checked' : ''}>
+          <span>Cào theo Top Sales</span>
+        </label>
+
         <div class="sc-btn-group">
           <button class="sc-btn sc-btn-start" id="sc-start-btn">Start</button>
           <button class="sc-btn sc-btn-stop" id="sc-stop-btn" style="display:none;">Stop</button>
@@ -825,6 +883,11 @@
       setAutoPageState(e.target.checked);
     });
 
+    const topSalesCb = document.getElementById('sc-top-sales-cb');
+    topSalesCb.addEventListener('change', (e) => {
+      setTopSalesSortState(e.target.checked);
+    });
+
     // Gán sự kiện nút
     // Chi phat hien lai cat_id luc bam Start THAT (khong phai luc startCollecting() tu goi
     // lai de tiep tuc sau auto-page/resume) - xem detectCatIdFromUrl()/setSessionCatId().
@@ -836,7 +899,7 @@
       if (catId) setSessionCatName(detectCatNameFromUrl());
       updateUI();
       resolveCatName(catId);
-      startCollecting();
+      startWithOptionalTopSalesSort();
     });
     document.getElementById('sc-stop-btn').addEventListener('click', stopCollecting);
     document.getElementById('sc-scroll-top-btn').addEventListener('click', () => {

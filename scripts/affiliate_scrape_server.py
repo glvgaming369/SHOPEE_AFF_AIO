@@ -52,7 +52,7 @@ USERSCRIPTS = [
     {
         "file": "tampermonkey_affiliate_group_scraper.user.js",
         "title": "Affiliate Offer Group Scraper",
-        "description": "Script CHÍNH: Chạy trên affiliate.shopee.* để gom đủ 60 sản phẩm/group (BFS qua sản phẩm tương tự). Cần cho MỖI tài khoản/profile đang dùng để cào.",
+        "description": "Script CHÍNH: Chạy trên affiliate.shopee.* để gom nhóm 6 sản phẩm/group (root đạt chuẩn + tối đa 5 sản phẩm tương tự). Cần cho MỖI tài khoản/profile đang dùng để cào.",
     },
     {
         "file": "shopee_collector.user.js",
@@ -363,7 +363,8 @@ def seed_candidates():
 def verify_root():
     """offer_data: nguyen si response.data tu goi that offer/product?item_id=<root>. Chi
     cap nhat metrics that cho dong root (KHONG doi status_link/claim). Tra ve 'passes' de
-    BFS quyet dinh root co tinh vao 60 hay khong (updatelogic.txt diem 4)."""
+    userscript quyet dinh: KHONG dat -> loai luon (khong lay san pham tuong tu); DAT -> lay
+    toi da 5 san pham tuong tu tu chinh similar_product_offers cua root cho du nhom 6."""
     body = request.get_json(force=True, silent=True) or {}
     offer_data = body.get("offer_data")
     if not isinstance(offer_data, dict):

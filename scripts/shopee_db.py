@@ -1136,7 +1136,7 @@ def assign_member(db_path, row, groupid):
         conn.close()
 
 
-def try_assign_verified(db_path, row: dict, groupid, promoted_7d_max=None, sold_min=None,
+def try_assign_verified(db_path, row: dict, groupid, sold_min=None,
                          seller_commission_vnd_min=None):
     """Dung cho pipeline web/BFS moi (nhieu Chrome profile chay SONG SONG, moi profile tu
     duyet 1 root khac nhau) - khac assign_member() o cho: assign_member() coi moi dong
@@ -1147,7 +1147,11 @@ def try_assign_verified(db_path, row: dict, groupid, promoted_7d_max=None, sold_
     seed no, nhom khac phai bi tu choi (khong duoc "cuop" dua vao viec chua verify).
 
     row: dict tu map_v2_data_to_row() (du affiliate_promoted_last_7days/sold/seller_commission
-    That, tuc DA goi offer/product that cho item nay). Tinh passes_criteria() luon, roi:
+    That, tuc DA goi offer/product that cho item nay). Ham nay CHI dung cho 'related' (KHONG
+    PHAI root - root xet o verify_root()) - tu 2026-08-29, related CHI can dat sold +
+    seller_commission (KHONG con xet promoted_7d_max/so KOL 7 ngay, theo yeu cau nguoi dung -
+    xem select_l1_l2_candidates.passes_criteria_related()). Tinh passes_criteria_related()
+    luon, roi:
       - Khong dat  -> luu 'cached' (groupid=null, tai dung metrics lan sau, khong goi lai API)
       - Dat + o duoc  -> gan 'member' cua groupid nay
       - Dat nhung da bi nhom KHAC giu (root cua no, hoac 'member'/'pending' groupid khac)
@@ -1155,17 +1159,15 @@ def try_assign_verified(db_path, row: dict, groupid, promoted_7d_max=None, sold_
 
     Tra ve dict {"outcome": "assigned"|"already_member"|"claimed_by_other"|"failed_criteria",
     "group_member_count": int} - group_member_count chi co gia tri khi outcome="assigned"
-    hoac "already_member" (dung de vong lap BFS phia goi biet khi nao dat 60 ma dung).
+    hoac "already_member" (dung de vong lap BFS phia goi biet khi nao dat GROUP_TARGET ma dung).
 
     market luon lay tu row["market"] (da duoc map_v2_data_to_row() tu suy tu product_link) -
     moi tra cuu/khoa itemid ben duoi deu KEM market de tranh dung nham dong cua market
     khac trung so itemid (xem CREATE_TABLE_SQL: unique la (market, itemid), khong con la
     itemid don le)."""
     import select_l1_l2_candidates as l1l2
-    if promoted_7d_max is None or sold_min is None or seller_commission_vnd_min is None:
+    if sold_min is None or seller_commission_vnd_min is None:
         _settings = get_settings(db_path)
-        if promoted_7d_max is None:
-            promoted_7d_max = _settings["promoted_7d_max"]
         if sold_min is None:
             sold_min = _settings["sold_min"]
         if seller_commission_vnd_min is None:
@@ -1175,7 +1177,7 @@ def try_assign_verified(db_path, row: dict, groupid, promoted_7d_max=None, sold_
     market = row["market"]
     groupid = str(groupid)
     metrics = l1l2._row_metrics(row)
-    passes = l1l2.passes_criteria(metrics, promoted_7d_max, sold_min, seller_commission_vnd_min)
+    passes = l1l2.passes_criteria_related(metrics, sold_min, seller_commission_vnd_min)
 
     conn = _connect(db_path)
     try:
@@ -1317,7 +1319,7 @@ def verify_root(db_path, offer_data, promoted_7d_max=None, sold_min=None,
     assigned_key/claimed_at ve None giua luc dang xu ly (claim_root da set 2 cot nay de
     khoa 30 phut - ghi de som se khien claim_root() cho thiet bi KHAC tuong lease het,
     claim trung ngay chinh root nay giua chung). Tra ve co dat 3 tieu chi khong (dung de
-    BFS quyet dinh root co tinh vao 60 khong - updatelogic.txt diem 4), KHONG tu gan/doi
+    userscript quyet dinh loai luon hay tiep tuc lay related - xem runBfsForRoot()), KHONG tu gan/doi
     status_link - finish_root() lo viec do o cuoi."""
     import select_l1_l2_candidates as l1l2
     if promoted_7d_max is None or sold_min is None or seller_commission_vnd_min is None:
@@ -1624,19 +1626,35 @@ def recompute_all_merged_links(db_path):
 
 
 def reset_all_insufficient_roots(db_path):
-    """Dua VE 'pending' TAT CA root 'done' nhung CHUA du 60 thanh vien - dung cho nut bam
-    hang loat, thay vi phai tu 'Dat lai' tung root mot (vd sau dot loi 403 khien nhieu
-    root bi bo do o cung 1 lan). Tra ve {"reset_count": n, "itemids": [...]}."""
+    """Dua VE 'pending' TAT CA root 'done' nhung CHUA du GROUP_TARGET (6: root + 5 related,
+    xem tampermonkey_affiliate_group_scraper.user.js) thanh vien - dung cho nut bam hang
+    loat, thay vi phai tu 'Dat lai' tung root mot (vd sau dot loi 403 khien nhieu root bi
+    bo do o cung 1 lan). CHI tinh la "thieu" khi CHINH root da dat 3 tieu chi (con < 5
+    related) - root KHONG dat tieu chi la bi loai VINH VIEN theo thiet ke moi (BFS dung
+    ngay, khong lay related), KHONG phai truong hop "thieu" nen KHONG dua vao day de tranh
+    cao lai vo ich 1 root da biet chac se bi loai. Tra ve {"reset_count": n, "itemids": [...]}."""
+    import select_l1_l2_candidates as l1l2
+    settings = get_settings(db_path)
     conn = _connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "select p.itemid, p.market, "
+            "select p.*, "
             "(select count(*) from products m where m.groupid=p.itemid and m.market=p.market "
             "and m.status_link='member') as member_count "
             "from products p where p.link_type='root' and p.status_link='done'"
         ).fetchall()
-        to_reset = [r for r in rows if r["member_count"] < 60]
+        to_reset = []
+        for r in rows:
+            if r["member_count"] >= 5:
+                continue
+            root_metrics = l1l2._row_metrics(r)
+            root_passes = l1l2.passes_criteria(
+                root_metrics, settings["promoted_7d_max"], settings["sold_min"],
+                settings["seller_commission_vnd_min"],
+            )
+            if root_passes:
+                to_reset.append(r)
         for r in to_reset:
             conn.execute(
                 "update products set status_link='pending', assigned_key=null, claimed_at=null, "
@@ -1858,7 +1876,12 @@ def list_video_push_candidates(db_path, limit=200, market=None):
     """Hang doi cho tinh nang 'Tao video': da co merged_link nhung CHUA tao xong task
     VideoAI (job_id con null) - bao gom ca dong da day cache tu lan chay truoc
     (cache_uploaded=1) lan dong chua day. Sap FIFO (id tang dan). market: gioi han CHI 1
-    thi truong (None/'' = tat ca) - dung cho dropdown chon market o tab 'Tao video'."""
+    thi truong (None/'' = tat ca) - dung cho dropdown chon market o tab 'Tao video'.
+
+    CHI lay link_type='root' (theo yeu cau nguoi dung 2026-08-29: chi tao video bang link
+    root, KHONG tao rieng cho tung 'related' nua) - merged_link cua dong root van chua ca
+    toi da 6 link (root + related cung nhom, xem compute_merged_links()) nen video van co
+    du ngu canh san pham lien quan, chi la KHONG con tao THEM 1 video rieng cho moi related."""
     conn = _connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
@@ -1866,7 +1889,7 @@ def list_video_push_candidates(db_path, limit=200, market=None):
         params = ([market] if market else []) + [limit]
         rows = conn.execute(
             "select * from products where merged_link is not null and job_id is null "
-            f"and product_link is not null {market_sql}order by id asc limit ?",
+            f"and product_link is not null and link_type='root' {market_sql}order by id asc limit ?",
             params,
         ).fetchall()
         return [dict(r) for r in rows]

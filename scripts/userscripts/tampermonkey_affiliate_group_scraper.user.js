@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Shopee Affiliate Offer Group Scraper
 // @namespace    shopee-crawl
-// @version      0.10
-// @description  BFS tu 1 link goc (root) qua "san pham tuong tu" cua offer/product, gom du 60 san pham dat 3 tieu chi (aff_7days/sold/seller_commission) cho 1 group_id, dong bo qua local server (affiliate_scrape_server.py) de gan group nguyen tu khi chay nhieu Chrome profile song song.
+// @version      0.13
+// @description  Tu 1 link goc (root), xac thuc du 3 tieu chi (aff_7days/sold/seller_commission). Root DAT thi lay them 5 san pham tuong tu dat 2 tieu chi (sold/seller_commission) cho du nhom 6 link; root KHONG DAT thi loai luon, khong lay tuong tu. Dong bo qua local server (affiliate_scrape_server.py) de gan group nguyen tu khi chay nhieu Chrome profile song song.
 // @match        https://affiliate.shopee.vn/*
 // @match        https://affiliate.shopee.sg/*
 // @match        https://affiliate.shopee.ph/*
@@ -23,16 +23,44 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.10'; // khop @version o header - doi ca 2 cho khi sua script
+  const SCRIPT_VERSION = '0.13'; // khop @version o header - doi ca 2 cho khi sua script
   const ENDPOINT_MARKER = '/api/v3/offer/product';
-  const GROUP_TARGET = 60;
-  const CALL_CAP_PER_ROOT = 500;
-  const CALL_DELAY_MIN_MS = 400;
-  const CALL_DELAY_MAX_MS = 900;
+  // GROUP_TARGET=6: 1 root (dat du 3 tieu chi) + 5 related (chi can dat 2 tieu chi
+  // sold/seller_commission - xem select_l1_l2_candidates.passes_criteria_related() ben
+  // server). Doi tu 60->6 theo yeu cau nguoi dung 2026-08-29 - video chi con tao tu link
+  // root (xem list_video_push_candidates()), nen khong can gom nhieu related nhu truoc.
+  const GROUP_TARGET = 6;
+  // Giam tu 500->80 vi gio chi can 5 related (thay vi 59) - root tot nhung "vung lan can"
+  // qua similar_product_offers toan hang khong dat thi nen dung som, chuyen root khac,
+  // thay vi ton toi da 500 request that vo ich cho 1 root.
+  const CALL_CAP_PER_ROOT = 80;
+  // Gia tri MAC DINH (dung khi nguoi dung chua tung nhap tren panel, hoac nhap gia tri
+  // khong hop le) - CHINH tra ve dung luc chay lay tu GM_getValue qua getCallDelayRangeMs()/
+  // getRootDelayRangeMs() ben duoi, cho phep nguoi dung tu chinh ngay tren panel (o
+  // "aog-call-delay-min/max", "aog-root-delay-min/max") ma khong can sua code/cap nhat
+  // script - xem yeu cau nguoi dung 2026-08-29 (de anti-captcha tuy may/tai khoan/thoi diem
+  // khac nhau ma khong phai fix cung 1 gia tri cho tat ca).
+  const CALL_DELAY_MIN_DEFAULT_MS = 400;
+  const CALL_DELAY_MAX_DEFAULT_MS = 900;
+  // Delay GIUA 2 ROOT khac nhau (KHAC voi CALL_DELAY o tren - do la delay giua 2 candidate
+  // CUNG 1 root). Can rieng vi tu khi bo BFS da tang (chi con 1 lan goi similar_product_offers
+  // cua root, xem runBfsForRoot()), 1 root co the chi ton DUY NHAT 1 request that (root khong
+  // dat chuan -> loai luon, xem nhanh "!rootVerify.passes"). Neu nhieu root lien tiep deu roi
+  // vao truong hop nay (thuong gap khi danh muc/nguon root chat luong thap), request that toi
+  // Shopee se ban ra LIEN TUC gan nhu khong nghi - de bi Shopee nghi ngo/chan captcha hon
+  // nhieu so voi truoc day (moi root cu it nhat cung ton vai giay xu ly BFS da tang). Don vi
+  // GIAY (khac CALL_DELAY don vi ms o tren) - de nguoi dung nhap tren panel de doc hon voi
+  // khoang gia tri lon nay.
+  const ROOT_DELAY_MIN_DEFAULT_S = 2.5;
+  const ROOT_DELAY_MAX_DEFAULT_S = 6;
   const POLL_ASSIGNMENT_MS = 4000; // khoang cach hoi server "co viec chua" luc dang ranh
 
   const SERVER_URL_KEY = 'aog_server_url';
   const DEVICE_KEY_KEY = 'aog_device_key';
+  const CALL_DELAY_MIN_KEY = 'aog_call_delay_min_ms';
+  const CALL_DELAY_MAX_KEY = 'aog_call_delay_max_ms';
+  const ROOT_DELAY_MIN_KEY = 'aog_root_delay_min_s';
+  const ROOT_DELAY_MAX_KEY = 'aog_root_delay_max_s';
   const STOP_KEY = 'aog_stop';
   const SERVER_URL_DEFAULT = 'http://127.0.0.1:8877';
   const OWN_SCRIPT_FILE = 'tampermonkey_affiliate_group_scraper.user.js';
@@ -82,6 +110,41 @@
   }
   function randomDelay(min, max) {
     return sleep(min + Math.random() * (max - min));
+  }
+
+  // Chuan hoa 1 cap min/max nguoi dung tu nhap tren panel: gia tri khong hop le (rong, NaN,
+  // am) -> fallback ve default TUONG UNG (rieng cho min/max, khong dung chung 1 default cho
+  // ca 2), min>max -> tu hoan doi (tranh randomDelay() nhan khoang am, ket qua vo nghia) thay
+  // vi bat nguoi dung tu sua lai thu tu. Doc lai MOI LAN goi (khong cache) de thay doi tren
+  // panel co hieu luc ngay tu request tiep theo, khong can bam Start lai.
+  function sanitizeDelayRange(rawMin, rawMax, defaultMin, defaultMax) {
+    let min = parseFloat(rawMin);
+    let max = parseFloat(rawMax);
+    if (isNaN(min) || min < 0) min = defaultMin;
+    if (isNaN(max) || max < 0) max = defaultMax;
+    if (min > max) { const t = min; min = max; max = t; }
+    return { min, max };
+  }
+
+  // Delay giua 2 candidate CUNG 1 root (don vi ms) - nguoi dung tu nhap tren panel (o
+  // "aog-call-delay-min/max"), luu qua GM_setValue.
+  function getCallDelayRangeMs() {
+    return sanitizeDelayRange(
+      GM_getValue(CALL_DELAY_MIN_KEY, CALL_DELAY_MIN_DEFAULT_MS),
+      GM_getValue(CALL_DELAY_MAX_KEY, CALL_DELAY_MAX_DEFAULT_MS),
+      CALL_DELAY_MIN_DEFAULT_MS, CALL_DELAY_MAX_DEFAULT_MS
+    );
+  }
+
+  // Delay giua 2 ROOT khac nhau (nguoi dung nhap tren panel theo GIAY cho de doc, xem
+  // "aog-root-delay-min/max") - tra ve da quy doi sang ms de dung thang voi randomDelay().
+  function getRootDelayRangeMs() {
+    const { min, max } = sanitizeDelayRange(
+      GM_getValue(ROOT_DELAY_MIN_KEY, ROOT_DELAY_MIN_DEFAULT_S),
+      GM_getValue(ROOT_DELAY_MAX_KEY, ROOT_DELAY_MAX_DEFAULT_S),
+      ROOT_DELAY_MIN_DEFAULT_S, ROOT_DELAY_MAX_DEFAULT_S
+    );
+    return { min: min * 1000, max: max * 1000 };
   }
 
   // ---- Goi Shopee that: cung origin voi trang (affiliate.shopee.*) nen fetch() thuong
@@ -234,7 +297,8 @@
     }
   }
 
-  // ---- BFS chinh cho 1 root ----
+  // ---- Xu ly chinh cho 1 root: xac thuc root, neu dat thi lay 1 lop san pham tuong tu
+  // (KHONG con da tang/BFS truoc day) tu chinh similar_product_offers cua root ----
   async function runBfsForRoot(root, log, soldMin) {
     const groupid = root.itemid;
     let calls = 0;
@@ -266,16 +330,21 @@
     }
     const rootData = rootResp.json.data;
     const rootVerify = await serverRequest('POST', '/api/roots/verify', { offer_data: rootData });
+    if (!rootVerify.passes) {
+      // Root KHONG dat 3 tieu chi -> LOAI LUON, khong lay san pham tuong tu (theo yeu cau
+      // nguoi dung 2026-08-29: khac truoc day - truoc day van BFS tiep qua related de co
+      // gang gom du 60 du root rot). finish_root() se tu tinh merged_link (rong vi khong
+      // co root/member nao dat) nen nhom nay se khong tao video.
+      log(`Root KHONG dat chuan -> loai luon, khong lay san pham tuong tu.`);
+      await serverRequest('POST', '/api/roots/finish', { itemid: groupid, market: root.market });
+      return { finished: true, reason: 'root_rejected', memberCount: 0 };
+    }
     // QUAN TRONG: memberCount CHI phan anh so 'member' THAT tu server (count_group_members()
     // KHONG tinh root) - da tung co bug o day: gan memberCount=1 cho root roi bi verify.group_member_count
-    // ghi de mat ngay vong lap dau, khien BFS chay toi du 60 MEMBER + 1 root = 61 tong thay vi
-    // 60 tong nhu thiet ke. Tach rieng rootCountsAsOne, LUON cong vao khi so sanh/hien thi.
-    const rootCountsAsOne = rootVerify.passes ? 1 : 0;
-    if (rootVerify.passes) {
-      log(`Root DAT chuan -> tinh 1/${GROUP_TARGET}.`);
-    } else {
-      log(`Root KHONG dat chuan -> can du ${GROUP_TARGET} tu san pham tuong tu.`);
-    }
+    // ghi de mat ngay vong lap dau, khien BFS chay toi du GROUP_TARGET MEMBER + 1 root thay
+    // vi GROUP_TARGET tong nhu thiet ke. Tach rieng rootCountsAsOne, LUON cong vao khi so sanh/hien thi.
+    const rootCountsAsOne = 1;
+    log(`Root DAT chuan -> tinh 1/${GROUP_TARGET}, can them ${GROUP_TARGET - 1} san pham tuong tu.`);
 
     // Hang doi uu tien theo sold giam dan (mang phang, sort lai moi lan pop - du nhanh
     // voi quy mo vai tram phan tu, khong can cau truc heap rieng).
@@ -306,6 +375,10 @@
       log(`  Nhan ${similar.length} ung vien: +${added} vao hang doi, ${skippedTaken} da thuoc nhom khac, ${skippedSold} bi loai vi sold<=${soldMin}.`);
     }
 
+    // CHI seed ung vien tu DUY NHAT 1 lan goi root (similar_product_offers cua chinh root) -
+    // theo yeu cau nguoi dung 2026-08-29: KHONG con BFS da tang (khong goi expandFrom() tiep
+    // tren du lieu cua tung related nhu truoc). Neu danh sach nay khong du 5 ung vien dat
+    // chuan thi CHAP NHAN so luong hien co roi ket thuc luon (xem cuoi ham) - khong tim tiep.
     await expandFrom(rootData);
 
     while (memberCount + rootCountsAsOne < GROUP_TARGET && queue.length > 0 && calls < CALL_CAP_PER_ROOT) {
@@ -339,21 +412,19 @@
         log(`  [${calls}/${CALL_CAP_PER_ROOT}] ${next.item_id}: ${verify.outcome}`);
       }
 
-      await expandFrom(data);
-      await randomDelay(CALL_DELAY_MIN_MS, CALL_DELAY_MAX_MS);
+      const callDelay = getCallDelayRangeMs();
+      await randomDelay(callDelay.min, callDelay.max);
     }
 
+    // Het ung vien tu danh sach tuong tu cua root (hoac da du GROUP_TARGET) -> KET THUC
+    // luon, KHONG tim them (khong con khai niem "chua du 6/6 thi tiep tuc tim" - du chi
+    // gom duoc 0-4 related van finish binh thuong, chi la group nho hon).
+    await serverRequest('POST', '/api/roots/finish', { itemid: groupid, market: root.market });
     if (memberCount + rootCountsAsOne >= GROUP_TARGET) {
-      await serverRequest('POST', '/api/roots/finish', { itemid: groupid, market: root.market });
       log(`=== XONG root ${groupid}: ${memberCount + rootCountsAsOne}/${GROUP_TARGET}. ===`);
       return { finished: true, reason: 'target_reached', memberCount };
     }
-    if (calls >= CALL_CAP_PER_ROOT) {
-      log(`=== DUNG root ${groupid}: cham tran ${CALL_CAP_PER_ROOT} request, chi duoc ${memberCount + rootCountsAsOne}/${GROUP_TARGET}. Coi la khong du, bo do. ===`);
-    } else {
-      log(`=== DUNG root ${groupid}: het ung vien truoc khi du, chi duoc ${memberCount + rootCountsAsOne}/${GROUP_TARGET}. Coi la khong du, bo do. ===`);
-    }
-    await serverRequest('POST', '/api/roots/finish', { itemid: groupid, market: root.market });
+    log(`=== XONG root ${groupid}: het ung vien tu danh sach tuong tu cua root, chi duoc ${memberCount + rootCountsAsOne}/${GROUP_TARGET} - chap nhan, khong tim them. ===`);
     return { finished: true, reason: 'insufficient', memberCount };
   }
 
@@ -417,6 +488,13 @@
       const result = await runBfsForRoot(assignedResp.root, log, settings.sold_min);
       if (result.reason === 'blocked') break;
       await heartbeat('idle');
+      // Nghi giua 2 root (xem ghi chu ROOT_DELAY_MIN_DEFAULT_S/MAX_DEFAULT_S, gia tri thuc te
+      // nguoi dung tu nhap tren panel qua getRootDelayRangeMs()) truoc khi hoi/xu ly root ke
+      // tiep - bo qua neu nguoi dung vua bam Stop de Stop phan hoi ngay, khong phai cho them.
+      if (!isStopped()) {
+        const rootDelay = getRootDelayRangeMs();
+        await randomDelay(rootDelay.min, rootDelay.max);
+      }
     }
     log('=== Vong lap ket thuc (bam Start lai de tiep tuc cho viec). ===');
   }
@@ -463,6 +541,25 @@
         <input id="aog-device" type="text" placeholder="Device key (ten tai khoan/profile)"
           style="flex:1;padding:4px 6px;border:1px solid #ccc;border-radius:4px;">
       </div>
+      <div style="background:#f8f9fa;border:1px solid #eee;border-radius:4px;padding:6px 8px;margin-bottom:6px;font-size:11px;color:#444;">
+        <div style="font-weight:700;color:#333;margin-bottom:4px;">Delay chống captcha (để trống = mặc định):</div>
+        <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;flex-wrap:wrap;">
+          <span style="min-width:132px;">Giữa 2 sản phẩm (ms):</span>
+          <input id="aog-call-delay-min" type="number" min="0" step="50" placeholder="${CALL_DELAY_MIN_DEFAULT_MS}"
+            style="width:64px;padding:3px 5px;border:1px solid #ccc;border-radius:4px;">
+          <span>-</span>
+          <input id="aog-call-delay-max" type="number" min="0" step="50" placeholder="${CALL_DELAY_MAX_DEFAULT_MS}"
+            style="width:64px;padding:3px 5px;border:1px solid #ccc;border-radius:4px;">
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+          <span style="min-width:132px;">Giữa 2 root (giây):</span>
+          <input id="aog-root-delay-min" type="number" min="0" step="0.5" placeholder="${ROOT_DELAY_MIN_DEFAULT_S}"
+            style="width:64px;padding:3px 5px;border:1px solid #ccc;border-radius:4px;">
+          <span>-</span>
+          <input id="aog-root-delay-max" type="number" min="0" step="0.5" placeholder="${ROOT_DELAY_MAX_DEFAULT_S}"
+            style="width:64px;padding:3px 5px;border:1px solid #ccc;border-radius:4px;">
+        </div>
+      </div>
       <div style="display:flex;gap:6px;margin-bottom:6px;">
         <button id="aog-start-btn" style="flex:1;padding:5px 0;cursor:pointer;background:#ee4d2d;color:#fff;border:none;border-radius:4px;">Start</button>
         <button id="aog-stop-btn" style="flex:1;padding:5px 0;cursor:pointer;background:#f2f2f2;color:#222;border:1px solid #ccc;border-radius:4px;">Stop</button>
@@ -477,6 +574,40 @@
     deviceInput.value = GM_getValue(DEVICE_KEY_KEY, '');
     serverInput.addEventListener('change', () => GM_setValue(SERVER_URL_KEY, serverInput.value.trim()));
     deviceInput.addEventListener('change', () => GM_setValue(DEVICE_KEY_KEY, deviceInput.value.trim()));
+
+    // Delay chong captcha - de trong (khong nhap gi) = dung mac dinh (xem placeholder o
+    // input, sanitizeDelayRange() cung fallback tuong tu neu lo nhap gia tri khong hop le
+    // nhu am/chu). Luu ngay khi rai input (change) - lan goi randomDelay() TIEP THEO se ap
+    // dung gia tri moi ngay, khong can bam Start lai (xem getCallDelayRangeMs()/
+    // getRootDelayRangeMs(), doc lai GM_getValue moi lan goi thay vi cache).
+    const callDelayMinInput = document.getElementById('aog-call-delay-min');
+    const callDelayMaxInput = document.getElementById('aog-call-delay-max');
+    const rootDelayMinInput = document.getElementById('aog-root-delay-min');
+    const rootDelayMaxInput = document.getElementById('aog-root-delay-max');
+    const storedCallMin = GM_getValue(CALL_DELAY_MIN_KEY, null);
+    const storedCallMax = GM_getValue(CALL_DELAY_MAX_KEY, null);
+    const storedRootMin = GM_getValue(ROOT_DELAY_MIN_KEY, null);
+    const storedRootMax = GM_getValue(ROOT_DELAY_MAX_KEY, null);
+    if (storedCallMin !== null) callDelayMinInput.value = storedCallMin;
+    if (storedCallMax !== null) callDelayMaxInput.value = storedCallMax;
+    if (storedRootMin !== null) rootDelayMinInput.value = storedRootMin;
+    if (storedRootMax !== null) rootDelayMaxInput.value = storedRootMax;
+    callDelayMinInput.addEventListener('change', () => {
+      if (callDelayMinInput.value === '') GM_setValue(CALL_DELAY_MIN_KEY, null);
+      else GM_setValue(CALL_DELAY_MIN_KEY, parseFloat(callDelayMinInput.value));
+    });
+    callDelayMaxInput.addEventListener('change', () => {
+      if (callDelayMaxInput.value === '') GM_setValue(CALL_DELAY_MAX_KEY, null);
+      else GM_setValue(CALL_DELAY_MAX_KEY, parseFloat(callDelayMaxInput.value));
+    });
+    rootDelayMinInput.addEventListener('change', () => {
+      if (rootDelayMinInput.value === '') GM_setValue(ROOT_DELAY_MIN_KEY, null);
+      else GM_setValue(ROOT_DELAY_MIN_KEY, parseFloat(rootDelayMinInput.value));
+    });
+    rootDelayMaxInput.addEventListener('change', () => {
+      if (rootDelayMaxInput.value === '') GM_setValue(ROOT_DELAY_MAX_KEY, null);
+      else GM_setValue(ROOT_DELAY_MAX_KEY, parseFloat(rootDelayMaxInput.value));
+    });
 
     document.getElementById('aog-start-btn').addEventListener('click', () => runLoop(log));
     document.getElementById('aog-stop-btn').addEventListener('click', () => {

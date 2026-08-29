@@ -1229,8 +1229,8 @@ function rootStatusBadge(r) {
   if (r.status_link === 'pending') return '<span class="badge pending">Đang chờ</span>';
   if (r.status_link === 'fail') return '<span class="badge fail">Lỗi</span>';
   if (r.status_link === 'done') {
-    if (r.member_count >= 60) return '<span class="badge working">Đủ 60/60</span>';
-    return `<span class="badge insufficient">THIẾU (${r.member_count}/60)</span>`;
+    if (r.member_count >= 5) return '<span class="badge working">Đủ 6/6</span>';
+    return `<span class="badge insufficient">THIẾU (${r.member_count}/6)</span>`;
   }
   return `<span class="badge idle">${r.status_link}</span>`;
 }
@@ -1256,7 +1256,7 @@ async function loadRoots() {
       <td><b>${r.market || '-'}</b></td>
       <td>${categoryCell(r)}</td>
       <td>${rootStatusBadge(r)}</td>
-      <td><b>${r.member_count}</b>/60</td>
+      <td><b>${r.member_count}</b>/6</td>
       <td>${r.assigned_key || '-'}</td>
       <td><a href="${r.product_link || '#'}" target="_blank">Mở link ↗</a></td>
       <td>
@@ -1294,7 +1294,7 @@ async function recomputeMergedAll() {
 }
 
 async function resetInsufficientAll() {
-  if (!(await customConfirm('Đưa VỀ "pending" toàn bộ Root đã làm xong nhưng chưa đủ 60/60 để giao lại? (KHÔNG xóa sản phẩm đã gom trước đó)'))) return;
+  if (!(await customConfirm('Đưa VỀ "pending" toàn bộ Root đã ĐẠT điều kiện nhưng chưa đủ 6/6 để giao lại? (Root đã bị loại do không đạt điều kiện sẽ KHÔNG bị đưa về - KHÔNG xóa sản phẩm đã gom trước đó)'))) return;
   try {
     // Timeout dai (1 phut) - truy van tren TOAN BO root 'done' (co subquery dem member cho
     // tung dong), co the lau hon 15s mac dinh voi DB lon, xem ghi chu o api().
