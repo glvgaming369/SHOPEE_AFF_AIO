@@ -436,7 +436,7 @@
       quá 15 giây không có tín hiệu (có thể tab đã đóng hoặc mất kết nối mạng).
     </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Device Key</th><th>Thị trường</th><th>Trạng thái</th><th>Root đang xử lý</th><th>Lần cuối báo cáo</th></tr></thead>
+      <thead><tr><th>Device Key</th><th>Thị trường</th><th>Trạng thái</th><th>Root đang xử lý</th><th>Lần cuối báo cáo</th><th>Thao tác</th></tr></thead>
       <tbody id="workers-tbody"></tbody>
     </table></div>
   </section>
@@ -629,7 +629,10 @@
   <section>
     <div class="row" style="align-items:center;justify-content:space-between;">
       <h2 style="margin:0;">Nhật ký tạo video</h2>
-      <button class="secondary" onclick="loadVideoPushLog(true)">Làm mới</button>
+      <div class="row" style="gap:8px;">
+        <button class="secondary" onclick="loadVideoPushLog(true)">Làm mới</button>
+        <button class="secondary" onclick="clearVideoPushLog()" style="color:var(--danger-text);">Xóa nhật ký</button>
+      </div>
     </div>
     <div class="muted" style="margin-bottom:10px;">
       Lịch sử từng lô đã xử lý (lưu trên server, không mất khi tải lại trang) - lọc theo thị trường đang chọn ở trên. Bấm số lỗi để xem chi tiết.
@@ -1192,8 +1195,16 @@ async function loadWorkers() {
       <td><span class="badge ${status}">${statusLabel}</span></td>
       <td><code>${w.current_root || '-'}</code></td>
       <td>${Math.round(ageSec)} giây trước</td>
+      <td><button class="secondary" style="color:var(--danger-text);" onclick="deleteWorker('${w.device_key.replace(/'/g, "\\'")}')">Xóa</button></td>
     </tr>`;
-  }).join('') || '<tr><td colspan="5" class="muted">Chưa có Worker nào báo cáo (Chưa bấm Start ở tab script nào).</td></tr>';
+  }).join('') || '<tr><td colspan="6" class="muted">Chưa có Worker nào báo cáo (Chưa bấm Start ở tab script nào).</td></tr>';
+}
+
+async function deleteWorker(deviceKey) {
+  if (!(await customConfirm(`Xóa Worker "${deviceKey}" khỏi danh sách? Root đang bị device key này giữ (nếu có) sẽ được nhả ra để giao được cho worker khác. (Nếu tab Tampermonkey đó vẫn đang chạy và tiếp tục báo cáo, worker sẽ tự xuất hiện lại ở lần báo cáo kế tiếp.)`))) return;
+  const { released_claims } = await api('DELETE', `/api/workers/${encodeURIComponent(deviceKey)}`);
+  await customAlert(`Đã xóa Worker "${deviceKey}"${released_claims > 0 ? ` (nhả ${released_claims} root đang bị giữ)` : ''}.`);
+  loadWorkers();
 }
 
 async function assignRoot(itemid, market) {
@@ -1635,6 +1646,15 @@ async function loadVideoPushLog(reset) {
   videoLogOffset += data.rows.length;
   renderVideoPushLog();
   document.getElementById('video-log-more-btn').style.display = videoLogOffset < data.total ? 'inline-block' : 'none';
+}
+
+async function clearVideoPushLog() {
+  const market = document.getElementById('video-market-sel').value;
+  const scopeLabel = market ? `thị trường ${market}` : 'TẤT CẢ thị trường';
+  if (!(await customConfirm(`Xóa TOÀN BỘ lịch sử "Nhật ký tạo video" (${scopeLabel})? Chỉ xóa lịch sử hiển thị, KHÔNG ảnh hưởng tới video/cache đã tạo. Không thể hoàn tác.`))) return;
+  const { deleted } = await api('POST', '/api/videos/log/clear', { market });
+  await customAlert(`Đã xóa ${deleted} dòng nhật ký (${scopeLabel}).`);
+  loadVideoPushLog(true);
 }
 
 function fmtLogTime(isoLike) {

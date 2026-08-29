@@ -282,6 +282,14 @@ def workers_list():
     return jsonify({"workers": shopee_db.list_workers(DB_PATH)})
 
 
+@app.route("/api/workers/<device_key>", methods=["DELETE"])
+def remove_worker(device_key):
+    """Xoa 1 device_key khoi bang 'workers' - dung cho nut 'Xoa' o tab 'Van hanh'. Nha kem
+    claim (assigned_key) cua device_key nay tren products, xem shopee_db.remove_worker()."""
+    result = shopee_db.remove_worker(DB_PATH, device_key)
+    return jsonify(result)
+
+
 @app.route("/api/roots/<itemid>/reset", methods=["POST"])
 def reset_root(itemid):
     body = request.get_json(force=True, silent=True) or {}
@@ -764,6 +772,16 @@ def videos_log():
     except (TypeError, ValueError):
         return _bad_request("'limit'/'offset' phai la so nguyen")
     return jsonify(shopee_db.list_video_push_log(DB_PATH, market=market, limit=limit, offset=offset))
+
+
+@app.route("/api/videos/log/clear", methods=["POST"])
+def clear_videos_log():
+    """Xoa lich su 'Nhat ky tao video' - dung cho nut 'Xoa nhat ky' o tab 'Tao video'. market
+    (body, optional): chi xoa 1 thi truong dang chon tren dropdown; bo trong = xoa tat ca."""
+    body = request.get_json(force=True, silent=True) or {}
+    market = body.get("market") or None
+    count = shopee_db.clear_video_push_log(DB_PATH, market=market)
+    return jsonify({"deleted": count})
 
 
 # ---- Tab "Tao tai khoan Shopee" (mua mail dongvanfb + doc code) ----

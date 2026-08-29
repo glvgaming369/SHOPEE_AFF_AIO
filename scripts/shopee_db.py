@@ -1097,6 +1097,26 @@ def list_workers(db_path):
         conn.close()
 
 
+def remove_worker(db_path, device_key):
+    """Xoa 1 worker khoi bang 'workers' - dung cho nut 'Xoa' o tab 'Van hanh' (vd device_key
+    go nham, tab/profile khong con dung nua nhung van con hien trong danh sach vi tung
+    heartbeat truoc do). Nha luon claim (assigned_key/claimed_at) ma DUNG device_key nay
+    dang giu tren bang products (xem release_claims_for_device()) - tranh de lai root "mo
+    coi" bi khoa boi 1 device_key khong con ai heartbeat, khong bao gio duoc nha tu nhien
+    (worker khac khong the "cuop" claim con hieu luc). Xoa xong, worker nay se bien mat khoi
+    danh sach ngay - neu tab Tampermonkey do van con dang chay va tiep tuc heartbeat, no se
+    tu xuat hien lai o lan bao cao ke tiep (khong ngan duoc viec do, chi xoa duoc 1 lan).
+    Tra ve {"removed": bool, "released_claims": n}."""
+    released = release_claims_for_device(db_path, device_key)
+    conn = _connect(db_path)
+    try:
+        cur = conn.execute("delete from workers where device_key=?", (device_key,))
+        conn.commit()
+        return {"removed": cur.rowcount > 0, "released_claims": released}
+    finally:
+        conn.close()
+
+
 def assign_member(db_path, row, groupid):
     """Gan item (row day du metrics tu product_v2) vao group NGUYEN TU, dam bao unique toan
     cuc (BEGIN IMMEDIATE khoa ghi ca file - 2 thiet bi khong gianh trung 1 item cho 2 group):
@@ -1967,6 +1987,23 @@ def list_video_push_log(db_path, market=None, limit=100, offset=0):
             params + [limit, offset],
         ).fetchall()
         return {"rows": [dict(r) for r in rows], "total": total}
+    finally:
+        conn.close()
+
+
+def clear_video_push_log(db_path, market=None):
+    """Xoa lich su "Nhat ky tao video" (bang video_push_log) - dung cho nut 'Xoa nhat ky' o
+    tab 'Tao video'. CHI xoa dong nhat ky (khong dung/anh huong toi job_id/cache_uploaded
+    cua san pham - muon dat lai trang thai do thi dung reset_video_jobs()/nut 'Dat lai trang
+    thai' rieng). market: gioi han CHI 1 thi truong dang chon tren dropdown (None/'' = xoa
+    TAT CA). Tra ve so dong da xoa."""
+    conn = _connect(db_path)
+    try:
+        market_sql = " where market=?" if market else ""
+        params = [market] if market else []
+        cur = conn.execute(f"delete from video_push_log{market_sql}", params)
+        conn.commit()
+        return cur.rowcount
     finally:
         conn.close()
 
