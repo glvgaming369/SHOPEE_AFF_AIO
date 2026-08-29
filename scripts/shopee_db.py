@@ -317,6 +317,15 @@ def init_db(db_path=DB_PATH_DEFAULT):
     # lan goi, cung tinh than voi cac index idx_products_* khac o tren (da do dac gap van
     # de tuong tu voi /api/roots/list, /api/stats truoc khi co index).
     conn.execute("create index if not exists idx_products_cat on products(market, cat_id)")
+    # Ho tro truy van GROUP BY trong list_roots_with_counts() (dem member cho TAT CA group
+    # trong 1 lan, thay vi N+1 query rieng cho tung root - xem ghi chu ham do, sua
+    # 2026-08-27 sau khi do dac CPU 100% khi chay nhieu tab BFS song song). Dan dau bang
+    # market+status_link (loc "member" 1 thi truong) roi groupid (GROUP BY) giup SQLite
+    # quet thang phan can, khong can scan/sort toan bang.
+    conn.execute(
+        "create index if not exists idx_products_market_status_group "
+        "on products(market, status_link, groupid)"
+    )
     conn.execute(CREATE_DEVICES_TABLE_SQL)
     conn.execute(CREATE_SETTINGS_TABLE_SQL)
     conn.execute(CREATE_WORKERS_TABLE_SQL)
@@ -1413,7 +1422,15 @@ def count_group_members(db_path, groupid, market):
 def list_roots_with_counts(db_path, status=None, search=None, market=None, limit=200):
     """Danh sach root + so member da gom cua tung group - dung cho UI xem group. market
     loc dung 1 thi truong cu the (dung cho dropdown loc o tab "Van hanh" - xem
-    count_roots_by_market() cho bang tong hop theo TAT CA market)."""
+    count_roots_by_market() cho bang tong hop theo TAT CA market).
+
+    Truoc day dem member bang 1 truy van RIENG cho TUNG root (N+1 query - toi da 200 truy
+    van/lan goi). Da do dac thuc te (2026-08-27, py-spy + mo phong 5 tab BFS ghi song
+    song): endpoint nay chiem CPU rat nang (200 vong lap Python + truy van tuan tu tren 1
+    process Flask), la nguyen nhan chinh gay "CPU 100%" nguoi dung bao cao khi chay nhieu
+    tab BFS - dashboard tu poll endpoint nay moi 5s, cong don voi ghi song song tu cac tab
+    lam moi lan goi cham hon, co the CHONG CHAT nhieu lan goi cung luc, cang lam CPU te
+    hon. Gio dem TAT CA group trong 1 (hoac vai) truy van GROUP BY duy nhat thay vi N+1."""
     conn = _connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
@@ -1432,13 +1449,20 @@ def list_roots_with_counts(db_path, status=None, search=None, market=None, limit
             f"select * from products where {' and '.join(where)} order by id asc limit ?",
             params + [limit],
         ).fetchall()
+        count_map = {}
+        if rows:
+            markets = {r["market"] for r in rows}
+            for m in markets:
+                for grow in conn.execute(
+                    "select groupid, count(*) as cnt from products "
+                    "where market=? and status_link='member' group by groupid",
+                    (m,),
+                ).fetchall():
+                    count_map[(grow["groupid"], m)] = grow["cnt"]
         out = []
         for r in rows:
             d = dict(r)
-            d["member_count"] = conn.execute(
-                "select count(*) from products where groupid=? and market=? and status_link='member'",
-                (d["itemid"], d["market"]),
-            ).fetchone()[0]
+            d["member_count"] = count_map.get((d["itemid"], d["market"]), 0)
             out.append(d)
         return out
     finally:
