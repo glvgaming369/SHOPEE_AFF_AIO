@@ -99,6 +99,19 @@ _REQUEST_TIMEOUT_SECONDS = 30
 _RATE_LIMIT_MAX_ATTEMPTS = 5
 _RATE_LIMIT_BASE_DELAY_SECONDS = 2.0
 
+# Pacing for push_rows_bulk(): 1 append_rows() call per account is unavoidable (no batch
+# equivalent for "append" across sheets), so at 100 accounts that alone is ~100 write
+# calls. Google's default Sheets API quota is commonly ~60 requests/min PER USER (this
+# tool authenticates as a single service account, so it IS "1 user" regardless of how many
+# accounts/sheets it touches) - firing 100 calls back-to-back trips that quota outright
+# (reported 2026-08-31 at just 20 accounts). 1s/account keeps the sustained rate near
+# ~50-55 calls/min (leaving headroom for the handful of read calls earlier in the same
+# push), fits well within the dashboard's 180s timeout for this endpoint (index.html's
+# api('POST', '/api/gsheet/push', ...) call in tab "Push Sheet" explicitly passes 180000ms)
+# even at 100 accounts (~100s of pacing + actual call time), and still relies on the
+# exponential backoff in _call() as a safety net for whatever residual 429s still occur.
+_PUSH_INTER_ACCOUNT_DELAY_SECONDS = 1.0
+
 
 class SheetsClient:
     def __init__(self, credentials_path: str, spreadsheet_url: str):
@@ -237,18 +250,50 @@ class SheetsClient:
         dedup only applies within the folder currently being processed. Only scans sheets
         whose title matches a known profile, so unrelated tabs a human added to the
         spreadsheet can't pollute dedup either.
+
+        Batched like get_job_stats_bulk() - 1 call to list worksheets + 1 batched values
+        call, instead of 1 get_all_values() PER ACCOUNT. With 20-100 accounts this used to
+        be the single biggest contributor to tripping Google's per-minute rate limit on
+        push (2026-08-31: reported 429 at 20 accounts x 80 jobs) - the account COUNT drove
+        the call count here, not the job count per account.
         """
-        wanted_titles = {sanitize_sheet_title(p) for p in profiles}
+        ws_by_title = self._worksheet_map()
+        wanted_titles = [
+            t for t in dict.fromkeys(sanitize_sheet_title(p) for p in profiles) if t in ws_by_title
+        ]
         target_folder = normalize_folder(folder)
         used: set[str] = set()
-        for ws in self._call(self._sh.worksheets):
-            if ws.title not in wanted_titles:
-                continue
-            used |= _extract_used_ids_for_folder(self._call(ws.get_all_values), target_folder)
+        if wanted_titles:
+            ranges = [f"'{title}'!A:L" for title in wanted_titles]
+            response = self._call(self._sh.values_batch_get, ranges)
+            for value_range in response.get("valueRanges", []):
+                used |= _extract_used_ids_for_folder(value_range.get("values", []), target_folder)
         return used
 
-    def push_rows(self, profile: str, rows: list[list[str]]) -> None:
-        if not rows:
-            return
-        ws = self.ensure_account_sheet(profile)
-        self._call(ws.append_rows, rows, value_input_option="RAW")
+    def push_rows_bulk(self, rows_by_profile: list[tuple[str, list[list[str]]]]) -> None:
+        """Push rows to many accounts in the SAME push (the "Push" button on tab "Push
+        Sheet") - resolves ALL target sheets from ONE worksheet listing instead of one
+        metadata fetch per account (see _worksheet_map()'s docstring: a naive per-account
+        Spreadsheet.worksheet(title) lookup re-fetches the ENTIRE sheet metadata each time).
+        Missing sheets (rare in practice - accounts normally already have one from
+        ensure_account_sheet() at import time) are created on demand.
+
+        Still 1 append_rows() call per account with rows (the Sheets API has no batch
+        equivalent for "append" across multiple sheets - unlike reads, which batch via
+        values_batch_get), so total API calls still scale with account count. Paces those
+        calls with a small delay (_PUSH_INTER_ACCOUNT_DELAY_SECONDS) so a large push (e.g.
+        100 accounts) doesn't fire a burst that Google's per-minute quota rejects outright -
+        complements (does not replace) the exponential backoff in _call() for whatever
+        still 429s despite the pacing."""
+        ws_by_title = self._worksheet_map()
+        pending = [(profile, rows) for profile, rows in rows_by_profile if rows]
+        for i, (profile, rows) in enumerate(pending):
+            title = sanitize_sheet_title(profile)
+            ws = ws_by_title.get(title)
+            if ws is None:
+                ws = self._call(self._sh.add_worksheet, title=title, rows=500, cols=12)
+                self._call(ws.update, "A1:L1", [ACCOUNT_SHEET_HEADERS])
+                ws_by_title[title] = ws
+            self._call(ws.append_rows, rows, value_input_option="RAW")
+            if i < len(pending) - 1:
+                time.sleep(_PUSH_INTER_ACCOUNT_DELAY_SECONDS)

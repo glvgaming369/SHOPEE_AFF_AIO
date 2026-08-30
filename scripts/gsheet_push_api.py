@@ -275,11 +275,19 @@ def register(app) -> None:
             ]
 
             allocations = allocate_sequential(pool, accounts)
+            # 1 lan goi duy nhat cho TOAN BO account (khong lap client.push_rows() tung
+            # account 1) - push_rows_bulk() tu resolve worksheet + phan luong (pacing) giua
+            # cac account, thay vi de moi vong lap tu ban 1 loat request lien tuc de bi
+            # Google tra 429 (bao cao thuc te 2026-08-31: 20 account x 80 job/account).
+            client.push_rows_bulk(
+                [
+                    (allocation.profile, [to_sheet_row(r, video_folder) for r in allocation.rows])
+                    for allocation in allocations
+                ]
+            )
             pushed_ids: list[str] = []
             per_account: list[dict] = []
             for allocation in allocations:
-                sheet_rows = [to_sheet_row(r, video_folder) for r in allocation.rows]
-                client.push_rows(allocation.profile, sheet_rows)
                 pushed_ids.extend(r.sp_id for r in allocation.rows)
                 per_account.append(
                     {
