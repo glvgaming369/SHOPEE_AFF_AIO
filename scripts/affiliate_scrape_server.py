@@ -25,7 +25,7 @@ import time
 from datetime import datetime
 
 from flask import Flask, Response, abort, jsonify, render_template, request
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 import chrome_launcher
 import dongvanfb_client
@@ -832,6 +832,14 @@ def mail_accounts_buy():
     })
 
 
+@app.route("/api/mail_accounts/add_manual", methods=["POST"])
+def mail_accounts_add_manual():
+    body = request.get_json(force=True, silent=True) or {}
+    lines = str(body.get("lines_text") or "").splitlines()
+    result = shopee_db.add_mail_accounts_manual(DB_PATH, lines)
+    return jsonify({"ok": True, **result})
+
+
 @app.route("/api/mail_accounts/list", methods=["GET"])
 def mail_accounts_list():
     market = request.args.get("market") or None
@@ -865,6 +873,52 @@ def export_mail_accounts_xlsx():
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+_IMPORT_MAIL_ACCOUNTS_COLUMN_MAP = {
+    "full info": "full_info",
+    "shopee_id": "shopee_id",
+    "device": "device",
+    "slot": "slot",
+    "market": "market",
+    "shopee_code": "shopee_code",
+}
+
+
+@app.route("/api/mail_accounts/import_xlsx", methods=["POST"])
+def import_mail_accounts_xlsx():
+    """Nhap lai file .xlsx dung dinh dang cot cua export_mail_accounts_xlsx() (nut 'Import
+    Excel' canh 'Xuat Excel' tren tab 'Tao tai khoan Shopee') - xem
+    shopee_db.import_mail_accounts_from_rows(). Doc header theo TEN cot (khong phu thuoc thu
+    tu) de khop voi _IMPORT_MAIL_ACCOUNTS_COLUMN_MAP, bo qua cot 'Email'/'PassEmail'/'Thoi
+    gian tao' (khong can, xem docstring ham do)."""
+    file = request.files.get("file")
+    if file is None or not file.filename:
+        return _bad_request("chua chon file .xlsx")
+    try:
+        wb = load_workbook(file, read_only=True, data_only=True)
+    except Exception as e:
+        return _bad_request(f"khong doc duoc file .xlsx: {e}")
+    ws = wb.active
+    rows_iter = ws.iter_rows(values_only=True)
+    header = next(rows_iter, None)
+    if not header:
+        return _bad_request("file rong, khong co dong tieu de")
+    col_index = {str(h).strip().lower(): i for i, h in enumerate(header) if h}
+    if "full info" not in col_index:
+        return _bad_request("thieu cot 'Full info' - file khong dung dinh dang xuat")
+    rows = []
+    for row in rows_iter:
+        if row is None:
+            continue
+        row_dict = {}
+        for header_name, field in _IMPORT_MAIL_ACCOUNTS_COLUMN_MAP.items():
+            idx = col_index.get(header_name)
+            if idx is not None and idx < len(row):
+                row_dict[field] = row[idx]
+        rows.append(row_dict)
+    result = shopee_db.import_mail_accounts_from_rows(DB_PATH, rows)
+    return jsonify({"ok": True, **result})
 
 
 @app.route("/api/mail_accounts/check_shopee_id", methods=["GET"])

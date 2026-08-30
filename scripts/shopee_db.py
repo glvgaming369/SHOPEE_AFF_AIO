@@ -2093,6 +2093,22 @@ def list_video_created_items(db_path):
 # dongvanfb_client.py) - moi dong 1 mail da mua, nguoi dung tu dien shopee_id/device/market
 # sau khi dang ky Shopee bang mail do. ---
 
+def _insert_mail_account_rows(db_path, parsed_rows):
+    if not parsed_rows:
+        return 0
+    conn = _connect(db_path)
+    try:
+        conn.executemany(
+            "insert into mail_accounts (full_info, email, password, refresh_token, "
+            "client_id, account_type, order_code) values (?, ?, ?, ?, ?, ?, ?)",
+            parsed_rows,
+        )
+        conn.commit()
+        return len(parsed_rows)
+    finally:
+        conn.close()
+
+
 def add_mail_accounts_from_buy(db_path, lines, account_type, order_code):
     """Parse tung dong "email|password|refresh_token|client_id" dongvanfb tra ve tu mua
     mail (list_data) va them vao bang. Bo qua dong khong parse duoc. Tra ve so dong da them."""
@@ -2107,17 +2123,92 @@ def add_mail_accounts_from_buy(db_path, lines, account_type, order_code):
             line, parsed["email"], parsed["password"], parsed["refresh_token"],
             parsed["client_id"], account_type, order_code,
         ))
-    if not parsed_rows:
-        return 0
+    return _insert_mail_account_rows(db_path, parsed_rows)
+
+
+def add_mail_accounts_manual(db_path, lines):
+    """Them mail nguoi dung tu dan thu cong (moi dong dung dinh dang "full info" giong mail
+    mua tren dongvanfb: "email|password|refresh_token|client_id" - xem parse_mail_line()).
+    Khac add_mail_accounts_from_buy() o cho day la nguoi dung tu go/dan nen de sai dinh dang
+    hon mail dongvanfb tra ve san, nen tra them so dong loi dinh dang de bao lai cho nguoi
+    dung sua ('invalid'). account_type='manual', order_code=None de phan biet voi mail mua."""
+    import dongvanfb_client
+
+    parsed_rows = []
+    invalid = 0
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        parsed = dongvanfb_client.parse_mail_line(line)
+        if not parsed:
+            invalid += 1
+            continue
+        parsed_rows.append((
+            line, parsed["email"], parsed["password"], parsed["refresh_token"],
+            parsed["client_id"], "manual", None,
+        ))
+    added = _insert_mail_account_rows(db_path, parsed_rows)
+    return {"added": added, "invalid": invalid}
+
+
+def import_mail_accounts_from_rows(db_path, rows):
+    """Nhap lai danh sach 'Tai khoan da tao' tu file .xlsx dung dinh dang cot cua
+    export_mail_accounts_xlsx() (Full info, Email, PassEmail, Shopee_id, Device, Slot,
+    Market, Shopee_code, Thoi gian tao) - dung cho nut 'Import Excel' canh 'Xuat Excel', vd
+    khoi phuc du lieu sau khi bam nham 'Xoa tat ca' hoac chuyen sang may khac. Moi dong la 1
+    dict {"full_info", "shopee_id", "device", "slot", "market", "shopee_code"}. Email/PassEmail
+    trong file KHONG dung truc tiep - luon parse lai tu full_info (nguon du lieu goc, co ca
+    refresh_token/client_id ma 2 cot do khong co) bang dongvanfb_client.parse_mail_line(). Bo
+    qua dong full_info rong/khong parse duoc, VA bo qua dong co full_info DA TON TAI trong
+    bang (tranh nhan doi khi lo import lai cung 1 file). Tra ve {"added", "skipped_duplicate",
+    "invalid"}."""
+    import dongvanfb_client
+
+    def _cell_str(value):
+        """Excel co the tra so (int/float) cho cot tuong "text" (vd slot '1' go lai thanh
+        so) - ep ve str truoc .strip() de tranh AttributeError."""
+        if value is None:
+            return ""
+        return str(value).strip()
+
     conn = _connect(db_path)
     try:
+        existing_full_info = {
+            row[0] for row in conn.execute("select full_info from mail_accounts").fetchall()
+        }
+        parsed_rows = []
+        invalid = 0
+        skipped_duplicate = 0
+        for row in rows:
+            full_info = _cell_str(row.get("full_info"))
+            if not full_info:
+                continue
+            if full_info in existing_full_info:
+                skipped_duplicate += 1
+                continue
+            parsed = dongvanfb_client.parse_mail_line(full_info)
+            if not parsed:
+                invalid += 1
+                continue
+            existing_full_info.add(full_info)
+            parsed_rows.append((
+                full_info, parsed["email"], parsed["password"], parsed["refresh_token"],
+                parsed["client_id"], "import", None,
+                _cell_str(row.get("shopee_id")), _cell_str(row.get("device")),
+                _cell_str(row.get("slot")), _cell_str(row.get("market")) or "PH",
+                _cell_str(row.get("shopee_code")) or None,
+            ))
+        if not parsed_rows:
+            return {"added": 0, "skipped_duplicate": skipped_duplicate, "invalid": invalid}
         conn.executemany(
             "insert into mail_accounts (full_info, email, password, refresh_token, "
-            "client_id, account_type, order_code) values (?, ?, ?, ?, ?, ?, ?)",
+            "client_id, account_type, order_code, shopee_id, device, slot, market, "
+            "shopee_code) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             parsed_rows,
         )
         conn.commit()
-        return len(parsed_rows)
+        return {"added": len(parsed_rows), "skipped_duplicate": skipped_duplicate, "invalid": invalid}
     finally:
         conn.close()
 

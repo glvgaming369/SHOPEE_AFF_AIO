@@ -677,6 +677,19 @@
   </section>
 
   <section>
+    <h2>Thêm Email thủ công</h2>
+    <div class="muted" style="margin-bottom:10px;">
+      Dán mail hàng loạt, mỗi mail một dòng, đúng định dạng "full info" như mail mua trên dongvanfb:
+      <code>email|password|refresh_token|client_id</code>.
+    </div>
+    <textarea id="mailacc-manual-ta" placeholder="email1@outlook.com|password1|refresh_token1|client_id1&#10;email2@outlook.com|password2|refresh_token2|client_id2"></textarea>
+    <div class="row" style="margin-top:10px;">
+      <button onclick="addMailAccountsManual(this)">Thêm Email</button>
+      <span class="muted" id="mailacc-manual-result" style="font-weight:600; color:var(--success-text);"></span>
+    </div>
+  </section>
+
+  <section>
     <h2>Danh sách Email / Tài khoản Shopee</h2>
     <div class="row">
       <select id="mailacc-filter-market" onchange="loadMailAccounts()" style="max-width:180px;">
@@ -694,6 +707,8 @@
       <input type="text" id="mailacc-filter-search" placeholder="Tìm theo email / shopee_id / device..." onkeydown="if(event.key==='Enter') loadMailAccounts()">
       <button class="secondary" onclick="loadMailAccounts()">Lọc danh sách</button>
       <button class="secondary" onclick="exportMailAccountsXlsx()">Xuất Excel (Tài khoản đã tạo)</button>
+      <button class="secondary" onclick="document.getElementById('mailacc-import-file').click()">Import Excel</button>
+      <input type="file" id="mailacc-import-file" accept=".xlsx" style="display:none;" onchange="importMailAccountsXlsx(this)">
       <button class="danger" onclick="clearMailAccounts()">Xóa tất cả</button>
     </div>
     <div class="muted" style="margin-bottom:10px;" id="mailacc-count"></div>
@@ -1777,6 +1792,26 @@ async function buyMailAccounts(btn) {
   });
 }
 
+async function addMailAccountsManual(btn) {
+  const ta = document.getElementById('mailacc-manual-ta');
+  const text = ta.value.trim();
+  const resultEl = document.getElementById('mailacc-manual-result');
+  if (!text) {
+    await customAlert('Chưa dán mail nào.', { danger: true });
+    return;
+  }
+  await withBusy(btn, async () => {
+    try {
+      const r = await api('POST', '/api/mail_accounts/add_manual', { lines_text: text });
+      resultEl.textContent = `Đã thêm ${r.added} Email` + (r.invalid ? `, bỏ qua ${r.invalid} dòng sai định dạng.` : '.');
+      if (r.added > 0) ta.value = '';
+      await loadMailAccounts();
+    } catch (e) {
+      await customAlert('Lỗi thêm Email thủ công: ' + e.message, { danger: true });
+    }
+  });
+}
+
 async function loadMailAccounts() {
   const params = new URLSearchParams();
   const market = document.getElementById('mailacc-filter-market').value;
@@ -1805,7 +1840,8 @@ function renderMailAccounts() {
         <button class="secondary" onclick="copyMailField(${idx}, 'full_info')">Sao chép</button></td>
       <td><b>${a.email}</b>
         <button class="secondary" onclick="copyMailField(${idx}, 'email')">Sao chép</button></td>
-      <td><code>${a.password || '-'}</code></td>
+      <td><code>${a.password || '-'}</code>
+        ${a.password ? `<button class="secondary" onclick="copyMailField(${idx}, 'password')">Sao chép</button>` : ''}</td>
       <td><input type="text" value="${(a.shopee_id || '').replace(/"/g, '&quot;')}" onchange="updateShopeeId(${a.id}, this)" placeholder="Shopee ID" style="min-width:160px; width:100%;"></td>
       <td><input type="text" value="${(a.device || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'device', this.value)" placeholder="Tên thiết bị" style="min-width:160px; width:100%;"></td>
       <td><input type="text" value="${(a.slot || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'slot', this.value)" placeholder="Slot" style="min-width:65px; width:65px; text-align:center;"></td>
@@ -1916,6 +1952,28 @@ async function deleteMailAccount(id) {
 
 function exportMailAccountsXlsx() {
   window.location.href = '/api/mail_accounts/export.xlsx';
+}
+
+async function importMailAccountsXlsx(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const resp = await fetch('/api/mail_accounts/import_xlsx', { method: 'POST', body: formData });
+    const json = await resp.json();
+    if (!resp.ok) throw new Error(json.error || 'Lỗi không xác định từ máy chủ');
+    await customAlert(
+      `Đã import ${json.added} Email.` +
+      (json.skipped_duplicate ? ` Bỏ qua ${json.skipped_duplicate} dòng đã tồn tại.` : '') +
+      (json.invalid ? ` Bỏ qua ${json.invalid} dòng sai định dạng.` : '')
+    );
+    await loadMailAccounts();
+  } catch (e) {
+    await customAlert('Lỗi import Excel: ' + e.message, { danger: true });
+  } finally {
+    input.value = '';
+  }
 }
 
 async function clearMailAccounts() {
