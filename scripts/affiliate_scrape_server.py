@@ -858,11 +858,11 @@ def export_mail_accounts_xlsx():
     wb = Workbook()
     ws = wb.active
     ws.title = "Tai khoan Shopee"
-    ws.append(["Full info", "Email", "PassEmail", "Shopee_id", "Device", "Slot", "Market", "Shopee_code", "Thoi gian tao"])
+    ws.append(["Full info", "Email", "PassEmail", "Shopee_id", "Device", "Profile", "Slot", "Market", "Shopee_code", "Thoi gian tao"])
     for a in accounts:
         ws.append([
             a["full_info"], a["email"], a["password"], a["shopee_id"],
-            a["device"], a["slot"], a["market"], a["shopee_code"], a["created_at"],
+            a["device"], a["profile"], a["slot"], a["market"], a["shopee_code"], a["created_at"],
         ])
     buf = io.BytesIO()
     wb.save(buf)
@@ -879,6 +879,7 @@ _IMPORT_MAIL_ACCOUNTS_COLUMN_MAP = {
     "full info": "full_info",
     "shopee_id": "shopee_id",
     "device": "device",
+    "profile": "profile",
     "slot": "slot",
     "market": "market",
     "shopee_code": "shopee_code",
@@ -937,7 +938,7 @@ def mail_accounts_update(account_id):
     row = shopee_db.update_mail_account_fields(
         DB_PATH, account_id,
         shopee_id=body.get("shopee_id"), device=body.get("device"),
-        slot=body.get("slot"), market=body.get("market"),
+        profile=body.get("profile"), slot=body.get("slot"), market=body.get("market"),
     )
     if row is None:
         return _bad_request(f"khong tim thay mail id={account_id}")

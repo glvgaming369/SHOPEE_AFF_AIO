@@ -132,6 +132,7 @@ create table if not exists mail_accounts (
     order_code text,
     shopee_id text default '',
     device text default '',
+    profile text default '',
     slot text default '',
     market text default 'PH',
     shopee_code text,
@@ -357,6 +358,8 @@ def init_db(db_path=DB_PATH_DEFAULT):
     existing_mail_cols = {row[1] for row in conn.execute("pragma table_info(mail_accounts)").fetchall()}
     if "slot" not in existing_mail_cols:
         conn.execute("alter table mail_accounts add column slot text default ''")
+    if "profile" not in existing_mail_cols:
+        conn.execute("alter table mail_accounts add column profile text default ''")
     conn.execute(
         "create index if not exists idx_mail_accounts_market on mail_accounts(market)"
     )
@@ -2154,15 +2157,15 @@ def add_mail_accounts_manual(db_path, lines):
 
 def import_mail_accounts_from_rows(db_path, rows):
     """Nhap lai danh sach 'Tai khoan da tao' tu file .xlsx dung dinh dang cot cua
-    export_mail_accounts_xlsx() (Full info, Email, PassEmail, Shopee_id, Device, Slot,
-    Market, Shopee_code, Thoi gian tao) - dung cho nut 'Import Excel' canh 'Xuat Excel', vd
-    khoi phuc du lieu sau khi bam nham 'Xoa tat ca' hoac chuyen sang may khac. Moi dong la 1
-    dict {"full_info", "shopee_id", "device", "slot", "market", "shopee_code"}. Email/PassEmail
-    trong file KHONG dung truc tiep - luon parse lai tu full_info (nguon du lieu goc, co ca
-    refresh_token/client_id ma 2 cot do khong co) bang dongvanfb_client.parse_mail_line(). Bo
-    qua dong full_info rong/khong parse duoc, VA bo qua dong co full_info DA TON TAI trong
-    bang (tranh nhan doi khi lo import lai cung 1 file). Tra ve {"added", "skipped_duplicate",
-    "invalid"}."""
+    export_mail_accounts_xlsx() (Full info, Email, PassEmail, Shopee_id, Device, Profile,
+    Slot, Market, Shopee_code, Thoi gian tao) - dung cho nut 'Import Excel' canh 'Xuat Excel',
+    vd khoi phuc du lieu sau khi bam nham 'Xoa tat ca' hoac chuyen sang may khac. Moi dong la
+    1 dict {"full_info", "shopee_id", "device", "profile", "slot", "market", "shopee_code"}.
+    Email/PassEmail trong file KHONG dung truc tiep - luon parse lai tu full_info (nguon du
+    lieu goc, co ca refresh_token/client_id ma 2 cot do khong co) bang
+    dongvanfb_client.parse_mail_line(). Bo qua dong full_info rong/khong parse duoc, VA bo
+    qua dong co full_info DA TON TAI trong bang (tranh nhan doi khi lo import lai cung 1
+    file). Tra ve {"added", "skipped_duplicate", "invalid"}."""
     import dongvanfb_client
 
     def _cell_str(value):
@@ -2196,15 +2199,16 @@ def import_mail_accounts_from_rows(db_path, rows):
                 full_info, parsed["email"], parsed["password"], parsed["refresh_token"],
                 parsed["client_id"], "import", None,
                 _cell_str(row.get("shopee_id")), _cell_str(row.get("device")),
-                _cell_str(row.get("slot")), _cell_str(row.get("market")) or "PH",
+                _cell_str(row.get("profile")), _cell_str(row.get("slot")),
+                _cell_str(row.get("market")) or "PH",
                 _cell_str(row.get("shopee_code")) or None,
             ))
         if not parsed_rows:
             return {"added": 0, "skipped_duplicate": skipped_duplicate, "invalid": invalid}
         conn.executemany(
             "insert into mail_accounts (full_info, email, password, refresh_token, "
-            "client_id, account_type, order_code, shopee_id, device, slot, market, "
-            "shopee_code) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "client_id, account_type, order_code, shopee_id, device, profile, slot, "
+            "market, shopee_code) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             parsed_rows,
         )
         conn.commit()
@@ -2267,23 +2271,27 @@ def get_mail_account(db_path, account_id):
         conn.close()
 
 
-def update_mail_account_fields(db_path, account_id, shopee_id=None, device=None, slot=None, market=None):
+def update_mail_account_fields(db_path, account_id, shopee_id=None, device=None, profile=None, slot=None, market=None):
     """Cap nhat MOT PHAN cot nguoi dung tu nhap (tham so None = giu nguyen), dung cho nut
-    luu tung dong tren UI khi doi Shopee_id/Device/Slot/Market."""
+    luu tung dong tren UI khi doi Shopee_id/Device/Profile/Slot/Market."""
     current = get_mail_account(db_path, account_id)
     if not current:
         return None
     new_vals = {
         "shopee_id": shopee_id if shopee_id is not None else current["shopee_id"],
         "device": device if device is not None else current["device"],
+        "profile": profile if profile is not None else current["profile"],
         "slot": slot if slot is not None else current["slot"],
         "market": market if market is not None else current["market"],
     }
     conn = _connect(db_path)
     try:
         conn.execute(
-            "update mail_accounts set shopee_id=?, device=?, slot=?, market=? where id=?",
-            (new_vals["shopee_id"], new_vals["device"], new_vals["slot"], new_vals["market"], account_id),
+            "update mail_accounts set shopee_id=?, device=?, profile=?, slot=?, market=? where id=?",
+            (
+                new_vals["shopee_id"], new_vals["device"], new_vals["profile"],
+                new_vals["slot"], new_vals["market"], account_id,
+            ),
         )
         conn.commit()
     finally:

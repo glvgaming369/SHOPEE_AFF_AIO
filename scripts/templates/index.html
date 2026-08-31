@@ -716,7 +716,7 @@
       <thead>
         <tr id="mailacc-thead-row">
           <th>Thông tin đầy đủ</th><th>Email</th><th>Mật khẩu Mail</th><th>Shopee ID</th>
-          <th>Thiết bị</th><th>Slot</th><th>Thị trường</th><th>Mã Shopee</th><th>Thao tác</th><th>Thời gian tạo</th>
+          <th>Thiết bị</th><th>Profile</th><th>Slot</th><th>Thị trường</th><th>Mã Shopee</th><th>Thao tác</th><th>Thời gian tạo</th>
         </tr>
       </thead>
       <tbody id="mailacc-tbody"></tbody>
@@ -1716,6 +1716,7 @@ const MAILACC_COLUMNS = [
   { field: 'password', label: 'Mật khẩu Mail' },
   { field: 'shopee_id', label: 'Shopee ID' },
   { field: 'device', label: 'Thiết bị' },
+  { field: 'profile', label: 'Profile' },
   { field: 'slot', label: 'Slot' },
   { field: 'market', label: 'Thị trường' },
   { field: 'shopee_code', label: 'Mã Shopee' },
@@ -1844,6 +1845,7 @@ function renderMailAccounts() {
         ${a.password ? `<button class="secondary" onclick="copyMailField(${idx}, 'password')">Sao chép</button>` : ''}</td>
       <td><input type="text" value="${(a.shopee_id || '').replace(/"/g, '&quot;')}" onchange="updateShopeeId(${a.id}, this)" placeholder="Shopee ID" style="min-width:160px; width:100%;"></td>
       <td><input type="text" value="${(a.device || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'device', this.value)" placeholder="Tên thiết bị" style="min-width:160px; width:100%;"></td>
+      <td><input type="text" value="${(a.profile || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'profile', this.value)" placeholder="Profile" style="min-width:160px; width:100%;"></td>
       <td><input type="text" value="${(a.slot || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'slot', this.value)" placeholder="Slot" style="min-width:65px; width:65px; text-align:center;"></td>
       <td>
         <select onchange="updateMailAccountField(${a.id}, 'market', this.value)">
@@ -1858,7 +1860,7 @@ function renderMailAccounts() {
       </td>
       <td class="muted" style="white-space:nowrap;">${a.created_at || '-'}</td>
     </tr>
-  `).join('') || '<tr><td colspan="10" class="muted">Chưa có Email nào.</td></tr>';
+  `).join('') || '<tr><td colspan="11" class="muted">Chưa có Email nào.</td></tr>';
 }
 
 function copyMailField(idx, field) {
