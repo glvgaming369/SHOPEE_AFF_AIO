@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Shopee Affiliate Offer Group Scraper
 // @namespace    shopee-crawl
-// @version      0.13
-// @description  Tu 1 link goc (root), xac thuc du 3 tieu chi (aff_7days/sold/seller_commission). Root DAT thi lay them 5 san pham tuong tu dat 2 tieu chi (sold/seller_commission) cho du nhom 6 link; root KHONG DAT thi loai luon, khong lay tuong tu. Dong bo qua local server (affiliate_scrape_server.py) de gan group nguyen tu khi chay nhieu Chrome profile song song.
+// @version      0.16
+// @description  Tu 1 link goc (root), xac thuc du 3 tieu chi (aff_7days/sold/seller_commission) qua DUY NHAT 1 request that toi Shopee. Root DAT thi xet toi 5 san pham tuong tu co san trong CHINH response cua root (similar_product_offers - KHONG goi them request that nao khac) dat 2 tieu chi (sold/seller_commission) cho du nhom 6 link; root KHONG DAT thi loai luon. Dong bo qua local server (affiliate_scrape_server.py) de gan group nguyen tu khi chay nhieu Chrome profile song song.
 // @match        https://affiliate.shopee.vn/*
 // @match        https://affiliate.shopee.sg/*
 // @match        https://affiliate.shopee.ph/*
@@ -23,45 +23,51 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.13'; // khop @version o header - doi ca 2 cho khi sua script
+  const SCRIPT_VERSION = '0.16'; // khop @version o header - doi ca 2 cho khi sua script
   const ENDPOINT_MARKER = '/api/v3/offer/product';
   // GROUP_TARGET=6: 1 root (dat du 3 tieu chi) + 5 related (chi can dat 2 tieu chi
   // sold/seller_commission - xem select_l1_l2_candidates.passes_criteria_related() ben
   // server). Doi tu 60->6 theo yeu cau nguoi dung 2026-08-29 - video chi con tao tu link
-  // root (xem list_video_push_candidates()), nen khong can gom nhieu related nhu truoc.
+  // root (xem list_video_push_candidates()), nen khong con can gom nhieu related nhu truoc.
   const GROUP_TARGET = 6;
-  // Giam tu 500->80 vi gio chi can 5 related (thay vi 59) - root tot nhung "vung lan can"
-  // qua similar_product_offers toan hang khong dat thi nen dung som, chuyen root khac,
-  // thay vi ton toi da 500 request that vo ich cho 1 root.
-  const CALL_CAP_PER_ROOT = 80;
   // Gia tri MAC DINH (dung khi nguoi dung chua tung nhap tren panel, hoac nhap gia tri
-  // khong hop le) - CHINH tra ve dung luc chay lay tu GM_getValue qua getCallDelayRangeMs()/
-  // getRootDelayRangeMs() ben duoi, cho phep nguoi dung tu chinh ngay tren panel (o
-  // "aog-call-delay-min/max", "aog-root-delay-min/max") ma khong can sua code/cap nhat
-  // script - xem yeu cau nguoi dung 2026-08-29 (de anti-captcha tuy may/tai khoan/thoi diem
-  // khac nhau ma khong phai fix cung 1 gia tri cho tat ca).
-  const CALL_DELAY_MIN_DEFAULT_MS = 400;
-  const CALL_DELAY_MAX_DEFAULT_MS = 900;
-  // Delay GIUA 2 ROOT khac nhau (KHAC voi CALL_DELAY o tren - do la delay giua 2 candidate
-  // CUNG 1 root). Can rieng vi tu khi bo BFS da tang (chi con 1 lan goi similar_product_offers
-  // cua root, xem runBfsForRoot()), 1 root co the chi ton DUY NHAT 1 request that (root khong
-  // dat chuan -> loai luon, xem nhanh "!rootVerify.passes"). Neu nhieu root lien tiep deu roi
-  // vao truong hop nay (thuong gap khi danh muc/nguon root chat luong thap), request that toi
-  // Shopee se ban ra LIEN TUC gan nhu khong nghi - de bi Shopee nghi ngo/chan captcha hon
-  // nhieu so voi truoc day (moi root cu it nhat cung ton vai giay xu ly BFS da tang). Don vi
-  // GIAY (khac CALL_DELAY don vi ms o tren) - de nguoi dung nhap tren panel de doc hon voi
-  // khoang gia tri lon nay.
+  // khong hop le) - CHINH tra ve dung luc chay lay tu GM_getValue qua getRootDelayRangeMs()
+  // ben duoi, cho phep nguoi dung tu chinh ngay tren panel (o "aog-root-delay-min/max") ma
+  // khong can sua code/cap nhat script - xem yeu cau nguoi dung 2026-08-29 (de anti-captcha
+  // tuy may/tai khoan/thoi diem khac nhau ma khong phai fix cung 1 gia tri cho tat ca).
+  // Delay GIUA 2 ROOT khac nhau. Sau khi bo han request that cho tung san pham tuong tu
+  // (theo yeu cau nguoi dung 2026-08-31 - da xac nhan similar_product_offers.list tra ve
+  // TU response cua root da co san day du du lieu can (batch_item_for_item_card_full +
+  // commission_rate), KHONG can goi lai offer/product rieng cho tung candidate nua, xem
+  // expandFrom() ben duoi), 1 root gio CHI CON DUY NHAT 1 request that toi Shopee (chinh
+  // request xac thuc root). Neu nhieu root lien tiep deu roi vao truong hop nay (thuong gap
+  // khi danh muc/nguon root chat luong thap), request that toi Shopee se ban ra LIEN TUC
+  // gan nhu khong nghi - de bi Shopee nghi ngo/chan captcha hon nhieu so voi truoc day, nen
+  // delay giua 2 root la hang phong thu DUY NHAT con lai (khong con CALL_DELAY giua 2
+  // candidate nua vi khong con request that nao o buoc do de can gian cach). Don vi GIAY -
+  // de nguoi dung nhap tren panel de doc hon voi khoang gia tri lon nay.
   const ROOT_DELAY_MIN_DEFAULT_S = 2.5;
   const ROOT_DELAY_MAX_DEFAULT_S = 6;
   const POLL_ASSIGNMENT_MS = 4000; // khoang cach hoi server "co viec chua" luc dang ranh
 
   const SERVER_URL_KEY = 'aog_server_url';
   const DEVICE_KEY_KEY = 'aog_device_key';
-  const CALL_DELAY_MIN_KEY = 'aog_call_delay_min_ms';
-  const CALL_DELAY_MAX_KEY = 'aog_call_delay_max_ms';
   const ROOT_DELAY_MIN_KEY = 'aog_root_delay_min_s';
   const ROOT_DELAY_MAX_KEY = 'aog_root_delay_max_s';
   const STOP_KEY = 'aog_stop';
+  // Ghi lai request that GAN NHAT toi callOfferApi() (truoc/sau khi goi) qua GM_setValue -
+  // KHONG dung bien module-level thuong vi neu Shopee dieu huong (navigate) that su sang
+  // "Page Unavailable" ngay giua luc dang cho response, toan bo JS context (bien trong RAM)
+  // mat sach ngay lap tuc, chi con GM storage (rieng cua Tampermonkey, song sot qua dieu
+  // huong/tai trang) la con giu duoc "dang xu ly item nao luc do" de dieu tra sau (xem
+  // recordCallBefore/recordCallAfter, setupPageUnavailableWatcher() ben duoi - dieu tra thuc
+  // te 2026-08-31: script goi callOfferApi binh thuong (code=0) nhung tab van bi chuyen sang
+  // "Page Unavailable" GIUA LUC dang chay that (khong tai hien duoc khi test rieng le tu
+  // DevTools Console), nen can bang chung tu chinh lan chay that gay loi).
+  const LAST_CALL_KEY = 'aog_last_api_call';
+  const RECENT_CALLS_KEY = 'aog_recent_api_calls';
+  const RECENT_CALLS_MAX = 8;
+  const PAGE_UNAVAILABLE_INCIDENT_KEY = 'aog_page_unavailable_incident';
   const SERVER_URL_DEFAULT = 'http://127.0.0.1:8877';
   const OWN_SCRIPT_FILE = 'tampermonkey_affiliate_group_scraper.user.js';
   const LAST_UPDATE_CHECK_KEY = 'aog_last_update_check';
@@ -126,16 +132,6 @@
     return { min, max };
   }
 
-  // Delay giua 2 candidate CUNG 1 root (don vi ms) - nguoi dung tu nhap tren panel (o
-  // "aog-call-delay-min/max"), luu qua GM_setValue.
-  function getCallDelayRangeMs() {
-    return sanitizeDelayRange(
-      GM_getValue(CALL_DELAY_MIN_KEY, CALL_DELAY_MIN_DEFAULT_MS),
-      GM_getValue(CALL_DELAY_MAX_KEY, CALL_DELAY_MAX_DEFAULT_MS),
-      CALL_DELAY_MIN_DEFAULT_MS, CALL_DELAY_MAX_DEFAULT_MS
-    );
-  }
-
   // Delay giua 2 ROOT khac nhau (nguoi dung nhap tren panel theo GIAY cho de doc, xem
   // "aog-root-delay-min/max") - tra ve da quy doi sang ms de dung thang voi randomDelay().
   function getRootDelayRangeMs() {
@@ -147,17 +143,59 @@
     return { min: min * 1000, max: max * 1000 };
   }
 
+  // Ghi lai TRUOC khi ban request that (khong doi response) - de neu Shopee dieu huong
+  // ngay giua luc cho fetch(), van con dau vet "dang xu ly item nao" trong GM storage.
+  function recordCallBefore(itemId, phase) {
+    try {
+      GM_setValue(LAST_CALL_KEY, JSON.stringify({
+        itemId, phase, market: currentMarket, href: location.href, ts: Date.now(),
+      }));
+    } catch (e) { /* khong lam gian doan luong chinh vi loi ghi log dieu tra */ }
+  }
+
+  // Ghi lai SAU khi nhan response (status/code/msg - KHONG luu ca rawText de tranh GM
+  // storage phinh to) vao 1 hang doi cap RECENT_CALLS_MAX phan tu, dung de xem lai "vai
+  // request truoc do la gi" khi dieu tra su co Page Unavailable.
+  function recordCallAfter(itemId, phase, status, code, msg) {
+    try {
+      let list = [];
+      try { list = JSON.parse(GM_getValue(RECENT_CALLS_KEY, '[]')) || []; } catch (e) { list = []; }
+      list.push({ itemId, phase, status, code, msg, ts: Date.now() });
+      while (list.length > RECENT_CALLS_MAX) list.shift();
+      GM_setValue(RECENT_CALLS_KEY, JSON.stringify(list));
+    } catch (e) { /* khong lam gian doan luong chinh vi loi ghi log dieu tra */ }
+  }
+
   // ---- Goi Shopee that: cung origin voi trang (affiliate.shopee.*) nen fetch() thuong
   // la du, cookie tu dinh kem, khong can GM_xmlhttpRequest o day (khac phan goi local
-  // server ben duoi - do la KHAC origin nen bat buoc phai qua GM_xmlhttpRequest de ne CORS). ----
-  async function callOfferApi(itemId) {
+  // server ben duoi - do la KHAC origin nen bat buoc phai qua GM_xmlhttpRequest de ne CORS).
+  // phase: 'root' (xac thuc chinh root) hoac 'candidate' (san pham tuong tu) - chi de ghi
+  // log dieu tra (recordCallBefore/After), khong anh huong logic goi API. ----
+  async function callOfferApi(itemId, phase) {
+    recordCallBefore(itemId, phase || 'candidate');
     const url = new URL(location.origin + ENDPOINT_MARKER);
     url.searchParams.set('item_id', String(itemId));
     // QUAN TRONG: unsafeWindow.fetch (khong phai fetch thuong cua sandbox Tampermonkey) -
     // da xac nhan qua thuc te la fetch thuong bi Shopee tra 403 ngay lan goi dau (thieu
     // gi do o request that su di ra, du credentials:'include' - unsafeWindow.fetch khop
     // dung request cua chinh trang, giong het probe script da test OK truoc do).
-    const resp = await unsafeWindow.fetch(url.toString(), { method: 'GET', credentials: 'include' });
+    //
+    // 2 header duoi day BAT BUOC phai co - dieu tra 2026-08-31 (so sanh cURL request THAT
+    // cua trang vs request cua script qua DevTools): thieu 'affiliate-program-type' VA
+    // 'accept' sai gia tri (chi '*/*' thay vi dung 'application/json, text/plain, */*' nhu
+    // trang that gui) la 2 khac biet TINH duy nhat tim thay (cac header con lai deu khop,
+    // ke ca cookie/token dong af-ac-enc-*/x-sap-*). Day rat co the la dau hieu "cung" de
+    // WAF cua Shopee nhan dien request KHONG phai do JS cua chinh trang phat ra, khac voi
+    // token dong (thay doi moi request, ca 2 phia deu co) - nghi van chinh cho viec tab bi
+    // chuyen sang shopee.<market>/verify/traffic/error sau vai request lien tiep.
+    const resp = await unsafeWindow.fetch(url.toString(), {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        'accept': 'application/json, text/plain, */*',
+        'affiliate-program-type': '1',
+      },
+    });
     const rawText = await resp.text();
     let json = null;
     try {
@@ -165,6 +203,7 @@
     } catch (e) {
       // khong phai JSON - co the la trang chan/captcha/loi HTML
     }
+    recordCallAfter(itemId, phase || 'candidate', resp.status, json && json.code, json && json.msg);
     return { status: resp.status, json, rawText };
   }
 
@@ -297,19 +336,19 @@
     }
   }
 
-  // ---- Xu ly chinh cho 1 root: xac thuc root, neu dat thi lay 1 lop san pham tuong tu
-  // (KHONG con da tang/BFS truoc day) tu chinh similar_product_offers cua root ----
+  // ---- Xu ly chinh cho 1 root: xac thuc root (DUY NHAT 1 request that), neu dat thi xet
+  // toi 5 san pham tuong tu CO SAN trong chinh response cua root (similar_product_offers) -
+  // KHONG con goi them request that nao khac cho tung candidate (xem expandFrom() ben duoi) ----
   async function runBfsForRoot(root, log, soldMin) {
     const groupid = root.itemid;
-    let calls = 0;
     let memberCount = 0;
 
     log(`=== Bat dau root ${groupid} (${root.product_link || ''}) ===`);
     await heartbeat('working', groupid);
 
-    // Buoc 1: xac thuc chinh root
-    calls++;
-    const rootResp = await callOfferApi(groupid);
+    // Buoc 1: xac thuc chinh root - DUY NHAT request that cua ca ham nay tu sau khi bo goi
+    // rieng cho tung candidate (xem ghi chu ROOT_DELAY_MIN_DEFAULT_S).
+    const rootResp = await callOfferApi(groupid, 'root');
     if (looksBlocked(rootResp.status, rootResp.json)) {
       log(`!!! Nghi bi chan/captcha khi goi root (HTTP ${rootResp.status}). Noi dung tra ve: ${rootResp.rawText.slice(0, 300)}`);
       log('Dung lai, tu kiem tra tab nay roi bam Start lai de tiep tuc.');
@@ -351,6 +390,16 @@
     let queue = [];
     const seenLocal = new Set([groupid]); // tranh tu xep hang doi lai chinh no/trung trong 1 lan chay
 
+    // QUAN TRONG (dieu tra 2026-08-31 - nguoi dung xac nhan): moi phan tu trong
+    // similar_product_offers.list la CUNG 1 kieu du lieu "OfferItem" nhu chinh root (co san
+    // item_id/product_link/batch_item_for_item_card_full/commission_rate), TUC LA DA DU
+    // truong can de shopee_db.map_v2_data_to_row() tinh sold/seller_commission ma KHONG can
+    // goi lai offer/product rieng cho tung candidate. Truoc day ham nay goi callOfferApi()
+    // cho tung candidate de lay offer_data day du - do la nguon phat sinh them (toi 5) request
+    // that/root, va dieu tra thuc te cho thay chinh o buoc do da xay ra su co Shopee tu chuyen
+    // tab sang "Page Unavailable" giua luc chay that (khong tai hien duoc khi goi rieng le tu
+    // DevTools Console). Bo han buoc goi rieng nay: dung THANG item trong similar_product_offers
+    // lam offer_data gui cho /api/items/verify.
     async function expandFrom(offerData) {
       const similar = (offerData.similar_product_offers && offerData.similar_product_offers.list) || [];
       if (!similar.length) {
@@ -362,58 +411,46 @@
       let added = 0;
       let skippedTaken = 0;
       let skippedSold = 0;
+      let missingCommission = 0;
       for (const item of similar) {
         const itemId = item.item_id;
         if (!itemId || seenLocal.has(itemId)) continue;
         if (!claimedSet.has(itemId)) { skippedTaken++; continue; } // da thuoc nhom khac
         const sold = (item.batch_item_for_item_card_full || {}).sold || 0;
-        if (sold <= soldMin) { skippedSold++; continue; } // loc mien phi truoc (khop dieu kien loc dang cau hinh o server), khoi ton request that
+        if (sold <= soldMin) { skippedSold++; continue; } // loc mien phi truoc (khop dieu kien loc dang cau hinh o server)
+        if (!item.commission_rate) missingCommission++; // xem canh bao duoi - phong truong hop du lieu thuc te khac gia dinh
         seenLocal.add(itemId);
-        queue.push({ item_id: itemId, sold });
+        queue.push({ item_id: itemId, sold, offerData: item });
         added++;
       }
       log(`  Nhan ${similar.length} ung vien: +${added} vao hang doi, ${skippedTaken} da thuoc nhom khac, ${skippedSold} bi loai vi sold<=${soldMin}.`);
+      if (missingCommission > 0) {
+        log(`  !!! CANH BAO: ${missingCommission} ung vien thieu 'commission_rate' trong du lieu similar_product_offers - se tinh hoa hong=0 nen de bi loai oan. Bao lai neu nhom hay bi thieu related bat thuong.`);
+      }
     }
 
-    // CHI seed ung vien tu DUY NHAT 1 lan goi root (similar_product_offers cua chinh root) -
+    // CHI xet ung vien tu DUY NHAT 1 lan goi root (similar_product_offers cua chinh root) -
     // theo yeu cau nguoi dung 2026-08-29: KHONG con BFS da tang (khong goi expandFrom() tiep
     // tren du lieu cua tung related nhu truoc). Neu danh sach nay khong du 5 ung vien dat
     // chuan thi CHAP NHAN so luong hien co roi ket thuc luon (xem cuoi ham) - khong tim tiep.
     await expandFrom(rootData);
 
-    while (memberCount + rootCountsAsOne < GROUP_TARGET && queue.length > 0 && calls < CALL_CAP_PER_ROOT) {
+    while (memberCount + rootCountsAsOne < GROUP_TARGET && queue.length > 0) {
       if (isStopped()) {
         log('Da dung theo yeu cau nguoi dung.');
         return { finished: false, reason: 'stopped', memberCount };
       }
       queue.sort((a, b) => b.sold - a.sold);
       const next = queue.shift();
-      await heartbeat('working', groupid);
 
-      calls++;
-      const resp = await callOfferApi(next.item_id);
-      if (looksBlocked(resp.status, resp.json)) {
-        log(`!!! Nghi bi chan/captcha luc xu ly ${next.item_id} (HTTP ${resp.status}, request thu ${calls}). Noi dung tra ve: ${resp.rawText.slice(0, 300)}`);
-        log('Dung lai, tu kiem tra tab nay roi bam Start lai de tiep tuc.');
-        queue.unshift(next); // giu lai, khong mat ung vien nay khi resume
-        await heartbeat('blocked', groupid);
-        return { finished: false, reason: 'blocked', memberCount };
-      }
-      if (!resp.json || resp.json.code !== 0) {
-        log(`  ${next.item_id}: loi API, bo qua.`);
-        continue;
-      }
-      const data = resp.json.data;
-      const verify = await serverRequest('POST', '/api/items/verify', { groupid, offer_data: data });
+      // KHONG con request that o day - verify THANG bang du lieu co san tu similar_product_offers.
+      const verify = await serverRequest('POST', '/api/items/verify', { groupid, offer_data: next.offerData });
       if (verify.outcome === 'assigned' || verify.outcome === 'already_member') {
         memberCount = verify.group_member_count;
-        log(`  [${calls}/${CALL_CAP_PER_ROOT}] ${next.item_id}: DAT -> ${memberCount + rootCountsAsOne}/${GROUP_TARGET}`);
+        log(`  ${next.item_id}: DAT -> ${memberCount + rootCountsAsOne}/${GROUP_TARGET}`);
       } else {
-        log(`  [${calls}/${CALL_CAP_PER_ROOT}] ${next.item_id}: ${verify.outcome}`);
+        log(`  ${next.item_id}: ${verify.outcome}`);
       }
-
-      const callDelay = getCallDelayRangeMs();
-      await randomDelay(callDelay.min, callDelay.max);
     }
 
     // Het ung vien tu danh sach tuong tu cua root (hoac da du GROUP_TARGET) -> KET THUC
@@ -510,6 +547,65 @@
     }
   }
 
+  // ---- Phat hien + ghi lai su co Shopee tu chuyen tab sang "Page Unavailable / Sorry,
+  // something went wrong" GIUA LUC dang chay that (da xac nhan qua thuc te 2026-08-31: goi
+  // callOfferApi() rieng le tu DevTools Console tra ve code=0 binh thuong, KHONG tai hien
+  // duoc loi nay - nghia la su co chi xay ra trong dieu kien chay that cua vong lap, can bat
+  // qua tai cho luc no xay ra thay vi doan). Dung GM storage (khong phai bien RAM) vi neu day
+  // la dieu huong that (khong phai SPA render lai tai cho), toan bo JS context mat ngay khi
+  // dieu huong bat dau - chi con GM storage la song sot duoc de xem lai sau. ----
+  function pageLooksUnavailable() {
+    const body = document.body;
+    if (!body) return false;
+    const text = body.innerText || '';
+    return /page unavailable/i.test(text) && /something went wrong/i.test(text);
+  }
+
+  function recordPageUnavailableIncident(trigger) {
+    try {
+      // Chi ghi 1 lan/1 phut - tranh MutationObserver ban lien tuc de mat du lieu "lastCall"
+      // goc (ghi de lien tuc se mat dau vet request THUC SU gay ra su co).
+      let existing = null;
+      try { existing = JSON.parse(GM_getValue(PAGE_UNAVAILABLE_INCIDENT_KEY, 'null')); } catch (e) { existing = null; }
+      if (existing && Date.now() - (existing.ts || 0) < 60000) return;
+
+      let lastCall = null;
+      let recentCalls = [];
+      try { lastCall = JSON.parse(GM_getValue(LAST_CALL_KEY, 'null')); } catch (e) { /* bo qua */ }
+      try { recentCalls = JSON.parse(GM_getValue(RECENT_CALLS_KEY, '[]')) || []; } catch (e) { /* bo qua */ }
+
+      const incident = { ts: Date.now(), trigger, href: location.href, market: currentMarket, lastCall, recentCalls };
+      GM_setValue(PAGE_UNAVAILABLE_INCIDENT_KEY, JSON.stringify(incident));
+      console.error('[offer-group-scraper] !!! PHAT HIEN "Page Unavailable" - da luu chi tiet su co (bam nut "Xem sự cố Page Unavailable" tren panel de xem lai, ke ca sau khi tai trang). Chi tiet:', incident);
+      requestStop(); // dung vong lap ngay - tranh tiep tuc chay tren 1 tab da vo, gay them request vo ich
+    } catch (e) {
+      console.error('[offer-group-scraper] Loi ghi lai su co Page Unavailable: ' + e.message);
+    }
+  }
+
+  function setupPageUnavailableWatcher() {
+    if (pageLooksUnavailable()) recordPageUnavailableIncident('phat_hien_ngay_luc_tai_trang');
+    if (!document.body) return;
+    const mo = new MutationObserver(() => {
+      if (pageLooksUnavailable()) recordPageUnavailableIncident('phat_hien_qua_MutationObserver');
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function showLastPageUnavailableIncident() {
+    let raw = GM_getValue(PAGE_UNAVAILABLE_INCIDENT_KEY, '');
+    if (!raw) {
+      alert('Chua ghi nhan su co "Page Unavailable" nao.');
+      return;
+    }
+    let incident;
+    try { incident = JSON.parse(raw); } catch (e) { incident = null; }
+    const text = incident ? JSON.stringify(incident, null, 2) : raw;
+    log('=== Chi tiet su co "Page Unavailable" gan nhat (copy gui lai de kiem tra) ===');
+    log(text);
+    log('=== Het chi tiet su co ===');
+  }
+
   function injectPanel() {
     if (document.getElementById(PANEL_ID) || !document.body) return;
 
@@ -527,6 +623,7 @@
       <div style="font-size:11px;color:#666;margin-bottom:6px;">Market: <b>${currentMarket || 'KHONG NHAN DIEN DUOC'}</b></div>
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
         <button id="aog-check-update-btn" style="padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer;background:#f2f2f2;color:#222;border:1px solid #ccc;border-radius:4px;">🔄 Kiểm tra cập nhật</button>
+        <button id="aog-show-incident-btn" style="padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer;background:#f2f2f2;color:#222;border:1px solid #ccc;border-radius:4px;" title="Xem chi tiet lan gan nhat Shopee chuyen tab nay sang 'Page Unavailable'">⚠️ Xem sự cố Page Unavailable</button>
         <span id="aog-update-badge" style="display:none;font-size:10px;font-weight:700;color:#d8431f;background:#fff5f2;border:1px solid #ee4d2d;padding:4px 8px;border-radius:4px;cursor:pointer;"></span>
       </div>
       <div id="aog-filter-box" style="background:#f8f9fa;border:1px solid #eee;border-radius:4px;padding:6px 8px;margin-bottom:6px;font-size:11px;line-height:1.6;color:#444;">
@@ -543,14 +640,6 @@
       </div>
       <div style="background:#f8f9fa;border:1px solid #eee;border-radius:4px;padding:6px 8px;margin-bottom:6px;font-size:11px;color:#444;">
         <div style="font-weight:700;color:#333;margin-bottom:4px;">Delay chống captcha (để trống = mặc định):</div>
-        <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;flex-wrap:wrap;">
-          <span style="min-width:132px;">Giữa 2 sản phẩm (ms):</span>
-          <input id="aog-call-delay-min" type="number" min="0" step="50" placeholder="${CALL_DELAY_MIN_DEFAULT_MS}"
-            style="width:64px;padding:3px 5px;border:1px solid #ccc;border-radius:4px;">
-          <span>-</span>
-          <input id="aog-call-delay-max" type="number" min="0" step="50" placeholder="${CALL_DELAY_MAX_DEFAULT_MS}"
-            style="width:64px;padding:3px 5px;border:1px solid #ccc;border-radius:4px;">
-        </div>
         <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
           <span style="min-width:132px;">Giữa 2 root (giây):</span>
           <input id="aog-root-delay-min" type="number" min="0" step="0.5" placeholder="${ROOT_DELAY_MIN_DEFAULT_S}"
@@ -578,28 +667,14 @@
     // Delay chong captcha - de trong (khong nhap gi) = dung mac dinh (xem placeholder o
     // input, sanitizeDelayRange() cung fallback tuong tu neu lo nhap gia tri khong hop le
     // nhu am/chu). Luu ngay khi rai input (change) - lan goi randomDelay() TIEP THEO se ap
-    // dung gia tri moi ngay, khong can bam Start lai (xem getCallDelayRangeMs()/
-    // getRootDelayRangeMs(), doc lai GM_getValue moi lan goi thay vi cache).
-    const callDelayMinInput = document.getElementById('aog-call-delay-min');
-    const callDelayMaxInput = document.getElementById('aog-call-delay-max');
+    // dung gia tri moi ngay, khong can bam Start lai (xem getRootDelayRangeMs(), doc lai
+    // GM_getValue moi lan goi thay vi cache).
     const rootDelayMinInput = document.getElementById('aog-root-delay-min');
     const rootDelayMaxInput = document.getElementById('aog-root-delay-max');
-    const storedCallMin = GM_getValue(CALL_DELAY_MIN_KEY, null);
-    const storedCallMax = GM_getValue(CALL_DELAY_MAX_KEY, null);
     const storedRootMin = GM_getValue(ROOT_DELAY_MIN_KEY, null);
     const storedRootMax = GM_getValue(ROOT_DELAY_MAX_KEY, null);
-    if (storedCallMin !== null) callDelayMinInput.value = storedCallMin;
-    if (storedCallMax !== null) callDelayMaxInput.value = storedCallMax;
     if (storedRootMin !== null) rootDelayMinInput.value = storedRootMin;
     if (storedRootMax !== null) rootDelayMaxInput.value = storedRootMax;
-    callDelayMinInput.addEventListener('change', () => {
-      if (callDelayMinInput.value === '') GM_setValue(CALL_DELAY_MIN_KEY, null);
-      else GM_setValue(CALL_DELAY_MIN_KEY, parseFloat(callDelayMinInput.value));
-    });
-    callDelayMaxInput.addEventListener('change', () => {
-      if (callDelayMaxInput.value === '') GM_setValue(CALL_DELAY_MAX_KEY, null);
-      else GM_setValue(CALL_DELAY_MAX_KEY, parseFloat(callDelayMaxInput.value));
-    });
     rootDelayMinInput.addEventListener('change', () => {
       if (rootDelayMinInput.value === '') GM_setValue(ROOT_DELAY_MIN_KEY, null);
       else GM_setValue(ROOT_DELAY_MIN_KEY, parseFloat(rootDelayMinInput.value));
@@ -615,15 +690,20 @@
       log('(Da bam Stop - se dung sau khi xu ly xong item hien tai.)');
     });
     document.getElementById('aog-check-update-btn').addEventListener('click', () => checkForUpdate(true));
+    document.getElementById('aog-show-incident-btn').addEventListener('click', showLastPageUnavailableIncident);
     document.getElementById('aog-update-badge').addEventListener('click', openUpdatePage);
     maybeAutoCheckForUpdate();
     loadFilterSettings(); // hien dieu kien loc NGAY luc mo panel, khong can doi bam Start
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', injectPanel);
+    document.addEventListener('DOMContentLoaded', () => {
+      injectPanel();
+      setupPageUnavailableWatcher();
+    });
   } else {
     injectPanel();
+    setupPageUnavailableWatcher();
   }
 
   unsafeWindow.__offerGroupScraper = { runLoop: () => runLoop(log), stop: requestStop };

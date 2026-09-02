@@ -2031,17 +2031,26 @@ def reset_video_jobs(db_path, market=None):
 
 
 def count_video_push_stats(db_path):
-    """So lieu tong quan cho tab 'Tao video' tren dashboard."""
+    """So lieu tong quan cho tab 'Tao video' tren dashboard.
+
+    QUAN TRONG: PHAI loc them link_type='root', giong het dieu kien cua
+    list_video_push_candidates() (ham THUC SU chon ung vien khi bam 'Tao video') - da tung
+    co bug thuc te o day: compute_merged_links() ghi merged_link cho CA related trong cung
+    nhom (khong rieng root), nen dem "merged_link is not null" suong se dem lan CA cac dong
+    related (khong bao gio duoc chon de tao video/khong bao gio co job_id), khien UI hien
+    "con lai chua tao" > 0 that su MAC DU list_video_push_candidates() da tra ve rong (dung
+    dong nguoi dung bao cao: 'giao dien van bao con link du dieu kien nhung bam tao video
+    thi he thong bao het')."""
     conn = _connect(db_path)
     try:
         eligible = conn.execute(
-            "select count(*) from products where merged_link is not null"
+            "select count(*) from products where merged_link is not null and link_type='root'"
         ).fetchone()[0]
         cache_uploaded = conn.execute(
-            "select count(*) from products where merged_link is not null and cache_uploaded=1"
+            "select count(*) from products where merged_link is not null and link_type='root' and cache_uploaded=1"
         ).fetchone()[0]
         job_created = conn.execute(
-            "select count(*) from products where merged_link is not null and job_id is not null"
+            "select count(*) from products where merged_link is not null and link_type='root' and job_id is not null"
         ).fetchone()[0]
         return {"eligible": eligible, "cache_uploaded": cache_uploaded, "job_created": job_created}
     finally:
@@ -2053,7 +2062,9 @@ def count_video_push_stats_by_market(db_path):
     market" o tab "Tao video" (hien thi ro thay vi chi 1 con so tong gop). Sap theo market
     A-Z, dong nao merged_link con thieu market (khong khop domain nao trong
     market_from_link() - hiem, thuong do link nhap tay sai dinh dang) gom chung vao 1 dong
-    '(chua ro)' o cuoi de khong bi that lac."""
+    '(chua ro)' o cuoi de khong bi that lac.
+
+    Cung PHAI loc link_type='root' - xem ghi chu chi tiet o count_video_push_stats()."""
     conn = _connect(db_path)
     try:
         rows = conn.execute(
@@ -2062,7 +2073,8 @@ def count_video_push_stats_by_market(db_path):
             "  count(*) as eligible, "
             "  sum(case when cache_uploaded=1 then 1 else 0 end) as cache_uploaded, "
             "  sum(case when job_id is not null then 1 else 0 end) as job_created "
-            "from products where merged_link is not null group by coalesce(market, '') order by market asc"
+            "from products where merged_link is not null and link_type='root' "
+            "group by coalesce(market, '') order by market asc"
         ).fetchall()
         return [
             {
