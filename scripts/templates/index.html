@@ -332,6 +332,10 @@
       <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,12 8,12 10,6 14,18 16,12 21,12"/></svg></span>
       Vận hành
     </button>
+    <button class="tab-btn" id="tabbtn-gpm" onclick="switchTab('gpm')">
+      <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8M12 18v3"/><circle cx="12" cy="11" r="2.5"/></svg></span>
+      Vận hành GPM
+    </button>
     <button class="tab-btn" id="tabbtn-products" onclick="switchTab('products')">
       <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="14" rx="1"/><path d="M3 7l9-4 9 4"/><line x1="12" y1="7" x2="12" y2="21"/></svg></span>
       Sản phẩm đã cào
@@ -526,6 +530,7 @@
       <button class="secondary" onclick="loadRoots()">Làm mới</button>
       <button class="secondary" onclick="recomputeMergedAll()">Gộp link TẤT CẢ Root</button>
       <button class="secondary" onclick="resetInsufficientAll()">Đặt lại TẤT CẢ Root thiếu</button>
+      <button class="secondary" onclick="recheckCachedCandidates()" title="Giai phong related cua Root khong con dat chuan, roi quet lai toan bo cache doi chieu dieu kien hien tai - khong can cao lai Shopee">Kiểm tra lại Cache theo điều kiện mới</button>
     </div>
     <div class="table-wrap"><table>
       <thead><tr><th>Mã SP (item_id)</th><th>Thị trường</th><th>Danh mục</th><th>Trạng thái</th><th>Thành viên</th><th>Giao cho</th><th>Liên kết</th><th>Thao tác</th></tr></thead>
@@ -549,6 +554,7 @@
       </select>
       <select id="item-filter-status" onchange="loadItems()">
         <option value="">-- Trạng thái: Tất cả --</option>
+        <option value="video_ready">Đủ điều kiện tạo video</option>
         <option value="pending">pending</option>
         <option value="member">member</option>
         <option value="cached">cached</option>
@@ -729,7 +735,53 @@
 
 </div>
 
-<!-- Tab 6: Push Sheet -->
+<!-- Tab 6: Vận hành GPM -->
+<div id="tab-gpm" class="tab-panel">
+
+  <section>
+    <h2>Worker GPM Login — Cào root bằng trình duyệt GPM (chống Page Unavailable)</h2>
+    <div class="row" style="margin-bottom:8px;align-items:center;">
+      <label style="font-weight:500;white-space:nowrap;">Nhóm GPM:</label>
+      <select id="gpm-group-sel" style="min-width:220px;" onchange="gpmOnGroupChange()">
+        <option value="">— Đang tải nhóm —</option>
+      </select>
+      <span class="muted" id="gpm-group-count"></span>
+      <label style="font-weight:500;white-space:nowrap;margin-left:8px;">Sắp xếp:</label>
+      <select id="gpm-sort" style="min-width:110px;" onchange="gpmOnSortChange()">
+        <option value="asc">Tên A→Z</option>
+        <option value="desc">Tên Z→A</option>
+      </select>
+      <label style="white-space:nowrap;margin-left:10px;font-weight:500;" title="Chạy worker với cửa sổ GPM được thu nhỏ (vẫn headed - fingerprint thật, không phải headless)">
+        <input type="checkbox" id="gpm-hidden" checked> Ẩn cửa sổ
+      </label>
+      <button class="secondary" onclick="loadGpmGroupsAndProfiles(true)">⟳ Làm mới</button>
+    </div>
+    <div class="muted" id="gpm-hint" style="margin-bottom:8px;"></div>
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th style="min-width:140px;">Profile (GPM)</th>
+        <th>Market</th>
+        <th style="min-width:60px;">Port</th>
+        <th>Browser</th>
+        <th>Worker</th>
+        <th style="min-width:250px;">Thao tác</th>
+      </tr></thead>
+      <tbody id="gpm-tbody"></tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>Log worker</h2>
+    <div class="row" style="margin-bottom:6px;">
+      <select id="gpm-log-sel" style="min-width:220px;" onchange="gpmRefreshLog()"></select>
+      <button class="secondary" onclick="gpmRefreshLog()">⟳ Xem log</button>
+    </div>
+    <pre id="gpm-log" class="console-log" style="height:300px;">(Chọn profile rồi bấm Xem log)</pre>
+  </section>
+
+</div>
+
+<!-- Tab 7: Push Sheet -->
 <div id="tab-sheets" class="tab-panel">
 
   <section>
@@ -825,6 +877,7 @@ function switchTab(name) {
     loadMailAccounts();
   }
   if (name === 'sheets') { loadSheetsConfig(); loadSheetsAccounts(); }
+  if (name === 'gpm') { loadGpmGroupsAndProfiles(); }
 }
 
 async function withBusy(btn, fn) {
@@ -1336,6 +1389,22 @@ async function resetInsufficientAll() {
   }
 }
 
+async function recheckCachedCandidates() {
+  if (!(await customConfirm('Đối chiếu TOÀN BỘ dữ liệu đã cào với điều kiện lọc HIỆN TẠI (không gọi lại Shopee)? Gồm 2 bước: (1) Giải phóng sản phẩm tương tự đang thuộc các Root ĐÃ TỪNG đạt nhưng nay KHÔNG CÒN đạt điều kiện; (2) Gán lại toàn bộ sản phẩm đang ở cache (gồm vừa giải phóng) cho Root phù hợp nếu có.'))) return;
+  try {
+    // Timeout dai (1 phut) - quet toan bo root + candidate 'cached' trong DB, co the lau
+    // hon 15s mac dinh voi DB lon, xem ghi chu o api().
+    const { roots_disqualified, released, checked, assigned } = await api('POST', '/api/candidates/recheck_cached', undefined, 60000);
+    await customAlert(
+      `Đã giải phóng ${released} sản phẩm khỏi ${roots_disqualified} Root không còn đạt điều kiện.\n` +
+      `Đã kiểm tra ${checked} sản phẩm trong cache, gán lại được ${assigned} sản phẩm đạt điều kiện mới.`
+    );
+    loadRoots();
+  } catch (e) {
+    await customAlert('Lỗi: ' + e.message, { danger: true });
+  }
+}
+
 async function resetRoot(itemid, market) {
   if (!(await customConfirm(`Đưa Root ${itemid} về 'pending' để giao lại? (Các sản phẩm tương tự đã gom trước đó vẫn được giữ nguyên)`))) return;
   try {
@@ -1382,9 +1451,12 @@ async function loadItems() {
   if (search) params.set('search', search);
   if (groupid) params.set('groupid', groupid);
   params.set('limit', '200');
-  const { items } = await api('GET', '/api/items/list?' + params.toString());
+  const data = await api('GET', '/api/items/list?' + params.toString());
+  const items = data.items || [];
   lastItemsList = items;
-  document.getElementById('items-count').textContent = `Hiển thị ${items.length} dòng (tối đa 200 - Lọc thêm để thu hẹp).`;
+  const label = status === 'video_ready' ? 'đủ điều kiện tạo video' : 'theo bộ lọc';
+  document.getElementById('items-count').textContent =
+    `Tổng ${data.total != null ? data.total : items.length} link ${label} | Hiển thị ${items.length} dòng (tối đa 200 - Lọc thêm để thu hẹp).`;
   const tbody = document.getElementById('items-tbody');
 
   function metricCell(value, passes) {
@@ -2213,6 +2285,203 @@ async function refreshAll() {
 }
 refreshAll();
 
+// ================= Tab "Vận hành GPM" =================
+let gpmProfiles = [];
+let gpmLogName = '';
+let gpmGroups = [];
+let gpmSelectedGroup = '';
+let gpmSortDir = 'asc'; // mac dinh A->Z theo yeu cau
+const gpmMarketOverride = {}; // id profile -> market nguoi dung da chon (giu qua cac lan refresh)
+
+function gpmMarketChanged(id, value) {
+  gpmMarketOverride[id] = value;
+}
+
+function gpmMarketOf(p) {
+  return gpmMarketOverride[p.id] || p.market || 'ph';
+}
+
+const GPM_HOME_URLS = {
+  ph: 'https://shopee.ph/',
+  th: 'https://shopee.co.th/',
+  my: 'https://shopee.com.my/',
+  vn: 'https://shopee.vn/',
+  sg: 'https://shopee.sg/',
+  id: 'https://shopee.co.id/',
+};
+
+async function gpmOpenHome(profileId, market) {
+  const url = GPM_HOME_URLS[market];
+  if (!url) { await customAlert('Không có URL home cho market: ' + market, { danger: true }); return; }
+  try {
+    const res = await api('POST', '/api/gpm/browser/open', { profile_id: profileId, url }, 60000);
+    if (!res.ok) throw new Error(res.error || 'Mở thất bại');
+    await loadGpmAll();
+  } catch (e) {
+    await customAlert('Lỗi mở Home: ' + e.message, { danger: true });
+  }
+}
+
+function gpmSortDirValue() {
+  const sel = document.getElementById('gpm-sort');
+  return sel ? sel.value : gpmSortDir;
+}
+
+function gpmOnSortChange() {
+  gpmSortDir = gpmSortDirValue();
+  loadGpmAll();
+}
+
+function gpmTabActive() {
+  const el = document.getElementById('tab-gpm');
+  return !!(el && el.classList.contains('active'));
+}
+
+function gpmSelectedGroupId() {
+  const sel = document.getElementById('gpm-group-sel');
+  return sel ? sel.value : gpmSelectedGroup;
+}
+
+async function loadGpmGroupsAndProfiles(forceRefresh) {
+  // load nhom truoc (neu rong hoac refresh), roi load profile cua nhom dang chon
+  try {
+    const g = await api('GET', '/api/gpm/groups');
+    if (g.ok) {
+      gpmGroups = g.groups || [];
+      const sel = document.getElementById('gpm-group-sel');
+      const prev = sel.value;
+      sel.innerHTML = '';
+      for (const gr of gpmGroups) {
+        const o = document.createElement('option');
+        o.value = gr.id;
+        o.textContent = gr.name + ' (' + gr.id.slice(0, 8) + ')';
+        sel.appendChild(o);
+      }
+      // mac dinh chon nhom DAU TIEN (khong load tat ca) tru khi nguoi dung da chon truoc do
+      let pick = prev;
+      if (!pick || !gpmGroups.some(x => x.id === pick)) pick = gpmGroups.length ? gpmGroups[0].id : '';
+      if (pick && pick !== sel.value) sel.value = pick;
+    }
+  } catch (e) {
+    document.getElementById('gpm-hint').textContent = 'Lỗi tải nhóm: ' + e.message;
+  }
+  await loadGpmAll();
+}
+
+function gpmOnGroupChange() {
+  gpmSelectedGroup = gpmSelectedGroupId();
+  document.getElementById('gpm-group-count').textContent = '';
+  loadGpmAll();
+}
+
+function gpmLogSelPopulate() {
+  const sel = document.getElementById('gpm-log-sel');
+  sel.innerHTML = '';
+  for (const p of gpmProfiles) {
+    const o = document.createElement('option');
+    o.value = p.name;
+    o.textContent = p.name + (p.worker && p.worker.running ? ' (đang chạy)' : '');
+    sel.appendChild(o);
+  }
+  if (gpmLogName) sel.value = gpmLogName;
+  if (!sel.value && sel.options.length) sel.value = sel.options[0].value;
+}
+
+function gpmStatusBadge(txt, ok) {
+  const color = ok ? 'var(--success)' : 'var(--danger)';
+  return `<span style="color:${ok ? '#16a34a' : '#b91c1c'};font-weight:600;">${txt}</span>`;
+}
+
+async function loadGpmAll() {
+  const hint = document.getElementById('gpm-hint');
+  const groupId = gpmSelectedGroupId();
+  try {
+    const data = await api('GET', '/api/gpm/profiles' + (groupId ? '?group_id=' + encodeURIComponent(groupId) : ''));
+    if (!data.ok) throw new Error(data.error || 'GPM loi');
+    gpmProfiles = data.profiles || [];
+    // sort theo ten profile (A->Z mac dinh, Z->A neu chon)
+    const dir = gpmSortDirValue() === 'desc' ? -1 : 1;
+    gpmProfiles.sort((a, b) => dir * String(a.name || '').localeCompare(String(b.name || ''), 'en'));
+    const gc = document.getElementById('gpm-group-count');
+    if (gc) gc.textContent = `(${gpmProfiles.length} profile)`;
+    if (hint) hint.textContent = `GPM Local API: ${data.gpm_base} | nhóm: ${groupId ? groupId.slice(0, 8) + '…' : 'tất cả'}`;
+    const tbody = document.getElementById('gpm-tbody');
+    tbody.innerHTML = gpmProfiles.map(p => {
+      const w = p.worker;
+      const browser = p.cdp_up ? gpmStatusBadge('Mở', true) : gpmStatusBadge('Đóng', false);
+      const worker = w ? (w.running ? gpmStatusBadge(`Chạy (${w.market})`, true) : gpmStatusBadge(`Thoát (${w.exit_code})`, false)) : '<span class="muted">-</span>';
+      const mkt = gpmMarketOf(p);
+      const mktOpts = ['ph', 'th', 'my'].map(m => `<option value="${m}" ${m === mkt ? 'selected' : ''}>${m.toUpperCase()}</option>`).join('');
+      return `
+      <tr>
+        <td><b>${p.name}</b><br><span class="muted" style="font-size:11px;">${p.id.slice(0, 8)}…</span></td>
+        <td>
+          <select class="gpm-market" data-id="${p.id}" onchange="gpmMarketChanged('${p.id}', this.value)">
+            ${mktOpts}
+          </select>
+        </td>
+        <td><code>${p.port || '-'}</code></td>
+        <td>${browser}</td>
+        <td>${worker}</td>
+        <td>
+          <button class="secondary" onclick="gpmStartWorker('${p.id}', '${p.name.replace(/'/g, '')}', this)">▶ Chạy worker</button>
+          <button class="secondary" onclick="gpmOpenHome('${p.id}', '${mkt}')" title="Mở trang chủ shopee.&lt;market&gt; của profile này">🏠 Home</button>
+          <button class="secondary" style="color:var(--danger-text);" onclick="gpmStopWorker('${p.id}')">■ Dừng</button>
+          <button class="secondary" onclick="gpmShowLog('${p.name.replace(/'/g, '')}')">Log</button>
+        </td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="6" class="muted">Không có profile — kiểm tra GPM Login đang chạy (port 9495).</td></tr>';
+    gpmLogSelPopulate();
+  } catch (e) {
+    if (hint) hint.textContent = 'Lỗi: ' + e.message;
+  }
+}
+
+async function gpmStartWorker(id, name, btn) {
+  const sel = btn.closest('tr').querySelector('.gpm-market');
+  const market = sel ? sel.value : 'ph';
+  const hidden = !!(document.getElementById('gpm-hidden') && document.getElementById('gpm-hidden').checked);
+  await withBusy(btn, async () => {
+    const res = await api('POST', '/api/gpm/worker/start', { profile_id: id, name, market, max_roots: 0, hidden }, 15000);
+    if (!res.ok) throw new Error(res.error || 'Start loi');
+    await loadGpmAll();
+  }).catch(async e => { await customAlert('Lỗi start worker: ' + e.message, { danger: true }); });
+}
+
+async function gpmStopWorker(id) {
+  if (!(await customConfirm('Dừng worker của profile này? Browser GPM sẽ GIỮ NGUYÊN.', {}))) return;
+  const closeBrowser = await customConfirm('Đóng luôn browser GPM của profile này?', {});
+  try {
+    const res = await api('POST', '/api/gpm/worker/stop', { profile_id: id, stop_browser: closeBrowser });
+    await customAlert(res.message || 'Đã dừng.');
+    await loadGpmAll();
+  } catch (e) {
+    await customAlert('Lỗi dừng: ' + e.message, { danger: true });
+  }
+}
+
+function gpmShowLog(name) {
+  gpmLogName = name;
+  const sel = document.getElementById('gpm-log-sel');
+  if (sel) sel.value = name;
+  gpmRefreshLog();
+}
+
+async function gpmRefreshLog() {
+  const sel = document.getElementById('gpm-log-sel');
+  const name = (sel && sel.value) || gpmLogName;
+  if (!name) return;
+  gpmLogName = name;
+  const box = document.getElementById('gpm-log');
+  box.textContent = '(Đang tải...)';
+  try {
+    const data = await api('GET', '/api/gpm/worker/log?name=' + encodeURIComponent(name));
+    box.textContent = data.log || '(Chưa có log — worker chưa chạy hoặc mới spawn.)';
+  } catch (e) {
+    box.textContent = 'Lỗi tải log: ' + e.message;
+  }
+}
+
 // Chan chong tick: neu lan poll truoc CHUA xong (vd dang cho 1 request timeout 15s) thi bo
 // qua lan nay thay vi ban them 4 request nua chong len - tranh chiem het 6 ket noi dong
 // thoi/domain cua trinh duyet (xem ghi chu o api()). Bat ky loi nao (kmm ca timeout) deu bi
@@ -2223,6 +2492,9 @@ setInterval(async () => {
   pollInFlight = true;
   try {
     await Promise.all([loadStats(), loadRoots(), loadWorkers(), loadRootMarketStats()]);
+    if (document.getElementById('tab-gpm') && document.getElementById('tab-gpm').classList.contains('active')) {
+      try { await loadGpmAll(); } catch (e) { console.warn('[poll] gpm:', e); }
+    }
   } catch (e) {
     console.warn('[poll] Bo qua loi khi tu dong lam moi:', e);
   } finally {

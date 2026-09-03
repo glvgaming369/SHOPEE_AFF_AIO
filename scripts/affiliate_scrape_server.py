@@ -17,6 +17,7 @@ import argparse
 import io
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -63,6 +64,11 @@ USERSCRIPTS = [
         "file": "shopee_ph_phone_checker.user.js",
         "title": "Shopee PH Phone Checker (SMSPool + 5sim + dongvanfb Mail)",
         "description": "1 script, 2 vai trò theo domain đang mở: Trên bất kỳ trang nào của shopee.ph - lấy số PH từ SMSPool/5sim qua API key hoặc dongvanfb mail, kiểm tra check_phone_exist, tự hủy số đã tồn tại; Trên 5sim.net - mua/hủy số bằng chính session trình duyệt (không qua API key, né rate limit riêng), gửi yêu cầu check sang tab shopee.ph qua GM_addValueChangeListener rồi tự quyết định hủy/giữ.",
+    },
+    {
+        "file": "tampermonkey_affiliate_root_navigator.user.js",
+        "title": "Affiliate Root Navigator (Navigation) - bản chống Page Unavailable",
+        "description": "THAY THẾ group scraper cũ khi Shopee chặn gọi offer/product liên tiếp (Page Unavailable sau ~1 root). Shopee chỉ chấp nhận token 'af-ac-enc-sz-token' mint từ 1 report (df.infra) và mỗi report chỉ dùng được ĐÚNG 1 lần - chỉ load trang thật mới kích engine gửi report. Script điều hướng tab tới offer/product_offer/<item_id> cho TỪNG root (như người mở link), hook fetch từ document-start để chụp response offer do CHÍNH TRANG gọi (token hợp lệ), rồi đẩy server local xử lý verify/seed/gan group/finish - KHÔNG gọi thêm request thật nào tới Shopee. Cách dùng: cài script này + TẮT script 'Affiliate Offer Group Scraper' cũ, nhập device key, Start. Mỗi root tốn 1 lần load trang (~3-8s) nhưng không bị chặn kiểu token reuse.",
     },
 ]
 USERSCRIPT_ALLOWLIST = {u["file"] for u in USERSCRIPTS}
@@ -339,6 +345,126 @@ def reset_insufficient_all():
     return jsonify(result)
 
 
+@app.route("/api/candidates/recheck_cached", methods=["POST"])
+def recheck_cached_candidates():
+    """1 lan bam nut = 2 buoc: (1) giai phong related cua cac root DA TUNG dat nhung KHONG
+    CON dat dieu kien HIEN TAI (release_disqualified_root_members() - dam bao dung nguyen
+    tac "root khong dat thi khong duoc giu related" MOI LUC, khong chi luc cao lan dau),
+    (2) quet lai TOAN BO candidate 'cached' (gom ca vua giai phong o buoc 1) doi chieu voi
+    dieu kien hien tai va gan lai cho root phu hop neu co (recheck_cached_candidates()).
+    Ca 2 buoc KHONG goi API Shopee. body (optional): {"market": "ph"} de gioi han 1 thi
+    truong."""
+    body = request.get_json(force=True, silent=True) or {}
+    market = body.get("market") or None
+    release_result = shopee_db.release_disqualified_root_members(DB_PATH, market=market)
+    recheck_result = shopee_db.recheck_cached_candidates(DB_PATH, market=market)
+    return jsonify({
+        "roots_disqualified": release_result["roots_disqualified"],
+        "released": len(release_result["released_itemids"]),
+        "checked": recheck_result["checked"],
+        "assigned": recheck_result["assigned"],
+    })
+
+
+@app.route("/api/roots/nav_complete", methods=["POST"])
+def nav_complete():
+    """1 lan goi duy nhat cho 1 root o che do "Root Navigator" (userscript dieu huong trang
+    that): server nhan offer_data MA CHINH TRANG Shopee da goi (token da hop le), tu verify
+    root, neu DAT thi seed + gan related (toi 5) + finish - gom toan bo logic truoc day
+    userscript phai goi nhieu lan (verify/seed/items.verify/finish) thanh 1 request local duy
+    nhat, giam diem loi va round-trip. KHONG goi bat ky API Shopee nao o day."""
+    body = request.get_json(force=True, silent=True) or {}
+    offer_data = body.get("offer_data")
+    if not isinstance(offer_data, dict):
+        return _bad_request("thieu 'offer_data' (object response.data cua offer/product)")
+    itemid = str(offer_data.get("item_id") or "")
+    market = body.get("market") or shopee_db.market_from_link(offer_data.get("product_link"))
+    if not itemid or not market:
+        return _bad_request("khong suy duoc itemid/market tu offer_data")
+    row = shopee_db.map_v2_data_to_row(
+        offer_data, link_type="root", groupid=itemid, market=market
+    )
+    verify = shopee_db.verify_root(DB_PATH, offer_data)
+    if not verify.get("passes"):
+        shopee_db.finish_root(DB_PATH, itemid, market)
+        return jsonify({"ok": True, "outcome": "rejected", "itemid": itemid})
+
+    settings = shopee_db.get_settings(DB_PATH)
+    sold_min = settings.get("sold_min") or 0
+    similar = (offer_data.get("similar_product_offers") or {}).get("list") or []
+    claimed = shopee_db.seed_and_claim_candidates(DB_PATH, itemid, similar, market=market) or []
+    claimed_set = {str(c) for c in claimed}
+    candidates = []
+    for it in similar:
+        sid = str(it.get("item_id") or "")
+        if not sid or sid == itemid or sid not in claimed_set:
+            continue
+        try:
+            sold = int((it.get("batch_item_for_item_card_full") or {}).get("sold") or 0)
+        except (TypeError, ValueError):
+            sold = 0
+        if sold <= sold_min:
+            continue
+        candidates.append((sold, it))
+    candidates.sort(key=lambda c: -c[0])
+
+    member = 0
+    errors = []
+    detail = {"similar_total": len(similar), "claimed": len(claimed), "sold_passed": 0,
+              "outcomes": {"assigned": 0, "already_member": 0, "failed_criteria": 0,
+                           "claimed_by_other": 0, "error": 0}}
+    for sold, it in candidates:
+        if member >= 5:  # GROUP_TARGET-1
+            break
+        detail["sold_passed"] += 1
+        try:
+            related_row = shopee_db.map_v2_data_to_row(
+                it, link_type="related", groupid=itemid, market=market
+            )
+            if not related_row.get("itemid"):
+                continue
+            # Candidate chi co COMMISSION THEO TY LE % (seller_commission_rate/default_commission_rate)
+            # ma khong kem so tien (da xac nhan that 2026-09-03: similar_product_offers.list chi
+            # tra rate, cr=null) - tieu chi hien tai can so tien. Uoc luong: pct% * gia hien thi
+            # (price int / 100000 = gia hien thi PHP/TH, vi du 19900000 -> ₱199.00) de co so sanh.
+            # Neu response da co so tien that (commission_rate.seller_commission) thi giu nguyen.
+            if not related_row.get("seller_commission"):
+                it_batch = it.get("batch_item_for_item_card_full") or {}
+                pct_raw = it.get("seller_commission_rate") or it.get("default_commission_rate")
+                try:
+                    price_raw = int(it_batch.get("price") or 0)
+                except (TypeError, ValueError):
+                    price_raw = 0
+                if pct_raw and price_raw:
+                    try:
+                        pct = float(str(pct_raw).replace("%", "").strip()) / 100.0
+                        price_display = price_raw / 100000.0 if price_raw > 100000 else float(price_raw)
+                        est = round(pct * price_display, 2)
+                        if est > 0:
+                            related_row["seller_commission"] = est
+                    except (TypeError, ValueError):
+                        pass
+            out = shopee_db.try_assign_verified(DB_PATH, related_row, itemid)
+            if out:
+                oc = out.get("outcome")
+                if oc in detail["outcomes"]:
+                    detail["outcomes"][oc] += 1
+            if out and out.get("outcome") in ("assigned", "already_member"):
+                member = out.get("group_member_count") or member
+        except Exception as e:  # noqa: BLE001 - 1 candidate loi khong duoc lam chet ca root
+            errors.append({"itemid": it.get("item_id"), "error": str(e)[:200]})
+            detail["outcomes"]["error"] += 1
+    shopee_db.finish_root(DB_PATH, itemid, market)
+    return jsonify({
+        "ok": True,
+        "outcome": "done",
+        "itemid": itemid,
+        "member_count": member,
+        "errors": errors[:20],
+        "detail": detail,
+    })
+
+
 @app.route("/api/roots/finish", methods=["POST"])
 def finish_root():
     body = request.get_json(force=True, silent=True) or {}
@@ -412,18 +538,29 @@ def filter_new():
 def list_items():
     """Danh sach san pham da cao (tab 'San pham' tren dashboard) - loc theo
     link_type/status_link/search (khop ten cot itemid/name/shop_name)/groupid (khop chinh
-    xac 1 nhom), gioi han so dong."""
+    xac 1 nhom), gioi han so dong. status_link='video_ready' = loc 'du dieu kien tao video'
+    (root co merged_link, chua tao job VideoAI, co product_link - cung dieu kien voi hang
+    doi tao video). Tra kem 'total' = tong so link khop bo loc (khong gioi han)."""
     link_type = request.args.get("link_type") or None
     status_link = request.args.get("status_link") or None
     search = request.args.get("search") or None
     groupid = request.args.get("groupid") or None
     market = request.args.get("market") or None
-    limit = request.args.get("limit", 200, type=int)
+    limit = min(max(1, request.args.get("limit", 200, type=int)), 500)
+    if status_link == "video_ready":
+        items, total = shopee_db.video_ready_items(
+            DB_PATH, market=market, search=search, groupid=groupid, limit=limit
+        )
+        return jsonify({"items": items, "total": total, "mode": "video_ready"})
     items = shopee_db.fetch_all_items(
         DB_PATH, link_type=link_type, status_link=status_link, search=search,
         groupid=groupid, market=market, limit=limit,
     )
-    return jsonify({"items": items})
+    total = shopee_db.count_all_items(
+        DB_PATH, link_type=link_type, status_link=status_link, search=search,
+        groupid=groupid, market=market,
+    )
+    return jsonify({"items": items, "total": total})
 
 
 @app.route("/api/items/<itemid>", methods=["DELETE"])
@@ -1045,6 +1182,314 @@ def stats():
         },
         "total_items": shopee_db.count_items(DB_PATH),
     })
+
+
+# ============================================================================
+# Tab "Vận hành GPM" - dieu phoi worker cào qua GPM Login (Local API 9495).
+# Server lam proxy (GPM khong CORS) + quan ly tien trinh node cdp_worker.mjs.
+# ============================================================================
+import requests as _requests  # noqa: E402
+
+GPM_BASE = os.environ.get("GPM_BASE", "http://127.0.0.1:9495")
+GPM_PORT_START = int(os.environ.get("GPM_PORT_START", "9601"))
+_gpm_ports = {}     # profile_id -> cdp port da cap
+_gpm_workers = {}   # profile_id -> {proc, name, market, port, log}
+_gpm_lock = threading.RLock()  # RLock: _gpm_alloc_port() giu lock khi duoc goi tu trong handler cung lock
+
+
+def _gpm_api(method, path, params=None, timeout=10):
+    r = _requests.request(method, GPM_BASE + path, params=params, timeout=timeout)
+    r.raise_for_status()
+    try:
+        return r.json()
+    except ValueError:
+        return {"success": False, "message": r.text[:200]}
+
+
+def _gpm_tcp_up(port):
+    if not port:
+        return False
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=0.3):
+            return True
+    except OSError:
+        return False
+
+
+def _gpm_alloc_port(profile_id):
+    with _gpm_lock:
+        if profile_id in _gpm_ports:
+            return _gpm_ports[profile_id]
+        used = set(_gpm_ports.values())
+        p = GPM_PORT_START
+        tries = 0
+        while (p in used or _gpm_tcp_up(p)) and tries < 200:
+            p += 1
+            tries += 1
+        _gpm_ports[profile_id] = p
+        return p
+
+
+def _gpm_log_path(name):
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", str(name))
+    log_dir = os.path.join(REPO_ROOT, "artifacts")
+    os.makedirs(log_dir, exist_ok=True)
+    return os.path.join(log_dir, f"gpm_worker_{safe}.log")
+
+
+def _gpm_worker_status(profile_id):
+    info = _gpm_workers.get(profile_id)
+    if not info:
+        return None
+    proc = info.get("proc")
+    running = proc is not None and proc.poll() is None
+    return {
+        "profile_id": profile_id,
+        "name": info.get("name"),
+        "market": info.get("market"),
+        "port": info.get("port"),
+        "running": running,
+        "exit_code": None if (proc is None or running) else proc.poll(),
+        "started_at": info.get("started_at"),
+    }
+
+
+def _gpm_read_log_tail(name, n=40):
+    path = _gpm_log_path(name)
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+        return "".join(lines[-n:])
+    except OSError:
+        return "(chua co log)"
+
+
+def _gpm_kill_proc(proc):
+    if not proc or proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+        try:
+            proc.wait(timeout=4)
+        except subprocess.TimeoutExpired:
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                capture_output=True, timeout=10,
+            )
+    except Exception:
+        pass
+
+
+@app.route("/api/gpm/groups", methods=["GET"])
+def gpm_groups():
+    """Danh sach nhom (group) cua GPM - de UI chon nhom roi moi load profile cua nhom do."""
+    try:
+        data = _gpm_api("GET", "/api/v1/groups")
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Khong goi duoc GPM Local API ({GPM_BASE}): {e}"}), 502
+    raw = data.get("data")
+    if isinstance(raw, dict):
+        items = raw.get("data") or []
+    else:
+        items = raw or []
+    groups = [{"id": g.get("id"), "name": g.get("name") or g.get("id")} for g in items if g.get("id")]
+    return jsonify({"ok": True, "groups": groups})
+
+
+@app.route("/api/gpm/profiles", methods=["GET"])
+def gpm_profiles():
+    """Danh sach profile GPM + trang thai (port, worker, CDP). Loc theo ?group_id=<id> neu co."""
+    group_id = (request.args.get("group_id") or "").strip()
+    try:
+        data = _gpm_api("GET", "/api/v1/profiles")
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Khong goi duoc GPM Local API ({GPM_BASE}): {e}"}), 502
+    profiles = (data.get("data") or {}).get("data") or []
+    if group_id:
+        profiles = [p for p in profiles if str(p.get("group_id") or "") == str(group_id)]
+    out = []
+    for p in profiles:
+        pid = p["id"]
+        port = _gpm_ports.get(pid)
+        st = _gpm_worker_status(pid)
+        out.append({
+            "id": pid,
+            "name": p.get("name"),
+            "group_id": p.get("group_id"),
+            "market": "ph",  # mac dinh; sua trong UI khi chay
+            "port": port,
+            "cdp_up": _gpm_tcp_up(port) if port else False,
+            "worker": st,
+            "browser": (p.get("browser") or {}).get("name", "chrome"),
+        })
+    return jsonify({"ok": True, "gpm_base": GPM_BASE, "group_id": group_id or None, "profiles": out})
+
+
+@app.route("/api/gpm/worker/start", methods=["POST"])
+def gpm_worker_start():
+    """Spawn 1 worker cdp_worker.mjs cho 1 profile GPM (tu start browser qua GPM khi chay)."""
+    body = request.get_json(force=True, silent=True) or {}
+    profile_id = (body.get("profile_id") or "").strip()
+    name = (body.get("name") or profile_id).strip()
+    market = (body.get("market") or "ph").strip()
+    max_roots = int(body.get("max_roots") or 0)
+    hidden = bool(body.get("hidden"))
+    if not profile_id:
+        return _bad_request("thieu 'profile_id'")
+    print(f"[gpm] start worker {name} ({profile_id})...", flush=True)
+    with _gpm_lock:
+        st = _gpm_worker_status(profile_id)
+        if st and st["running"]:
+            return jsonify({"ok": False, "error": f"Worker '{st['name']}' dang chay roi (pid da co)."}), 409
+        port = _gpm_alloc_port(profile_id)
+        log_path = _gpm_log_path(name)
+        node_exe = shutil.which("node") or "node"
+        cmd = [
+            node_exe,
+            os.path.join(SCRIPTS_DIR, "cdp_worker.mjs"),
+            "--gpm-profile", profile_id,
+            "--port", str(port),
+            "--device-key", name,
+            "--market", market,
+            "--log", log_path,
+        ]
+        if max_roots > 0:
+            cmd += ["--max-roots", str(max_roots)]
+        if hidden:
+            cmd += ["--hidden", "1"]
+    # spawn NGOAI lock de khong chan cac request khac
+    print(f"[gpm] spawn node: {' '.join(cmd)}", flush=True)
+    logf = open(log_path, "a", encoding="utf-8")
+    try:
+        proc = subprocess.Popen(cmd, cwd=REPO_ROOT, stdout=logf, stderr=subprocess.STDOUT, text=True)
+    except Exception as e:
+        logf.close()
+        return jsonify({"ok": False, "error": f"Khong spawn duoc worker: {e}"}), 500
+    _gpm_workers[profile_id] = {
+        "proc": proc, "name": name, "market": market,
+        "port": port, "log": log_path,
+        "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    print(f"[gpm] da spawn worker {name} (profile {profile_id}) pid={proc.pid} port={port}")
+    return jsonify({"ok": True, "worker": _gpm_worker_status(profile_id)})
+
+
+@app.route("/api/gpm/worker/stop", methods=["POST"])
+def gpm_worker_stop():
+    body = request.get_json(force=True, silent=True) or {}
+    profile_id = (body.get("profile_id") or "").strip()
+    stop_browser = bool(body.get("stop_browser", True))
+    if not profile_id:
+        return _bad_request("thieu 'profile_id'")
+    info = _gpm_workers.get(profile_id)
+    if info:
+        _gpm_kill_proc(info["proc"])
+        info["proc"] = None
+    msg = "Da dung worker."
+    if stop_browser:
+        try:
+            _gpm_api("GET", f"/api/v1/profiles/stop/{profile_id}")
+            msg += " + da dong browser GPM."
+        except Exception as e:
+            msg += f" (dong browser loi: {e})"
+    return jsonify({"ok": True, "message": msg})
+
+
+@app.route("/api/gpm/worker/log", methods=["GET"])
+def gpm_worker_log():
+    name = (request.args.get("name") or "").strip()
+    if not name:
+        return _bad_request("thieu 'name'")
+    return jsonify({"ok": True, "log": _gpm_read_log_tail(name)})
+
+
+_GPM_HOME_URL = {
+    "ph": "https://shopee.ph/",
+    "th": "https://shopee.co.th/",
+    "my": "https://shopee.com.my/",
+    "vn": "https://shopee.vn/",
+    "sg": "https://shopee.sg/",
+    "id": "https://shopee.co.id/",
+}
+
+
+def _gpm_ensure_browser(profile_id):
+    """Bao dam browser GPM cua profile dang chay + tra ve CDP port that su (tu GPM tra ve khi
+    start - khong tu chon port de tranh lech voi instance dang chay san). Neu GPM bao
+    ProfileInUse (dang chay tu noi khac nhung khong ro port) thi stop roi start lai 1 lan."""
+    with _gpm_lock:
+        known = _gpm_ports.get(profile_id)
+        if known and _gpm_tcp_up(known):
+            return known
+    for attempt in range(2):
+        try:
+            r = _gpm_api("GET", f"/api/v1/profiles/start/{profile_id}")
+        except Exception:
+            return None
+        if r.get("success"):
+            data = r.get("data") or {}
+            p = data.get("remote_debugging_port")
+            if p:
+                with _gpm_lock:
+                    _gpm_ports[profile_id] = p
+                return p
+            return None
+        if "InUse" in (r.get("message") or "") and attempt == 0:
+            try:
+                _gpm_api("GET", f"/api/v1/profiles/stop/{profile_id}")
+            except Exception:
+                pass
+            time.sleep(2.5)
+            continue
+        return None
+    return None
+
+
+@app.route("/api/gpm/browser/open", methods=["POST"])
+def gpm_browser_open():
+    """Mo browser GPM cua profile (neu chua chay) va mo 1 tab toi 'url' - dung cho nut
+    'Home-Shopee' (mo trang chu shopee.<market> theo market dang chon cua profile)."""
+    body = request.get_json(force=True, silent=True) or {}
+    profile_id = (body.get("profile_id") or "").strip()
+    url = (body.get("url") or "").strip()
+    market = (body.get("market") or "").strip()
+    if not profile_id:
+        return _bad_request("thieu 'profile_id'")
+    if not url and market in _GPM_HOME_URL:
+        url = _GPM_HOME_URL[market]
+    if not url or not (url.startswith("https://") or url.startswith("http://")):
+        return _bad_request("thieu 'url' hop le")
+    port = _gpm_ensure_browser(profile_id)
+    if not port:
+        return jsonify({"ok": False, "error": "GPM khong start duoc browser (kiem tra GPM app / profile dang mo)."}), 502
+    up = False
+    for _ in range(90):  # cho toi 45s browser bind CDP
+        if _gpm_tcp_up(port):
+            up = True
+            break
+        time.sleep(0.5)
+    if not up:
+        return jsonify({"ok": False, "error": f"Browser GPM start nhung CDP port {port} khong len."}), 502
+    # mo tab moi bang CDP HTTP endpoint /json/new?<url> - CHU Y: url phai nam THANG trong query
+    # (khong phai param ten 'url' - Chrome bo qua neu dung dang '?url=...' va chi mo about:blank)
+    created = False
+    new_tab = f"http://127.0.0.1:{port}/json/new?{url}"
+    try:
+        r = _requests.put(new_tab, timeout=6)
+        if r.status_code in (200, 201):
+            created = True
+    except Exception:
+        pass
+    if not created:
+        try:
+            r = _requests.get(new_tab, timeout=6)
+            if r.status_code in (200, 201):
+                created = True
+        except Exception:
+            pass
+    if not created:
+        return jsonify({"ok": False, "error": f"Mo tab that bai tren port {port}."}), 502
+    return jsonify({"ok": True, "url": url, "port": port, "message": f"Da mo {url}"})
 
 
 def _ensure_port_free(host, port):

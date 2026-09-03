@@ -41,6 +41,17 @@ scripts/artifacts/
 check_phone_exist/
 5sim.txt/
 
+# Capture / RE workspace - co the chua header/token/session that, KHONG commit.
+burp-suite/
+re_work/
+gpm Login/
+artifacts/*.log
+artifacts/cdp_*
+
+# Agent state / notes ca nhan - khong phai source.
+.agents/
+RE_PLAN.md
+
 # Claude Code / tooling / test artifact cuc bo - khong phai source cua du an.
 .claude/
 .playwright-mcp/

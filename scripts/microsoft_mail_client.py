@@ -39,7 +39,20 @@ GRAPH_MESSAGES_URL = "https://graph.microsoft.com/v1.0/me/messages"
 # '.default' KHONG kem 'offline_access' nen response se KHONG co refresh_token moi - chap
 # nhan duoc vi da xac nhan token cu van dung binh thuong nhieu lan (xem ghi chu duoi ham
 # fetch_shopee_code()).
-SCOPE = "https://graph.microsoft.com/.default"
+#
+# NGUOC LAI (2026-09-03, tai khoan that): mot so tai khoan refresh_token KHONG co scope nao
+# "applicable" cho '.default' (loi AADSTS90023 "No applicable permissions were found for
+# this user") nhung van refresh duoc bang scope TUONG MINH Mail.Read / Mail.ReadWrite (da
+# test that: Mail.Read cho access_token hop le, doc duoc inbox, tim duoc link kich hoat).
+# Vi vay thu lan luot: .default -> Mail.ReadWrite+offline_access -> Mail.Read+offline_access.
+# Scope nao thanh cong dau tien thi dung. invalid_grant (token chet/thu hoi) la het duong -
+# khong thu tiep.
+SCOPES_ORDER = [
+    "https://graph.microsoft.com/.default",
+    "https://graph.microsoft.com/Mail.ReadWrite offline_access",
+    "https://graph.microsoft.com/Mail.Read offline_access",
+]
+SCOPE = SCOPES_ORDER[0]  # giu cho tuong thich nguoc voi noi import SCOPE
 
 
 class MicrosoftMailError(RuntimeError):
@@ -48,32 +61,37 @@ class MicrosoftMailError(RuntimeError):
 
 def refresh_access_token(refresh_token, client_id, timeout=20):
     """Doi refresh_token -> access_token qua endpoint token cua Microsoft (public client,
-    KHONG can client_secret - da xac nhan qua test that). Tra ve dict Microsoft goc (co
-    'access_token', 'refresh_token' MOI, 'expires_in',...). Nem MicrosoftMailError voi thong
-    diep ro rang neu token da het han/bi thu hoi (error='invalid_grant' - mail nay KHONG con
-    doc duoc nua qua duong nay, can mua lai hoac kiem tra lai tai khoan)."""
-    resp = requests.post(
-        TOKEN_URL,
-        data={
-            "client_id": client_id,
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-            "scope": SCOPE,
-        },
-        headers={"Accept": "application/json"},
-        timeout=timeout,
-    )
-    try:
-        body = resp.json()
-    except ValueError:
-        raise MicrosoftMailError(f"Microsoft tra ve khong phai JSON (HTTP {resp.status_code}): {resp.text[:200]}")
-    if resp.status_code != 200:
+    KHONG can client_secret - da xac nhan qua test that). Lan luot thu cac scope trong
+    SCOPES_ORDER ('.default' truoc, roi den Mail.ReadWrite/Mail.Read - xem ghi chu tren).
+    Tra ve dict Microsoft goc (co 'access_token', co the co 'refresh_token' MOI neu scope
+    kem 'offline_access', 'expires_in',...). Nem MicrosoftMailError voi thong diep ro rang
+    neu token het han/bi thu hoi (error='invalid_grant' - mail nay KHONG con doc duoc nua)."""
+    last_err = None
+    for scope in SCOPES_ORDER:
+        resp = requests.post(
+            TOKEN_URL,
+            data={
+                "client_id": client_id,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "scope": scope,
+            },
+            headers={"Accept": "application/json"},
+            timeout=timeout,
+        )
+        try:
+            body = resp.json()
+        except ValueError:
+            raise MicrosoftMailError(f"Microsoft tra ve khong phai JSON (HTTP {resp.status_code}): {resp.text[:200]}")
+        if resp.status_code == 200 and body.get("access_token"):
+            return body
         err = body.get("error") or "unknown_error"
         desc = (body.get("error_description") or "").split("\r\n")[0]
-        raise MicrosoftMailError(f"loi refresh token ({err}): {desc}")
-    if not body.get("access_token"):
-        raise MicrosoftMailError("Microsoft khong tra ve access_token.")
-    return body
+        if err == "invalid_grant":
+            # token chet that - thu scope khac cung vo ich
+            raise MicrosoftMailError(f"loi refresh token ({err}): {desc}")
+        last_err = f"loi refresh token ({err}): {desc} (scope: {scope})"
+    raise MicrosoftMailError(last_err or "loi refresh token khong ro")
 
 
 def list_recent_messages(access_token, top=15, timeout=20):

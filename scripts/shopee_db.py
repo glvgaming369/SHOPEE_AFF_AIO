@@ -141,6 +141,26 @@ create table if not exists mail_accounts (
 );
 """
 
+# Ghi lai "item X TUNG duoc de xuat lam candidate cho root Y" - populate tu
+# seed_and_claim_candidates() cho MOI item nhan duoc tu similar_product_offers, BAT KE co
+# dat tieu chi/duoc claim hay khong. Muc dich: item bi loai (status_link='cached',
+# groupid=NULL - xem try_assign_verified()) truoc day MAT HET dau vet "tung la candidate
+# cua root nao", nen khi nguoi dung doi dieu kien loc, KHONG CO CACH nao tu dong re-check +
+# gan lai dung nhom ma khong cao lai root do (2026-09-02, yeu cau nguoi dung: "co san cache,
+# doi dieu kien thi phai co co che check lai de ap dung luon thay vi phai cao lai"). Bang nay
+# giu lai quan he do de recheck_cached_candidates() co the quet lai TOAN BO cache doi chieu
+# voi dieu kien HIEN TAI ma KHONG can goi API Shopee. CHI co hieu luc voi item duoc cache TU
+# LUC co bang nay tro di - item cached truoc do van can cao lai root tuong ung 1 lan.
+CREATE_CANDIDATE_ROOT_SEEN_TABLE_SQL = """
+create table if not exists candidate_root_seen (
+    itemid text not null,
+    market text not null,
+    groupid text not null,
+    seen_at timestamp default current_timestamp,
+    primary key (itemid, market, groupid)
+);
+"""
+
 # Trang thai "song" cua tung tab Tampermonkey (khong phai hang doi viec - hang doi viec
 # van dung lai cot assigned_key/claimed_at co san tren 'products', xem
 # assign_root_to_worker()). Bang nay CHI de dashboard hien thi tab nao dang ranh/lam
@@ -362,6 +382,10 @@ def init_db(db_path=DB_PATH_DEFAULT):
         conn.execute("alter table mail_accounts add column profile text default ''")
     conn.execute(
         "create index if not exists idx_mail_accounts_market on mail_accounts(market)"
+    )
+    conn.execute(CREATE_CANDIDATE_ROOT_SEEN_TABLE_SQL)
+    conn.execute(
+        "create index if not exists idx_candidate_root_seen_item on candidate_root_seen(itemid, market)"
     )
     conn.commit()
     return conn
@@ -714,6 +738,64 @@ def fetch_all_items(db_path=DB_PATH_DEFAULT, link_type=None, status_link=None, s
             f"select * from products {where_sql} order by id desc limit ?", params
         ).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def count_all_items(db_path=DB_PATH_DEFAULT, link_type=None, status_link=None, search=None,
+                    groupid=None, market=None):
+    """Dem tong so dong khop cac bo loc (cung dieu kien voi fetch_all_items) - dung de bao
+    'Tong X link' tren tab 'San pham da cao' khi nguoi dung chon bo loc (khong gioi han 200)."""
+    conn = _connect(db_path)
+    try:
+        where, params = [], []
+        if link_type:
+            where.append("link_type = ?")
+            params.append(link_type)
+        if status_link:
+            where.append("status_link = ?")
+            params.append(status_link)
+        if groupid:
+            where.append("groupid = ?")
+            params.append(str(groupid))
+        if market:
+            where.append("market = ?")
+            params.append(market)
+        if search:
+            where.append("(itemid LIKE ? OR name LIKE ? OR shop_name LIKE ?)")
+            like = f"%{search}%"
+            params.extend([like, like, like])
+        where_sql = f"where {' and '.join(where)}" if where else ""
+        return conn.execute(f"select count(*) from products {where_sql}", params).fetchone()[0]
+    finally:
+        conn.close()
+
+
+def video_ready_items(db_path=DB_PATH_DEFAULT, market=None, search=None, groupid=None, limit=200):
+    """San pham DANG DU DIEU KIEN TAO VIDEO (cung dieu kien voi list_video_push_candidates():
+    root da co merged_link, chua tao job VideoAI, co product_link). Tra (items, total) de UI
+    bao tong so link theo trang thai nay."""
+    conn = _connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        where = ["link_type='root'", "merged_link is not null", "job_id is null", "product_link is not null"]
+        params = []
+        if market:
+            where.append("market = ?")
+            params.append(market)
+        if groupid:
+            where.append("groupid = ?")
+            params.append(str(groupid))
+        if search:
+            where.append("(itemid LIKE ? OR name LIKE ? OR shop_name LIKE ?)")
+            like = f"%{search}%"
+            params.extend([like, like, like])
+        where_sql = f"where {' and '.join(where)}"
+        total = conn.execute(f"select count(*) from products {where_sql}", params).fetchone()[0]
+        rows = conn.execute(
+            f"select * from products {where_sql} order by id asc limit ?", params + [limit]
+        ).fetchall()
+        return [dict(r) for r in rows], total
     finally:
         conn.close()
 
@@ -1289,11 +1371,15 @@ def try_assign_verified(db_path, row: dict, groupid, sold_min=None,
 
 def seed_and_claim_candidates(db_path, groupid, related_items, market=None):
     """Nhu insert_related_as_pending() nhung ATOMIC + tra ve DUNG cac item_id ma NHOM NAY
-    dang thuc su giu quyen (moi them lan nay, hoac da la cua nhom nay tu seed truoc do) -
-    dung cho BFS song song (nhieu Chrome profile/root cung luc): item da bi nhom KHAC
-    seed truoc se KHONG co trong ket qua tra ve, phia goi biet ngay khong can xep vao
-    hang doi cua minh nua (khoi ton 1 request that toi Shopee roi bi tu choi o
-    try_assign_verified()).
+    dang thuc su giu quyen (moi them lan nay, hoac da la cua nhom nay tu seed truoc do, hoac
+    duoc "nhan lai" tu trang thai 'cached' - xem nhanh duoi) - dung cho BFS song song (nhieu
+    Chrome profile/root cung luc): item da bi nhom KHAC giu that su se KHONG co trong ket qua
+    tra ve, phia goi biet ngay khong can xep vao hang doi cua minh nua (khoi ton 1 request
+    that toi Shopee roi bi tu choi o try_assign_verified()).
+
+    Luon ghi vao candidate_root_seen cho MOI item nhan duoc (bat ke co duoc claim hay
+    khong) - phuc vu recheck_cached_candidates() sau nay (xem ghi chu bang do), KHONG anh
+    huong logic claim.
 
     market=None: tu suy tu market cua CHINH root (groupid=itemid cua root) - san pham
     tuong tu Shopee tra ve luon CUNG market voi root dang xem, nen day la nguon dang tin
@@ -1316,8 +1402,13 @@ def seed_and_claim_candidates(db_path, groupid, related_items, market=None):
                 continue
             itemid = str(itemid)
             sold = (item.get("batch_item_for_item_card_full") or {}).get("sold")
+            conn.execute(
+                "insert or ignore into candidate_root_seen (itemid, market, groupid) values (?, ?, ?)",
+                (itemid, market, groupid),
+            )
             ex = conn.execute(
-                "select groupid from products where itemid=? and market=?", (itemid, market)
+                "select groupid, status_link from products where itemid=? and market=?",
+                (itemid, market),
             ).fetchone()
             if ex is None:
                 conn.execute(
@@ -1328,7 +1419,19 @@ def seed_and_claim_candidates(db_path, groupid, related_items, market=None):
                 claimed.append(itemid)
             elif ex["groupid"] == groupid:
                 claimed.append(itemid)
-            # else: da thuoc nhom/root khac - bo qua, khong tra ve
+            elif ex["status_link"] == "cached" and ex["groupid"] is None:
+                # Da bi loai truoc do (khong con thuoc nhom nao - xem try_assign_verified())
+                # - cho root nay "nhan lai" de duoc danh gia lai voi dieu kien HIEN TAI (co
+                # the da doi tu luc bi cache). Sua bug thuc te 2026-09-02: truoc day 1 item
+                # cached bi khoa cung VINH VIEN, khong bao gio duoc xem xet lai du dieu kien
+                # loc thay doi ra sao.
+                conn.execute(
+                    "update products set groupid=?, status_link='pending' where itemid=? and market=?",
+                    (groupid, itemid, market),
+                )
+                claimed.append(itemid)
+            # else: da thuoc nhom/root khac that su (member, hoac dang pending cua nhom khac) -
+            # bo qua, khong tra ve.
         conn.commit()
         return claimed
     finally:
@@ -1688,6 +1791,166 @@ def reset_all_insufficient_roots(db_path):
         return {"reset_count": len(to_reset), "itemids": [r["itemid"] for r in to_reset]}
     finally:
         conn.close()
+
+
+def release_disqualified_root_members(db_path, market=None):
+    """Giai phong 'related' cua cac root DA TUNG dat (dang giu member that su) nhung KHONG
+    CON dat dieu kien loc HIEN TAI (nguoi dung vua doi settings) - dua related ve lai
+    'cached' (groupid=null) de co co hoi duoc gan cho 1 root KHAC dang thuc su dat chuan
+    (qua recheck_cached_candidates(), goi NGAY SAU ham nay trong cung 1 lan bam nut tren
+    UI). Nguyen tac nguoi dung chot 2026-09-02: "root khong dat dieu kien thi luon luon
+    khong duoc giu related" - PHAI dung MOI LUC settings thay doi, khong chi luc cao lan
+    dau (luc do BFS da tu loai root khong dat truoc khi lay related roi, xem
+    runBfsForRoot() - ke ho DUY NHAT con lai la root DA TUNG dat o qua khu).
+
+    Xoa merged_link cua CA root va cac related vua giai phong (khong con hop le de tao
+    video nua - neu khong xoa, compute_merged_links() se KHONG tu xoa gium vi no CHI ghi de
+    cho cac dong con nam trong danh sach hop le, khong dong toi dong bi loai ra, merged_link
+    cu se con sot lai va bi list_video_push_candidates() hieu nham la "van con hop le").
+
+    Tra ve {"roots_disqualified": n, "released_itemids": [...]}."""
+    import select_l1_l2_candidates as l1l2
+    settings = get_settings(db_path)
+    conn = _connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        market_sql = "and p.market=? " if market else ""
+        params = [market] if market else []
+        rows = conn.execute(
+            "select p.*, "
+            "(select count(*) from products m where m.groupid=p.itemid and m.market=p.market "
+            "and m.status_link='member') as member_count "
+            f"from products p where p.link_type='root' and p.status_link='done' {market_sql}",
+            params,
+        ).fetchall()
+        released = []
+        disqualified_roots = []
+        for r in rows:
+            if r["member_count"] == 0:
+                continue  # khong co gi de giai phong
+            root_metrics = l1l2._row_metrics(r)
+            root_passes = l1l2.passes_criteria(
+                root_metrics, settings["promoted_7d_max"], settings["sold_min"],
+                settings["seller_commission_vnd_min"],
+            )
+            if root_passes:
+                continue
+            members = conn.execute(
+                "select itemid from products where groupid=? and market=? and status_link='member'",
+                (r["itemid"], r["market"]),
+            ).fetchall()
+            for m in members:
+                conn.execute(
+                    "update products set groupid=null, status_link='cached', merged_link=null "
+                    "where itemid=? and market=?",
+                    (m["itemid"], r["market"]),
+                )
+                released.append(m["itemid"])
+            conn.execute(
+                "update products set merged_link=null where itemid=? and market=?",
+                (r["itemid"], r["market"]),
+            )
+            disqualified_roots.append(r["itemid"])
+        conn.commit()
+        return {"roots_disqualified": len(disqualified_roots), "released_itemids": released}
+    finally:
+        conn.close()
+
+
+def recheck_cached_candidates(db_path, market=None):
+    """Quet lai TOAN BO candidate dang 'cached' (da bi loai truoc do vi khong dat tieu chi
+    'related') doi chieu voi dieu kien LOC HIEN TAI (nguoi dung co the vua doi) - HOAN TOAN
+    KHONG goi API Shopee, chi dung du lieu + quan he da luu san trong candidate_root_seen
+    (xem CREATE_CANDIDATE_ROOT_SEEN_TABLE_SQL, ghi tu seed_and_claim_candidates()). Yeu cau
+    nguoi dung 2026-09-02: "co san cache, doi dieu kien thi phai co co che check lai de ap
+    dung luon thay vi phai cao lai".
+
+    Voi moi item cached NAY DA DAT tieu chi related: tim cac root tung de xuat no (theo
+    thu tu seen_at som nhat truoc), chon root DAU TIEN van con thieu member (<5) VA CHINH
+    root do van dang dat 3 tieu chi (dung settings hien tai, tren metrics da luu san cua
+    root) - gan item vao root do (status_link='member'). Item khong con root nao phu hop
+    (het lien quan hoac tat ca da du 5) thi giu nguyen 'cached'.
+
+    LUU Y quan trong: CHI hoat dong voi item duoc cache TU LUC co bang candidate_root_seen
+    (2026-09-02) tro di - item cached truoc do khong co du lieu quan he nay trong bang, se
+    bi bo qua o day (khong loi) va van can cao lai root tuong ung 1 lan de he thong biet lai
+    no thuoc root nao (xem seed_and_claim_candidates()).
+
+    Tra ve {"checked": n, "assigned": n, "itemids": [...]}."""
+    import select_l1_l2_candidates as l1l2
+    settings = get_settings(db_path)
+    conn = _connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        market_sql = "and p.market=? " if market else ""
+        params = [market] if market else []
+        cached_rows = conn.execute(
+            "select * from products p where p.link_type='related' and p.status_link='cached' "
+            f"{market_sql}",
+            params,
+        ).fetchall()
+        checked = 0
+        assigned = []
+        touched_roots = set()  # {(groupid, market), ...} - can compute_merged_links() lai sau
+        for row in cached_rows:
+            checked += 1
+            metrics = l1l2._row_metrics(row)
+            if not l1l2.passes_criteria_related(
+                metrics, settings["sold_min"], settings["seller_commission_vnd_min"]
+            ):
+                continue
+            itemid = row["itemid"]
+            item_market = row["market"]
+            candidate_roots = conn.execute(
+                "select cr.groupid, "
+                "(select count(*) from products m where m.groupid=cr.groupid and m.market=cr.market "
+                " and m.status_link='member') as member_count "
+                "from candidate_root_seen cr where cr.itemid=? and cr.market=? order by cr.seen_at asc",
+                (itemid, item_market),
+            ).fetchall()
+            target_root = None
+            for cr in candidate_roots:
+                if cr["member_count"] >= 5:
+                    continue
+                root_row = conn.execute(
+                    "select * from products where itemid=? and market=? and link_type='root'",
+                    (cr["groupid"], item_market),
+                ).fetchone()
+                if root_row is None:
+                    continue
+                root_metrics = l1l2._row_metrics(root_row)
+                if not l1l2.passes_criteria(
+                    root_metrics, settings["promoted_7d_max"], settings["sold_min"],
+                    settings["seller_commission_vnd_min"],
+                ):
+                    continue
+                target_root = cr["groupid"]
+                break
+            if target_root is None:
+                continue
+            root_cat = conn.execute(
+                "select cat_id, cat_name from products where itemid=? and market=? and link_type='root'",
+                (target_root, item_market),
+            ).fetchone()
+            conn.execute(
+                "update products set groupid=?, status_link='member', cat_id=?, cat_name=? "
+                "where itemid=? and market=?",
+                (
+                    target_root, root_cat["cat_id"] if root_cat else None,
+                    root_cat["cat_name"] if root_cat else None, itemid, item_market,
+                ),
+            )
+            assigned.append(itemid)
+            touched_roots.add((target_root, item_market))
+        conn.commit()
+    finally:
+        conn.close()
+    # compute_merged_links() tu mo ket noi rieng - goi SAU khi conn o tren da dong/commit,
+    # tranh giao dich long nhau. Cap nhat lai merged_link cho dung group vua them member moi
+    # (khac finish_root() la lan dau tinh - o day la tinh LAI vi thanh phan nhom da doi).
+    for groupid, group_market in touched_roots:
+        compute_merged_links(db_path, groupid, group_market)
+    return {"checked": checked, "assigned": len(assigned), "itemids": assigned}
 
 
 def mark_root_failed(db_path, itemid, market, reason):
