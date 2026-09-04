@@ -504,7 +504,7 @@
 
   <section>
     <h2>Tổng quan hệ thống</h2>
-    <div class="stats-bar" id="stats-bar">Đang tải dữ liệu...</div>
+    <div class="kw-stats" id="stats-bar">Đang tải dữ liệu...</div>
     <div class="row" style="margin-top:14px; margin-bottom:0;">
       <select id="reset-market-sel" style="max-width:200px;">
         <option value="">-- Tất cả thị trường --</option>
@@ -524,27 +524,6 @@
       <thead><tr><th>Device Key</th><th>Thị trường</th><th>Trạng thái</th><th>Root đang xử lý</th><th>Lần cuối báo cáo</th><th>Thao tác</th></tr></thead>
       <tbody id="workers-tbody"></tbody>
     </table></div>
-  </section>
-
-  <section>
-    <h2>Điều kiện lọc sản phẩm</h2>
-    <div class="muted" style="margin-bottom:12px;">Áp dụng cho MỌI lần xác minh từ đây trở đi (không ảnh hưởng tới các sản phẩm đã cào trước đó - dùng nút "Chấm lại điểm" nếu cần).</div>
-    <div class="row">
-      <label style="min-width:260px; font-weight:500;">Số lượng KOL quảng bá 7 ngày &lt;</label>
-      <input type="text" id="set-promoted7d" placeholder="1000">
-    </div>
-    <div class="row">
-      <label style="min-width:260px; font-weight:500;">Số đã bán trong 30 ngày &gt;</label>
-      <input type="text" id="set-sold" placeholder="100">
-    </div>
-    <div class="row">
-      <label style="min-width:260px; font-weight:500;">Hoa hồng nhà bán hàng &gt;</label>
-      <input type="text" id="set-commission" placeholder="1000">
-    </div>
-    <div class="row">
-      <button onclick="saveSettings()">Lưu điều kiện lọc</button>
-      <span class="muted" id="settings-result" style="color:var(--success); font-weight:600;"></span>
-    </div>
   </section>
 
   <section>
@@ -834,8 +813,39 @@
       <button class="secondary" onclick="loadGpmGroupsAndProfiles(true)">⟳ Làm mới</button>
     </div>
     <div class="muted" id="gpm-hint" style="margin-bottom:8px;"></div>
+
+    <!-- Điều kiện lọc chung - 1 nơi duy nhất lam gia tri tham chieu (ROOT + cào từ khoá) -->
     <div class="kw-crawlbar">
-      <div class="kw-crawlbar-title">Cào root AFF (Keyword) — cấu hình <b>khi cào</b></div>
+      <div class="kw-crawlbar-title">Điều kiện lọc chung — giá trị <b>tham chiếu</b> (dùng chung khi xử lý ROOT và cào từ khoá Keyword AFF)</div>
+      <div class="kw-crawlbar-fields">
+        <div class="kw-field" title="Chỉ áp dụng khi xác minh/verify ROOT (không dùng khi cào từ khoá)">
+          <b>KOL quảng bá 7 ngày &lt; (ROOT)</b>
+          <input type="number" id="set-promoted7d" min="0" step="1" value="1000">
+        </div>
+        <div class="kw-field" title="Lượt đã bán tối thiểu (sold) - áp dụng khi verify ROOT và khi cào từ khoá">
+          <b>Lượt bán ≥ (sold)</b>
+          <input type="number" id="set-sold" min="0" step="1" value="100">
+        </div>
+        <div class="kw-field" title="Số TIỀN hoa hồng tối thiểu, cho phép thập phân (vd 0.1 - tiền MY có thể &lt; 1). Nhập 1 = 1 đơn vị tiền theo market (1 ₱ / 1 ฿ / 1 RM / 1 ₫).">
+          <b>Hoa hồng ≥ (tiền market)</b>
+          <input type="number" id="set-commission" min="0" step="0.1" value="0">
+        </div>
+        <div class="kw-field kw-field-btn">
+          <b aria-hidden="true">&nbsp;</b>
+          <button onclick="saveSettings()" title="Lưu làm giá trị tham chiếu dùng chung cho ROOT và cào từ khoá">💾 Lưu điều kiện lọc</button>
+        </div>
+      </div>
+      <span class="muted" id="settings-result" style="color:var(--success); font-weight:600;"></span>
+    </div>
+    <div class="muted" style="margin-bottom:8px;">
+      Hoa hồng cho phép số thập phân (vd <b>0.1</b>); nhập <b>1</b> nghĩa là <b>1 ₱ / 1 ฿ / 1 RM / 1 ₫</b>
+      theo market của sản phẩm. <b>KOL 7 ngày</b> chỉ áp dụng khi xử lý ROOT; <b>Lượt bán</b> và
+      <b>Hoa hồng</b> dùng cho cả verify ROOT lẫn cào từ khoá.
+    </div>
+
+    <!-- Cấu hình cào theo từ khoá: chi con sort/lọc (API param); sold/hoa hong lay tu điều kiện chung -->
+    <div class="kw-crawlbar">
+      <div class="kw-crawlbar-title">Cào root AFF (Keyword) — <b>Sắp xếp / Lọc khi cào</b> (lượt bán & hoa hồng lấy từ "Điều kiện lọc chung" bên trên)</div>
       <div class="kw-crawlbar-fields">
         <div class="kw-field">
           <b>Sắp xếp</b>
@@ -848,25 +858,15 @@
           <b>Lọc</b>
           <span><input type="checkbox" id="gpm-crawl-xtra"> Comm Xtra</span>
         </label>
-        <div class="kw-field" title="Lượt đã bán tối thiểu của sản phẩm (sold)">
-          <b>Lượt bán ≥ (sold)</b>
-          <input type="number" id="gpm-crawl-sold" min="0" value="100">
-        </div>
-        <div class="kw-field" title="Số TIỀN hoa hồng ước tính tối thiểu: seller_commission_rate% × giá hiển thị (giá API ÷ 100000), đơn vị theo market.">
-          <b>Hoa hồng ≥ (tiền)</b>
-          <input type="number" id="gpm-crawl-comm" min="0" step="0.01" value="0">
-        </div>
         <div class="kw-field kw-field-btn">
           <b aria-hidden="true">&nbsp;</b>
-          <button class="secondary" onclick="gpmCrawlReset()" title="Đặt lại cấu hình cào về mặc định">↺ Mặc định</button>
+          <button class="secondary" onclick="gpmCrawlReset()" title="Đặt lại Sắp xếp/Comm Xtra về mặc định">↺ Mặc định</button>
         </div>
       </div>
     </div>
     <div class="muted" style="margin-bottom:8px;">
-      Các giá trị này <b>chỉ áp dụng khi chạy worker chế độ Keyword AFF</b> và dùng cho TẤT CẢ từ khoá
-      worker claim trong lần chạy đó — <b>không lưu vào từ khoá lúc import</b> (import chỉ có market + danh mục ở tab Từ Khoá).
-      Hoa hồng = số TIỀN ước tính (vd giá 12.000.000 → ₱120.00, hoa hồng 11% ≈ ₱13.20). Cấu hình được lưu tự động
-      trên trình duyệt (giữ nguyên sau khi F5).
+      Cấu hình này chỉ áp dụng khi chạy worker chế độ <b>Keyword AFF</b> và được lưu tự động trên
+      trình duyệt (giữ nguyên sau khi F5) — không lưu vào từ khoá lúc import.
     </div>
     <div class="table-wrap"><table>
       <thead><tr>
@@ -1318,11 +1318,18 @@ async function loadCategoryStats() {
 
 async function loadStats() {
   const s = await api('GET', '/api/stats');
-  document.getElementById('stats-bar').innerHTML = `
-    <div>Root: <b>${s.root.pending}</b> Đang chờ / <b>${s.root.done}</b> Hoàn tất / <b>${s.root.fail}</b> Lỗi</div>
-    <div>Related: <b>${s.related.pending}</b> Đang chờ / <b>${s.related.member}</b> Thành viên / <b>${s.related.cached}</b> Cached</div>
-    <div>Tổng sản phẩm DB: <b>${s.total_items}</b></div>
-  `;
+  const chip = (label, value, color) =>
+    `<div class="kw-stat"><span class="k">${label}</span>` +
+    `<span class="v"${color ? ` style="color:${color}"` : ''}>${value}</span></div>`;
+  document.getElementById('stats-bar').innerHTML =
+    chip('Root · Chờ', s.root.pending, '#666') +
+    chip('Root · Xong', s.root.done, '#16a34a') +
+    chip('Root · Tạo video', s.root_video_eligible, '#7c3aed') +
+    chip('Root · Lỗi', s.root.fail, '#b91c1c') +
+    chip('Related · Chờ', s.related.pending, '#666') +
+    chip('Related · Thành viên', s.related.member, '#2563eb') +
+    chip('Related · Cached', s.related.cached, '#b45309') +
+    chip('Tổng sản phẩm DB', s.total_items, '#0f172a');
 }
 
 let knownAccounts = [];
@@ -2666,22 +2673,19 @@ async function gpmStartWorker(id, name, btn) {
   const modeSel = btn.closest('tr').querySelector('.gpm-mode');
   const mode = modeSel ? modeSel.value : 'root';
   const hidden = !!(document.getElementById('gpm-hidden') && document.getElementById('gpm-hidden').checked);
-  // Cau hinh KHI CAO (chi dung cho mode Keyword AFF): doc tu thanh "Cào root AFF (Keyword)"
-  // o tren bang profile - sort/filter/sold/hoa hong Tien toi thieu. Khong luu o import.
+  // Cau hinh KHI CAO (chi dung cho mode Keyword AFF): Sắp xếp/Comm Xtra o thanh "Cào root
+  // AFF (Keyword)". Lượt bán & Hoa hồng KHONG gui o day - lay tu "Điều kiện lọc chung"
+  // (settings) phia server khi loc page_done (xem keyword_page_done fallback get_settings).
   const body = { profile_id: id, name, market, mode, max_roots: 0, hidden };
   if (mode === 'keyword') {
     const sortType = parseInt(document.getElementById('gpm-crawl-sort').value, 10);
     const filterTypes = document.getElementById('gpm-crawl-xtra').checked ? 2 : 0;
-    const soldMin = parseInt(document.getElementById('gpm-crawl-sold').value, 10);
-    const commMoney = parseFloat(document.getElementById('gpm-crawl-comm').value);
-    if (Number.isNaN(sortType) || Number.isNaN(soldMin) || Number.isNaN(commMoney)) {
-      await customAlert('Kiểm tra lại cấu hình cào: Sắp xếp / Lượt bán / Hoa hồng phải là số hợp lệ.', { danger: true });
+    if (Number.isNaN(sortType)) {
+      await customAlert('Kiểm tra lại cấu hình cào: Sắp xếp phải là số hợp lệ.', { danger: true });
       return;
     }
     body.sort_type = sortType;
     body.filter_types = filterTypes;
-    body.sold_min = soldMin;
-    body.comm_money_min = commMoney;
   }
   await withBusy(btn, async () => {
     const res = await api('POST', '/api/gpm/worker/start', body, 15000);
@@ -2727,7 +2731,7 @@ async function gpmRefreshLog() {
 // ================= Cache cau hinh "cào root AFF khi cào" (localStorage) =============
 // Luu Top Sales/Relevance, Comm Xtra, Lượt bán, Hoa hồng tren trinh duyet - giu nguyen
 // sau F5/mo lai dashboard (khong lien quan toi import - chi dung khi chay worker Keyword).
-const GPM_CRAWL_DEFAULTS = { 'gpm-crawl-sort': '2', 'gpm-crawl-xtra': '0', 'gpm-crawl-sold': '100', 'gpm-crawl-comm': '0' };
+const GPM_CRAWL_DEFAULTS = { 'gpm-crawl-sort': '2', 'gpm-crawl-xtra': '0' };
 let gpmCrawlWired = false;
 
 function gpmCrawlPersist(id, val) {

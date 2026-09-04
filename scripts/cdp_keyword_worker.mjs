@@ -3,7 +3,8 @@
 // /api/v3/offer/product/list bang fetch() ben trong CHINH trang affiliate (SFU wrapper cua
 // trang tu gan header chong bot + cookie session cua profile) -> lap qua cac page_offset
 // cho toi khi het total_count -> day tung trang ve /api/keywords/page_done de server loc
-// (sold_min/hoa hong tien toi thieu theo cau hinh KHI CAO) + insert root pending.
+// (loc theo "Điều kiện lọc chung" - sold/hoa hong tien cua market - phia server luc
+// page_done; xem keyword_page_done fallback get_settings) + insert root pending.
 //
 // DA XAC MINH BANG PROBE THAT (2026-09-05, profile SHOPEE 001, affiliate.shopee.ph):
 //  - goi product/list lien tuc 4+ lan trong CUNG page-view deu code:0 - khong gap loi
@@ -17,7 +18,7 @@
 //
 // Chay: node scripts/cdp_keyword_worker.mjs --port 9701 --device-key <ten> --market ph
 //       [--gpm-profile <uuid> --gpm-port 9495] [--max-keywords N]
-//       [--sort-type 2 --filter-types 0 --sold-min 0 --comm-money-min 0 --page-limit 20]
+//       [--sort-type 2 --filter-types 0 --page-limit 50]
 import { appendFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -44,8 +45,6 @@ const PAGE_LIMIT = parseInt(arg('--page-limit', '50'), 10) || 50;
 // KHONG luu o import. Worker gui kem MOI trang page_done de server loc dung 1 lan nay.
 const SORT_TYPE = parseInt(arg('--sort-type', '2'), 10) || 2;        // 1=Relevance 2=Top Sales
 const FILTER_TYPES = parseInt(arg('--filter-types', '0'), 10) || 0;  // 2=Comm Xtra
-const SOLD_MIN = parseInt(arg('--sold-min', '0'), 10) || 0;
-const COMM_MONEY_MIN = parseFloat(arg('--comm-money-min', '0')) || 0;
 const LOG = resolve(arg('--log', 'artifacts/cdp_keyword_worker.log'));
 
 const HOST = { ph: 'affiliate.shopee.ph', th: 'affiliate.shopee.co.th', my: 'affiliate.shopee.com.my', vn: 'affiliate.shopee.vn', sg: 'affiliate.shopee.sg' }[MARKET];
@@ -226,8 +225,9 @@ async function postPage(keywordId, offset, total, items) {
   const res = await serverJson('POST', '/api/keywords/page_done', {
     keyword_id: keywordId, device_key: DEVICE, market: MARKET,
     page_offset: offset, page_limit: PAGE_LIMIT, total_count: total, items,
-    // Cau hinh KHI CAO (khong luu o import) - gui kem moi trang de server loc theo.
-    sold_min: SOLD_MIN, comm_money_min: COMM_MONEY_MIN, filter_types: FILTER_TYPES,
+    // Cau hinh KHI CAO (API param) - sort/filter goi trong URL. Lượt bán & Hoa hồng khong
+    // gui o day: server tu lay "Điều kiện lọc chung" (settings) khi loc (xem keyword_page_done).
+    filter_types: FILTER_TYPES,
   });
   if (res && res.ok === false) throw new Error('server page_done: ' + (res.error || 'unknown'));
   return res;
@@ -237,7 +237,7 @@ async function handleKeyword(cdp, kw) {
   const id = kw.id;
   const text = kw.keyword;
   const label = `#${id} "${text}" (${kw.market})`;
-  log(`>>> Xu ly keyword ${label} | cau hinh cao: sort=${SORT_TYPE} filter=${FILTER_TYPES} sold_min=${SOLD_MIN} comm_money_min=${COMM_MONEY_MIN} page_limit=${PAGE_LIMIT}`);
+  log(`>>> Xu ly keyword ${label} | cau hinh cao: sort=${SORT_TYPE} filter=${FILTER_TYPES} page_limit=${PAGE_LIMIT} (sold/hoa hong lay tu Điều kiện lọc chung tren server)`);
   await heartbeat(cdp, 'working', `kw#${id} ${text}`);
 
   let blockedCount = 0;

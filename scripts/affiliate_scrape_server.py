@@ -1169,6 +1169,7 @@ def reset_all():
 
 @app.route("/api/stats", methods=["GET"])
 def stats():
+    video_stats = shopee_db.count_video_push_stats(DB_PATH)
     return jsonify({
         "root": {
             "pending": shopee_db.count_status(DB_PATH, link_type="root", status_link="pending"),
@@ -1180,6 +1181,9 @@ def stats():
             "member": shopee_db.count_status(DB_PATH, link_type="related", status_link="member"),
             "cached": shopee_db.count_status(DB_PATH, link_type="related", status_link="cached"),
         },
+        # "Root đủ điều kiện tạo video": root co merged_link (nhom da du) - KHONG giam sau khi
+        # da tao video (job_id/cache_uploaded tinh rieng ben tab Tạo Video), xem count_video_push_stats().
+        "root_video_eligible": video_stats.get("eligible") or 0,
         "total_items": shopee_db.count_items(DB_PATH),
     })
 
@@ -1515,20 +1519,18 @@ def gpm_worker_start():
         return _bad_request("thieu 'profile_id'")
     if mode not in ("root", "keyword"):
         return _bad_request("'mode' chi nhan 'root' hoac 'keyword'")
-    # Cau hinh "khi cào" (chi dung cho mode keyword): sort_type/filter_types/sold_min/hoa
-    # hong tien toi thieu - nguoi dung nhap o tab Vận hành GPM luc bam start, KHONG luu o
-    # import. Server truyen sang worker (--sold-min ...) de worker gui kem moi page_done.
+    # Cau hinh "khi cào" (chi dung cho mode keyword): sort_type/filter_types (API param khi
+    # search). Lượt bán & Hoa hồng KHONG gui o day - lay tu "Điều kiện lọc chung" (settings,
+    # tab Worker GPM Login) phia server khi loc page_done (xem keyword_page_done).
     try:
         crawl_sort = int(body.get("sort_type") or 2)
         if crawl_sort not in (1, 2):
             crawl_sort = 2
         crawl_filter = int(body.get("filter_types") or 0)
-        crawl_sold = max(0, int(body.get("sold_min") or 0))
-        crawl_comm = max(0.0, float(body.get("comm_money_min") or 0))
     except (TypeError, ValueError):
-        return _bad_request("'sort_type'/'filter_types'/'sold_min'/'comm_money_min' phai la so")
+        return _bad_request("'sort_type'/'filter_types' phai la so")
     worker_script = "cdp_worker.mjs" if mode == "root" else "cdp_keyword_worker.mjs"
-    print(f"[gpm] start worker {name} ({profile_id}) mode={mode} crawl(sort={crawl_sort}, filter={crawl_filter}, sold>={crawl_sold}, comm>={crawl_comm})...", flush=True)
+    print(f"[gpm] start worker {name} ({profile_id}) mode={mode} crawl(sort={crawl_sort}, filter={crawl_filter})...", flush=True)
     with _gpm_lock:
         st = _gpm_worker_status(profile_id)
         if st and st["running"]:
@@ -1546,8 +1548,7 @@ def gpm_worker_start():
             "--log", log_path,
         ]
         if mode == "keyword":
-            cmd += ["--sort-type", str(crawl_sort), "--filter-types", str(crawl_filter),
-                    "--sold-min", str(crawl_sold), "--comm-money-min", str(crawl_comm)]
+            cmd += ["--sort-type", str(crawl_sort), "--filter-types", str(crawl_filter)]
         if max_roots > 0:
             limit_arg = "--max-keywords" if mode == "keyword" else "--max-roots"
             cmd += [limit_arg, str(max_roots)]

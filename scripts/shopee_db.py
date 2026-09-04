@@ -3100,10 +3100,22 @@ def keyword_page_done(db_path, keyword_id, device_key, market, page_offset, page
         return {"ok": False, "error": "'page_offset'/'page_limit' phai la so nguyen"}
     if not isinstance(items, list):
         return {"ok": False, "error": "thieu 'items' (danh sach item cua trang)"}
+    # Nguong loc KHI CAO: neu worker khong gui (sold_min/comm_money_min/filter_types rong) thi
+    # lay tu "Điều kiện lọc chung" (bang settings, 1 noi duy nhat tren dashboard tab Worker GPM
+    # Login - dung chung cho ROOT verify va cào từ khoá). comm_money_min la so TIEN theo don vi
+    # cua market (1 = 1 ₱ / 1 ฿ / 1 RM / 1 ₫; cho phep thap phan nhu 0.1 vi MY co the < 1).
     try:
-        sold_min = max(0, int(sold_min or 0)) if sold_min is not None else 0
-        comm_money_min = max(0.0, float(comm_money_min or 0)) if comm_money_min is not None else 0.0
-        filter_types = int(filter_types or 0) if filter_types is not None else 0
+        if sold_min is None or comm_money_min is None or filter_types is None:
+            settings = get_settings(db_path)
+        if sold_min is None:
+            sold_min = settings["sold_min"] or 0
+        if comm_money_min is None:
+            comm_money_min = settings["seller_commission_vnd_min"] or 0.0
+        if filter_types is None:
+            filter_types = 0
+        sold_min = max(0, int(sold_min or 0))
+        comm_money_min = max(0.0, float(comm_money_min or 0))
+        filter_types = int(filter_types or 0)
     except (TypeError, ValueError):
         return {"ok": False, "error": "'sold_min'/'comm_money_min'/'filter_types' phai la so"}
 
