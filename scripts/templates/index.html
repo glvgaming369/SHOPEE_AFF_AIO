@@ -90,41 +90,79 @@
     padding: 4px 12px; border-radius: 20px;
   }
 
-  /* Navigation Tabs */
+  /* Navigation Tabs — sidebar trai full-height (app shell) */
+  .app-layout {
+    display: flex; align-items: stretch;
+    min-height: calc(100vh - 65px);
+  }
   .nav-container {
+    flex: 0 0 240px; min-width: 0;
     background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    position: sticky;
-    top: 65px;
-    z-index: 40;
-    box-shadow: var(--shadow-sm);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    position: sticky; top: 65px;
+    height: calc(100vh - 65px);
+    overflow-y: auto;
+    padding: 14px 10px 18px;
   }
   .tab-nav {
-    max-width: 1240px; margin: 0 auto;
-    display: flex; gap: 4px; padding: 0 24px; overflow-x: auto;
-    scrollbar-width: none;
+    display: flex; flex-direction: column; gap: 2px;
+    max-width: none; margin: 0; padding: 0; overflow: visible;
+    flex: 1 1 auto;
   }
-  .tab-nav::-webkit-scrollbar { display: none; }
   .tab-btn {
-    display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
-    padding: 14px 18px; border: none; background: none; cursor: pointer;
+    display: grid; grid-template-columns: 20px minmax(0, 1fr);
+    column-gap: 10px; align-items: center; width: 100%;
+    white-space: nowrap; text-align: left;
+    padding: 10px 10px; border: none; background: none; cursor: pointer;
     font-family: var(--font-sans); font-size: 13.5px; font-weight: 500;
-    color: var(--ink-soft); border-bottom: 3px solid transparent;
-    transition: all 0.2s ease;
+    color: var(--ink-soft);
+    border-radius: var(--radius-sm);
+    transition: background 0.15s ease, color 0.15s ease;
   }
-  .tab-btn:hover { color: var(--ink); background: var(--surface-2); border-radius: 8px 8px 0 0; }
-  .tab-btn.active { border-bottom-color: var(--accent); color: var(--accent-dark); font-weight: 700; }
-  .tab-icon { display: inline-flex; opacity: 0.75; transition: opacity 0.2s; }
+  .tab-btn:hover { color: var(--ink); background: var(--surface-2); }
+  .tab-btn.active { background: var(--accent-soft); color: var(--accent-dark); font-weight: 700; }
+  .tab-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; opacity: 0.75; flex-shrink: 0;
+    transition: opacity 0.2s;
+  }
+  .tab-icon svg { width: 16px; height: 16px; display: block; }
+  .tab-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .tab-btn.active .tab-icon { opacity: 1; color: var(--accent); }
 
   /* Layout Container */
-  main { max-width: 1240px; margin: 24px auto 60px; padding: 0 24px; }
+  main {
+    flex: 1; min-width: 0; margin: 0;
+    padding: 20px 22px 60px;
+    display: block;
+  }
   .tab-panel { display: none; }
-  .tab-panel.active { display: grid; gap: 24px; animation: fadeIn 0.25s ease-out; }
+  .tab-panel.active {
+    display: grid; gap: 24px; align-content: start;
+    width: 100%; min-width: 0; max-width: none;
+    animation: fadeIn 0.25s ease-out;
+  }
+  .tab-panel.active > section { min-width: 0; } /* khong cho nd dung ban rong day panel trao ra ngoai viewport */
 
   @keyframes fadeIn {
     from { opacity: 0; transform: translateY(4px); }
     to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Man hinh hep: tab quay lai dang ngang (cuon ngang duoc) cho gon */
+  @media (max-width: 960px) {
+    .app-layout { flex-direction: column; min-height: 0; }
+    .nav-container {
+      position: static; flex: none; width: 100%; height: auto;
+      border-right: none; border-bottom: 1px solid var(--border);
+      overflow-x: auto; padding: 8px;
+    }
+    .tab-nav { flex-direction: row; overflow-x: auto; scrollbar-width: none; }
+    .tab-nav::-webkit-scrollbar { display: none; }
+    .tab-btn { width: auto; flex-shrink: 0; }
+    main { padding: 16px 14px 48px; }
+    .tab-panel.active { max-width: none; }
   }
 
   .ellipsis { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
@@ -299,6 +337,40 @@
     font-size: 14.5px; line-height: 1.6; color: var(--ink); white-space: pre-wrap;
   }
   .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+
+  /* Khoi cau hinh "cào root AFF khi cào" (tab Vận hành GPM) - bố cục can deu, cache duoc */
+  .kw-crawlbar {
+    display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px;
+    background: var(--surface-2); padding: 10px 12px;
+    border-radius: var(--radius-sm); border: 1px solid var(--border);
+  }
+  .kw-crawlbar-title { font-weight: 600; }
+  .kw-crawlbar-fields { display: flex; flex-wrap: wrap; gap: 14px 20px; align-items: flex-end; }
+  .kw-field { display: flex; flex-direction: column; gap: 4px; }
+  .kw-field > b { font-size: 12px; font-weight: 600; color: var(--border-strong); white-space: nowrap; }
+  .kw-field select, .kw-field input[type="number"] {
+    padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: #fff; color: var(--ink); font-size: 13px;
+  }
+  .kw-field select { min-width: 136px; }
+  .kw-field input[type="number"] { width: 116px; }
+  .kw-field-chk { cursor: pointer; }
+  .kw-field-chk span { display: inline-flex; align-items: center; gap: 6px; padding: 6px 2px; font-size: 13px; }
+  .kw-field-btn { justify-content: flex-end; }
+  .kw-field-btn button { white-space: nowrap; }
+
+  /* Lưới thống kê Từ Khoá - cac chip can deu, tu dong xuong hang dep */
+  .kw-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 10px; }
+  .kw-stat {
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 10px 14px;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .kw-stat .k {
+    font-size: 11px; font-weight: 600; color: var(--ink-faint);
+    text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
+  }
+  .kw-stat .v { font-size: 20px; font-weight: 700; line-height: 1.2; }
 </style>
 </head>
 <body>
@@ -322,35 +394,40 @@
   </div>
 </header>
 
+<div class="app-layout">
 <div class="nav-container">
   <nav class="tab-nav">
     <button class="tab-btn" id="tabbtn-setup" onclick="switchTab('setup')">
       <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><circle cx="9" cy="6" r="2" fill="currentColor" stroke="none"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="7" cy="18" r="2" fill="currentColor" stroke="none"/></svg></span>
-      Tài khoản & Script
+      <span class="tab-label">Tài khoản & Script</span>
     </button>
     <button class="tab-btn active" id="tabbtn-operations" onclick="switchTab('operations')">
       <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,12 8,12 10,6 14,18 16,12 21,12"/></svg></span>
-      Vận hành
+      <span class="tab-label">ROOT</span>
     </button>
     <button class="tab-btn" id="tabbtn-gpm" onclick="switchTab('gpm')">
       <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8M12 18v3"/><circle cx="12" cy="11" r="2.5"/></svg></span>
-      Vận hành GPM
+      <span class="tab-label">Worker GPM Login</span>
+    </button>
+    <button class="tab-btn" id="tabbtn-kw" onclick="switchTab('kw')">
+      <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/><line x1="8" y1="11" x2="14" y2="11"/></svg></span>
+      <span class="tab-label">Từ Khoá</span>
     </button>
     <button class="tab-btn" id="tabbtn-products" onclick="switchTab('products')">
       <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="14" rx="1"/><path d="M3 7l9-4 9 4"/><line x1="12" y1="7" x2="12" y2="21"/></svg></span>
-      Sản phẩm đã cào
+      <span class="tab-label">Sản phẩm đã cào</span>
     </button>
     <button class="tab-btn" id="tabbtn-video" onclick="switchTab('video')">
       <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="M16 9l6-3v12l-6-3z"/></svg></span>
-      Tạo Video
+      <span class="tab-label">Tạo Video</span>
     </button>
     <button class="tab-btn" id="tabbtn-mailacc" onclick="switchTab('mailacc')">
       <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 6l10 7 10-7"/></svg></span>
-      Tạo tài khoản Shopee
+      <span class="tab-label">Quản lý account Shopee</span>
     </button>
     <button class="tab-btn" id="tabbtn-sheets" onclick="switchTab('sheets')">
       <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="9" x2="9" y2="21"/></svg></span>
-      Push Sheet
+      <span class="tab-label">Push Sheet</span>
     </button>
   </nav>
 </div>
@@ -757,6 +834,40 @@
       <button class="secondary" onclick="loadGpmGroupsAndProfiles(true)">⟳ Làm mới</button>
     </div>
     <div class="muted" id="gpm-hint" style="margin-bottom:8px;"></div>
+    <div class="kw-crawlbar">
+      <div class="kw-crawlbar-title">Cào root AFF (Keyword) — cấu hình <b>khi cào</b></div>
+      <div class="kw-crawlbar-fields">
+        <div class="kw-field">
+          <b>Sắp xếp</b>
+          <select id="gpm-crawl-sort">
+            <option value="2">Top Sales</option>
+            <option value="1">Relevance</option>
+          </select>
+        </div>
+        <label class="kw-field kw-field-chk" title="filter_types=2: chỉ lấy sản phẩm thuộc chiến dịch hoa hồng Xtra">
+          <b>Lọc</b>
+          <span><input type="checkbox" id="gpm-crawl-xtra"> Comm Xtra</span>
+        </label>
+        <div class="kw-field" title="Lượt đã bán tối thiểu của sản phẩm (sold)">
+          <b>Lượt bán ≥ (sold)</b>
+          <input type="number" id="gpm-crawl-sold" min="0" value="100">
+        </div>
+        <div class="kw-field" title="Số TIỀN hoa hồng ước tính tối thiểu: seller_commission_rate% × giá hiển thị (giá API ÷ 100000), đơn vị theo market.">
+          <b>Hoa hồng ≥ (tiền)</b>
+          <input type="number" id="gpm-crawl-comm" min="0" step="0.01" value="0">
+        </div>
+        <div class="kw-field kw-field-btn">
+          <b aria-hidden="true">&nbsp;</b>
+          <button class="secondary" onclick="gpmCrawlReset()" title="Đặt lại cấu hình cào về mặc định">↺ Mặc định</button>
+        </div>
+      </div>
+    </div>
+    <div class="muted" style="margin-bottom:8px;">
+      Các giá trị này <b>chỉ áp dụng khi chạy worker chế độ Keyword AFF</b> và dùng cho TẤT CẢ từ khoá
+      worker claim trong lần chạy đó — <b>không lưu vào từ khoá lúc import</b> (import chỉ có market + danh mục ở tab Từ Khoá).
+      Hoa hồng = số TIỀN ước tính (vd giá 12.000.000 → ₱120.00, hoa hồng 11% ≈ ₱13.20). Cấu hình được lưu tự động
+      trên trình duyệt (giữ nguyên sau khi F5).
+    </div>
     <div class="table-wrap"><table>
       <thead><tr>
         <th style="min-width:140px;">Profile (GPM)</th>
@@ -781,9 +892,95 @@
 
 </div>
 
-<!-- Tab 7: Push Sheet -->
-<div id="tab-sheets" class="tab-panel">
+<!-- Tab 7: Từ Khoá (cào root AFF theo keyword) -->
+<div id="tab-kw" class="tab-panel">
 
+  <section>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:4px;">
+      <h2 style="margin:0;">Từ Khoá</h2>
+      <span class="muted" style="font-size:12px;">Nhập từ khoá → chạy worker chế độ <b>Keyword AFF</b> ở tab Worker GPM Login để cào root.</span>
+    </div>
+    <div class="kw-stats" id="kw-summary-bar">Đang tải...</div>
+  </section>
+
+  <section>
+    <h2>Nhập từ khoá</h2>
+    <div class="muted" style="margin-bottom:10px;">
+      Danh mục (category) chọn dưới đây áp dụng cho <b>CẢ LÔ</b> từ khoá khi bấm Import.
+      Các giá trị <b>Sắp xếp / Lọc / Lượt bán / Hoa hồng</b> KHÔNG nhập ở đây — chúng là cấu hình
+      <b>khi cào</b>, nhập ở tab Vận hành GPM trước khi bấm ▶ Chạy worker (chế độ Keyword AFF).
+      Từ khoá trùng (cùng market, không phân biệt hoa thường) sẽ bị bỏ qua tự động.
+    </div>
+    <div class="row" style="margin-bottom:10px;">
+      <label style="white-space:nowrap;font-weight:500;">Market:</label>
+      <select id="kw-market" style="min-width:90px;" onchange="kwOnImportMarketChange()">
+        <option value="ph">PH</option>
+        <option value="th">TH</option>
+        <option value="my">MY</option>
+        <option value="id">ID</option>
+        <option value="vn">VN</option>
+        <option value="sg">SG</option>
+      </select>
+      <label style="white-space:nowrap;font-weight:500;">Danh mục:</label>
+      <select id="kw-cat" style="min-width:240px;">
+        <option value="">-- Không chọn danh mục --</option>
+      </select>
+    </div>
+    <textarea id="kw-text" rows="7" placeholder="Mỗi dòng 1 từ khoá.&#10;&#10;Có thể dán cả file nhóm (tự bỏ tiêu đề + dấu { }):&#10;Home Appliances&#10;{&#10;mini projector&#10;movie projector&#10;}"></textarea>
+    <div class="row" style="margin-top:10px;">
+      <button onclick="kwImport(this)">⬆ Import từ khoá vào DB</button>
+      <span class="muted" id="kw-import-result"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Lọc danh sách & thao tác hàng loạt</h2>
+    <div class="row" style="margin-bottom:6px;">
+      <label style="white-space:nowrap;font-weight:500;">Market:</label>
+      <select id="kw-filter-market" onchange="kwOnFilterMarketChange()" style="min-width:110px;">
+        <option value="">-- Tất cả --</option>
+      </select>
+      <label style="white-space:nowrap;font-weight:500;">Trạng thái:</label>
+      <select id="kw-filter-status" onchange="kwOnFilterChange()" style="min-width:120px;">
+        <option value="">-- Tất cả --</option>
+        <option value="pending">Chờ</option>
+        <option value="in_progress">Đang cào</option>
+        <option value="done">Xong</option>
+        <option value="error">Lỗi</option>
+      </select>
+      <label style="white-space:nowrap;font-weight:500;">Danh mục:</label>
+      <select id="kw-filter-cat" onchange="kwOnFilterChange()" style="min-width:200px;">
+        <option value="">-- Tất cả --</option>
+      </select>
+      <input type="text" id="kw-filter-search" placeholder="Lọc theo từ khoá..." style="min-width:200px;" onchange="kwOnFilterChange()">
+      <button class="secondary" onclick="kwReload()">⟳ Làm mới</button>
+    </div>
+    <div class="row" style="margin-bottom:8px;">
+      <button class="secondary" onclick="kwBulkReset()" title="Đặt lại các từ khoá đang lọc (và toàn bộ nếu không lọc) về trạng thái Chờ - KHÔNG xoá root đã nạp">↺ Đặt lại các từ khoá đang lọc</button>
+      <button class="danger" onclick="kwBulkDelete()" title="Xoá các từ khoá đang lọc khỏi danh sách - KHÔNG xoá root đã nạp vào DB">🗑 Xoá các từ khoá đang lọc</button>
+      <span class="muted" id="kw-filter-hint"></span>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th style="min-width:60px;">ID</th>
+        <th>Từ khoá</th>
+        <th style="min-width:60px;">Market</th>
+        <th>Danh mục</th>
+        <th style="min-width:90px;">Trạng thái</th>
+        <th style="min-width:100px;">Tiến độ (sp)</th>
+        <th style="min-width:110px;">Root (mới/trùng)</th>
+        <th style="min-width:120px;">Giao cho / Lỗi</th>
+        <th style="min-width:100px;">Cập nhật</th>
+        <th style="min-width:130px;">Thao tác</th>
+      </tr></thead>
+      <tbody id="kw-tbody"></tbody>
+    </table></div>
+  </section>
+
+</div>
+
+<!-- Tab 8: Push Sheet -->
+<div id="tab-sheets" class="tab-panel">
   <section>
     <h2>Cấu hình</h2>
     <div class="row">
@@ -861,6 +1058,7 @@
 </div>
 
 </main>
+</div><!-- /app-layout -->
 
 <script>
 function switchTab(name) {
@@ -878,6 +1076,7 @@ function switchTab(name) {
   }
   if (name === 'sheets') { loadSheetsConfig(); loadSheetsAccounts(); }
   if (name === 'gpm') { loadGpmGroupsAndProfiles(); }
+  if (name === 'kw') { kwLoadCategories(true); kwReload(); }
 }
 
 async function withBusy(btn, fn) {
@@ -2292,6 +2491,7 @@ let gpmGroups = [];
 let gpmSelectedGroup = '';
 let gpmSortDir = 'asc'; // mac dinh A->Z theo yeu cau
 const gpmMarketOverride = {}; // id profile -> market nguoi dung da chon (giu qua cac lan refresh)
+const gpmModeOverride = {};   // id profile -> che do Root/Keyword AFF nguoi dung da chon (giu qua cac lan refresh)
 
 function gpmMarketChanged(id, value) {
   gpmMarketOverride[id] = value;
@@ -2299,6 +2499,20 @@ function gpmMarketChanged(id, value) {
 
 function gpmMarketOf(p) {
   return gpmMarketOverride[p.id] || p.market || 'ph';
+}
+
+function gpmModeChanged(id, value) {
+  gpmModeOverride[id] = value;
+}
+
+// Che do hien thi cho 1 profile: khi worker DANG CHAY thi lay che do that tu server (khong
+// de nguoi dung doi giua chung); khi dung/idle thi uu tien lua chon gan nhat cua nguoi dung
+// (gpmModeOverride), fallback ve che do lan chay cu (w.mode) hoac 'root'.
+function gpmModeOf(p) {
+  const w = p.worker;
+  if (w && w.running) return w.mode || 'root';
+  if (gpmModeOverride[p.id]) return gpmModeOverride[p.id];
+  return (w && w.mode) || 'root';
 }
 
 const GPM_HOME_URLS = {
@@ -2408,10 +2622,18 @@ async function loadGpmAll() {
     const tbody = document.getElementById('gpm-tbody');
     tbody.innerHTML = gpmProfiles.map(p => {
       const w = p.worker;
+      const running = !!(w && w.running);
       const browser = p.cdp_up ? gpmStatusBadge('Mở', true) : gpmStatusBadge('Đóng', false);
-      const worker = w ? (w.running ? gpmStatusBadge(`Chạy (${w.market})`, true) : gpmStatusBadge(`Thoát (${w.exit_code})`, false)) : '<span class="muted">-</span>';
+      // che do hien thi: uu tien lua chon nguoi dung (giu qua poll 5s), khi dang chay thi
+      // lay che do that tu server va KHOA dropdown lai de khong doi giua chung.
+      const wmode = gpmModeOf(p);
+      const worker = w ? (running ? gpmStatusBadge(`Chạy ${wmode === 'keyword' ? 'Keyword' : 'Root'} (${w.market})`, true) : gpmStatusBadge(`Thoát (${w.exit_code})`, false)) : '<span class="muted">-</span>';
       const mkt = gpmMarketOf(p);
-      const mktOpts = ['ph', 'th', 'my'].map(m => `<option value="${m}" ${m === mkt ? 'selected' : ''}>${m.toUpperCase()}</option>`).join('');
+      const mktOpts = ['ph', 'th', 'my', 'id', 'vn', 'sg'].map(m => `<option value="${m}" ${m === mkt ? 'selected' : ''}>${m.toUpperCase()}</option>`).join('');
+      const modeSel = `<select class="gpm-mode" data-id="${p.id}" ${running ? 'disabled' : ''} onchange="gpmModeChanged('${p.id}', this.value)" title="Chế độ chạy: Root (cào từng root) | Keyword AFF (cào root theo từ khoá - cần nhập từ khoá ở tab Từ Khoá)${running ? ' - đang chạy, dừng worker rồi mới đổi được' : ''}">
+          <option value="root" ${wmode === 'root' ? 'selected' : ''}>Root</option>
+          <option value="keyword" ${wmode === 'keyword' ? 'selected' : ''}>Keyword AFF</option>
+        </select>`;
       return `
       <tr>
         <td><b>${p.name}</b><br><span class="muted" style="font-size:11px;">${p.id.slice(0, 8)}…</span></td>
@@ -2424,6 +2646,7 @@ async function loadGpmAll() {
         <td>${browser}</td>
         <td>${worker}</td>
         <td>
+          ${modeSel}
           <button class="secondary" onclick="gpmStartWorker('${p.id}', '${p.name.replace(/'/g, '')}', this)">▶ Chạy worker</button>
           <button class="secondary" onclick="gpmOpenHome('${p.id}', '${mkt}')" title="Mở trang chủ shopee.&lt;market&gt; của profile này">🏠 Home</button>
           <button class="secondary" style="color:var(--danger-text);" onclick="gpmStopWorker('${p.id}')">■ Dừng</button>
@@ -2440,9 +2663,28 @@ async function loadGpmAll() {
 async function gpmStartWorker(id, name, btn) {
   const sel = btn.closest('tr').querySelector('.gpm-market');
   const market = sel ? sel.value : 'ph';
+  const modeSel = btn.closest('tr').querySelector('.gpm-mode');
+  const mode = modeSel ? modeSel.value : 'root';
   const hidden = !!(document.getElementById('gpm-hidden') && document.getElementById('gpm-hidden').checked);
+  // Cau hinh KHI CAO (chi dung cho mode Keyword AFF): doc tu thanh "Cào root AFF (Keyword)"
+  // o tren bang profile - sort/filter/sold/hoa hong Tien toi thieu. Khong luu o import.
+  const body = { profile_id: id, name, market, mode, max_roots: 0, hidden };
+  if (mode === 'keyword') {
+    const sortType = parseInt(document.getElementById('gpm-crawl-sort').value, 10);
+    const filterTypes = document.getElementById('gpm-crawl-xtra').checked ? 2 : 0;
+    const soldMin = parseInt(document.getElementById('gpm-crawl-sold').value, 10);
+    const commMoney = parseFloat(document.getElementById('gpm-crawl-comm').value);
+    if (Number.isNaN(sortType) || Number.isNaN(soldMin) || Number.isNaN(commMoney)) {
+      await customAlert('Kiểm tra lại cấu hình cào: Sắp xếp / Lượt bán / Hoa hồng phải là số hợp lệ.', { danger: true });
+      return;
+    }
+    body.sort_type = sortType;
+    body.filter_types = filterTypes;
+    body.sold_min = soldMin;
+    body.comm_money_min = commMoney;
+  }
   await withBusy(btn, async () => {
-    const res = await api('POST', '/api/gpm/worker/start', { profile_id: id, name, market, max_roots: 0, hidden }, 15000);
+    const res = await api('POST', '/api/gpm/worker/start', body, 15000);
     if (!res.ok) throw new Error(res.error || 'Start loi');
     await loadGpmAll();
   }).catch(async e => { await customAlert('Lỗi start worker: ' + e.message, { danger: true }); });
@@ -2482,6 +2724,260 @@ async function gpmRefreshLog() {
   }
 }
 
+// ================= Cache cau hinh "cào root AFF khi cào" (localStorage) =============
+// Luu Top Sales/Relevance, Comm Xtra, Lượt bán, Hoa hồng tren trinh duyet - giu nguyen
+// sau F5/mo lai dashboard (khong lien quan toi import - chi dung khi chay worker Keyword).
+const GPM_CRAWL_DEFAULTS = { 'gpm-crawl-sort': '2', 'gpm-crawl-xtra': '0', 'gpm-crawl-sold': '100', 'gpm-crawl-comm': '0' };
+let gpmCrawlWired = false;
+
+function gpmCrawlPersist(id, val) {
+  try { localStorage.setItem('gpmCrawl.' + id, String(val)); } catch (e) {}
+}
+
+function gpmCrawlApply() {
+  for (const id of Object.keys(GPM_CRAWL_DEFAULTS)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    let saved = null;
+    try { saved = localStorage.getItem('gpmCrawl.' + id); } catch (e) {}
+    if (saved == null) saved = GPM_CRAWL_DEFAULTS[id];
+    if (el.type === 'checkbox') el.checked = saved === '1';
+    else el.value = saved;
+  }
+}
+
+function gpmCrawlWire() {
+  if (gpmCrawlWired) return;
+  gpmCrawlWired = true;
+  for (const id of Object.keys(GPM_CRAWL_DEFAULTS)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const save = () => gpmCrawlPersist(id, el.type === 'checkbox' ? (el.checked ? '1' : '0') : el.value);
+    el.addEventListener('change', save);
+    if (el.type !== 'checkbox') el.addEventListener('input', save);
+  }
+}
+
+function gpmCrawlReset() {
+  for (const id of Object.keys(GPM_CRAWL_DEFAULTS)) {
+    try { localStorage.removeItem('gpmCrawl.' + id); } catch (e) {}
+  }
+  gpmCrawlApply();
+}
+
+gpmCrawlWire();
+gpmCrawlApply();
+
+// ================= Tab "Cào Root AFF" (keyword) =================
+const KW_HOST_BY_MARKET = {
+  ph: 'affiliate.shopee.ph', th: 'affiliate.shopee.co.th', my: 'affiliate.shopee.com.my',
+  id: 'affiliate.shopee.co.id', vn: 'affiliate.shopee.vn', sg: 'affiliate.shopee.sg',
+};
+const KW_STATUS_LABEL = { pending: 'Chờ', in_progress: 'Đang cào', done: 'Xong', error: 'Lỗi' };
+const KW_STATUS_COLOR = { pending: '#666', in_progress: '#2563eb', done: '#16a34a', error: '#b91c1c' };
+
+function kwEsc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function kwT(s) { return s ? String(s).slice(0, 16).replace('T', ' ') : ''; }
+
+async function kwFetchCats(market) {
+  if (!market || !KW_HOST_BY_MARKET[market]) return [];
+  try {
+    const d = await api('GET', '/api/categories/list?url=' + encodeURIComponent('https://' + KW_HOST_BY_MARKET[market] + '/'));
+    return d.categories || [];
+  } catch (e) { return []; }
+}
+
+function kwFillCatSelect(sel, cats, keep) {
+  sel.innerHTML = '<option value="">-- Tất cả / không chọn --</option>' +
+    cats.map(c => `<option value="${c.cat_id}">${kwEsc(c.cat_name)}</option>`).join('');
+  if (keep !== undefined && cats.some(c => String(c.cat_id) === String(keep))) sel.value = keep;
+  else sel.value = '';
+}
+
+async function kwLoadCategories(resetFilters) {
+  const m = document.getElementById('kw-market').value;
+  const cats = await kwFetchCats(m);
+  const prev = document.getElementById('kw-cat').value;
+  kwFillCatSelect(document.getElementById('kw-cat'), cats, resetFilters ? '' : prev);
+  // filter market hien tai
+  const fm = document.getElementById('kw-filter-market').value;
+  const fsel = document.getElementById('kw-filter-cat');
+  if (!fm) { fsel.disabled = true; fsel.innerHTML = '<option value="">-- Tất cả --</option>'; }
+  else {
+    fsel.disabled = false;
+    const fcats = await kwFetchCats(fm);
+    const fpv = fsel.value;
+    kwFillCatSelect(fsel, fcats, fpv);
+  }
+}
+
+function kwOnImportMarketChange() { kwLoadCategories(true); }
+
+function kwFilterMarketOptions(summary) {
+  const sel = document.getElementById('kw-filter-market');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">-- Tất cả --</option>' + (summary.markets || [])
+    .map(x => `<option value="${x.market}">${String(x.market).toUpperCase()} (${x.n})</option>`).join('');
+  if (prev && (summary.markets || []).some(x => x.market === prev)) sel.value = prev;
+  else sel.value = '';
+  const fsel = document.getElementById('kw-filter-cat');
+  if (!sel.value) { fsel.disabled = true; fsel.innerHTML = '<option value="">-- Tất cả --</option>'; }
+  else if (fsel.disabled || fsel.options.length <= 1) { fsel.disabled = false; kwFillCatSelect(fsel, [], ''); }
+}
+
+async function kwReload() {
+  try {
+    const [sum, list] = await Promise.all([
+      api('GET', '/api/keywords/summary'),
+      api('GET', '/api/keywords/list?' + new URLSearchParams(kwFilterParams())),
+    ]);
+    kwRenderSummary(sum);
+    kwFilterMarketOptions(sum);
+    kwRenderList(list.keywords || []);
+  } catch (e) {
+    const bar = document.getElementById('kw-summary-bar');
+    if (bar) bar.textContent = 'Lỗi tải từ khoá: ' + e.message;
+  }
+}
+
+function kwFilterParams() {
+  const p = {};
+  const m = document.getElementById('kw-filter-market').value;
+  const s = document.getElementById('kw-filter-status').value;
+  const c = document.getElementById('kw-filter-cat').value;
+  const q = (document.getElementById('kw-filter-search').value || '').trim();
+  if (m) p.market = m;
+  if (s) p.status = s;
+  if (c) p.cat_id = c;
+  if (q) p.search = q;
+  p.limit = 500;
+  return p;
+}
+
+function kwFilterDesc() {
+  const m = document.getElementById('kw-filter-market').value;
+  const s = document.getElementById('kw-filter-status').value;
+  const q = (document.getElementById('kw-filter-search').value || '').trim();
+  const parts = [];
+  if (m) parts.push('market ' + m.toUpperCase());
+  if (s) parts.push('trạng thái ' + (KW_STATUS_LABEL[s] || s));
+  if (q) parts.push('từ khoá chứa "' + q + '"');
+  return parts.length ? parts.join(' | ') : 'TẤT CẢ từ khoá';
+}
+
+function kwOnFilterChange() { kwReload(); }
+
+async function kwOnFilterMarketChange() {
+  const fm = document.getElementById('kw-filter-market').value;
+  const fsel = document.getElementById('kw-filter-cat');
+  if (!fm) { fsel.disabled = true; fsel.innerHTML = '<option value="">-- Tất cả --</option>'; }
+  else {
+    fsel.disabled = false;
+    const fcats = await kwFetchCats(fm);
+    kwFillCatSelect(fsel, fcats, '');
+  }
+  kwReload();
+}
+
+function kwRenderSummary(sum) {
+  const c = sum.counts || {};
+  const r = sum.roots || {};
+  const chip = (label, value, color) =>
+    `<div class="kw-stat"><span class="k">${label}</span>` +
+    `<span class="v"${color ? ` style="color:${color}"` : ''}>${value}</span></div>`;
+  document.getElementById('kw-summary-bar').innerHTML =
+    chip('Tổng từ khoá', c.all || 0) +
+    chip('Chờ', c.pending || 0, KW_STATUS_COLOR.pending) +
+    chip('Đang cào', c.in_progress || 0, KW_STATUS_COLOR.in_progress) +
+    chip('Xong', c.done || 0, KW_STATUS_COLOR.done) +
+    chip('Lỗi', c.error || 0, KW_STATUS_COLOR.error) +
+    chip('Root đã nạp', r.inserted || 0, '#16a34a') +
+    chip('Trùng bỏ qua', r.dup || 0, '#b45309');
+}
+
+function kwRenderList(rows) {
+  const tbody = document.getElementById('kw-tbody');
+  const hint = document.getElementById('kw-filter-hint');
+  if (hint) hint.textContent = `Đang hiển thị ${rows.length} từ khoá — bộ lọc: ${kwFilterDesc()}.`;
+  tbody.innerHTML = rows.map(r => {
+    const st = r.status || 'pending';
+    const progress = r.total_count != null ? `${r.checkpoint_page || 0} / ${r.total_count} sp` : `${r.checkpoint_page || 0} sp`;
+    const errCell = st === 'error' ? `<span style="color:${KW_STATUS_COLOR.error};" title="${kwEsc(r.last_error || '')}">${kwEsc((r.last_error || '').slice(0, 60))}</span>`
+      : (r.assigned_key ? `<span class="muted">${kwEsc(r.assigned_key)}</span>` : '<span class="muted">—</span>');
+    return `<tr>
+      <td>${r.id}</td>
+      <td><b>${kwEsc(r.keyword)}</b></td>
+      <td>${String(r.market || '').toUpperCase()}</td>
+      <td>${r.cat_name ? kwEsc(r.cat_name) : (r.cat_id ? '#' + r.cat_id : '<span class="muted">—</span>')}</td>
+      <td><span style="color:${KW_STATUS_COLOR[st]};font-weight:600;">${KW_STATUS_LABEL[st] || st}</span></td>
+      <td class="muted" style="font-size:12px;">${kwEsc(progress)}</td>
+      <td><b>${r.roots_inserted || 0}</b> mới / <b>${r.dup_skipped || 0}</b> trùng</td>
+      <td style="font-size:12px;">${errCell}</td>
+      <td class="muted" style="font-size:12px;">${kwT(r.updated_at || r.created_at)}</td>
+      <td>
+        <button class="secondary" onclick="kwResetOne(${r.id})" title="Đặt lại về Chờ để cào lại (không xoá root đã nạp)">↺ Reset</button>
+        <button class="secondary" style="color:var(--danger-text);" onclick="kwDeleteOne(${r.id})">🗑 Xoá</button>
+      </td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="10" class="muted">Chưa có từ khoá — nhập ở mục "Nhập từ khoá" phía trên rồi bấm Import. Khớp bộ lọc hiện tại: ${kwEsc(kwFilterDesc())}.</td></tr>`;
+}
+
+async function kwImport(btn) {
+  const text = (document.getElementById('kw-text').value || '').trim();
+  if (!text) { await customAlert('Chưa có từ khoá nào để import.', { danger: true }); return; }
+  const market = document.getElementById('kw-market').value;
+  const catId = document.getElementById('kw-cat').value || null;
+  const catName = catId ? (document.getElementById('kw-cat').selectedOptions[0] || {}).textContent || null : null;
+  await withBusy(btn, async () => {
+    // Import CHI luu tu khoa + market + danh muc. Sort/filter/sold/hoa hong la cau hinh
+    // KHI CAO - nhap o tab Vận hành GPM khi chay worker Keyword AFF.
+    const res = await api('POST', '/api/keywords/import', {
+      market, text, cat_id: catId, cat_name: catName,
+    }, 30000);
+    const el = document.getElementById('kw-import-result');
+    el.textContent = `Đã thêm ${res.added} từ khoá (${res.duplicates} trùng bỏ qua, ${res.skipped} dòng rỗng/bỏ).`;
+    await kwReload();
+  }).catch(async e => { await customAlert('Lỗi import: ' + e.message, { danger: true }); });
+}
+
+async function kwResetOne(id) {
+  await api('POST', `/api/keywords/${id}/reset`);
+  kwReload();
+}
+
+async function kwDeleteOne(id) {
+  if (!(await customConfirm('Xoá từ khoá #' + id + ' khỏi danh sách? Các root đã nạp vào DB từ trước vẫn được GIỮ NGUYÊN.', { danger: true }))) return;
+  await api('DELETE', `/api/keywords/${id}`);
+  kwReload();
+}
+
+function kwBulkPayload() {
+  const p = {};
+  const m = document.getElementById('kw-filter-market').value;
+  const s = document.getElementById('kw-filter-status').value;
+  if (m) p.market = m;
+  if (s) p.status = s;
+  return p;
+}
+
+async function kwBulkReset() {
+  const scope = kwFilterDesc();
+  if (!(await customConfirm(`Đặt lại ${scope} về trạng thái "Chờ"? Root đã nạp vào DB vẫn được giữ nguyên; từ khoá sẽ được cào lại từ đầu.`))) return;
+  const res = await api('POST', '/api/keywords/bulk_reset', kwBulkPayload(), 30000);
+  await customAlert(`Đã đặt lại ${res.reset} từ khoá.`);
+  kwReload();
+}
+
+async function kwBulkDelete() {
+  const scope = kwFilterDesc();
+  if (!(await customConfirm(`Xoá ${scope} khỏi danh sách từ khoá? KHÔNG xoá root đã nạp vào DB. Không thể hoàn tác.`, { danger: true }))) return;
+  const res = await api('POST', '/api/keywords/bulk_delete', kwBulkPayload(), 30000);
+  await customAlert(`Đã xoá ${res.deleted} từ khoá.`);
+  kwReload();
+}
+
 // Chan chong tick: neu lan poll truoc CHUA xong (vd dang cho 1 request timeout 15s) thi bo
 // qua lan nay thay vi ban them 4 request nua chong len - tranh chiem het 6 ket noi dong
 // thoi/domain cua trinh duyet (xem ghi chu o api()). Bat ky loi nao (kmm ca timeout) deu bi
@@ -2494,6 +2990,9 @@ setInterval(async () => {
     await Promise.all([loadStats(), loadRoots(), loadWorkers(), loadRootMarketStats()]);
     if (document.getElementById('tab-gpm') && document.getElementById('tab-gpm').classList.contains('active')) {
       try { await loadGpmAll(); } catch (e) { console.warn('[poll] gpm:', e); }
+    }
+    if (document.getElementById('tab-kw') && document.getElementById('tab-kw').classList.contains('active')) {
+      try { await kwReload(); } catch (e) { console.warn('[poll] kw:', e); }
     }
   } catch (e) {
     console.warn('[poll] Bo qua loi khi tu dong lam moi:', e);

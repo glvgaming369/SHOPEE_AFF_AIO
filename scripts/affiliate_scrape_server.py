@@ -1185,6 +1185,178 @@ def stats():
 
 
 # ============================================================================
+# Tab "Cào root AFF" - cao san pham root theo TU KHOA qua trang
+# affiliate.shopee.*/offer/product_offer (xem Cao_root_aff.txt). Worker la
+# cdp_keyword_worker.mjs (spawn tu tab Vận hành GPM, mode 'keyword'): claim tu khoa
+# pending, dieu khien CHINH TRANG affiliate search theo tu khoa do (de trang tu goi
+# /api/v3/offer/product/list voi token chong bot hop le), hook Network chup tung trang
+# roi day ve /api/keywords/page_done. Server loc tieu chi theo CAU HINH CAO worker gui
+# kem moi trang: sold_min + comm_money_min = so TIEN hoa hong uoc tinh toi thieu
+# (seller_commission_rate% * gia hien thi - "seller_com quy doi thanh tien") + filter_types
+# (danh dau Xtra). CAC GIA TRI NAY CHI AP DUNG KHI CAO (nhap o tab Vận hành GPM luc start
+# worker), KHONG LUU khi import tu khoa. Item dat tieu chi insert root pending vao bang
+# 'products' chung (link_type 'root', groupid=itemid) - link da ton tai o bat ky dau trong
+# DB thi bo qua (dup_skipped).
+# ============================================================================
+KEYWORD_MARKETS = ("ph", "th", "my", "id", "vn", "sg")
+
+
+def _parse_keyword_text(text):
+    """Doc noi dung dan len: ho tro ca dang "moi dong 1 tu khoa" lan dang file nhom
+    (tieu de nhom tren 1 dong, sau do { cac tu khoa } - xem keyword_PH.txt). Dang file
+    nhom: chi giu dong NAM TRONG { }; tieu de nhom/dau ngoac tu bo. Neu ca text khong co
+    { } thi moi dong khong rong la 1 tu khoa."""
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    if not lines:
+        return []
+    if any(ln in ("{", "}") for ln in lines):
+        out, in_block = [], False
+        for ln in lines:
+            if ln == "{":
+                in_block = True
+            elif ln == "}":
+                in_block = False
+            elif in_block:
+                out.append(ln)
+        return out
+    return [ln for ln in lines if ln not in ("{", "}")]
+
+
+@app.route("/api/keywords/summary", methods=["GET"])
+def keywords_summary():
+    market = request.args.get("market") or None
+    return jsonify(shopee_db.keyword_summary(DB_PATH, market=market))
+
+
+@app.route("/api/keywords/list", methods=["GET"])
+def keywords_list():
+    market = request.args.get("market") or None
+    status = request.args.get("status") or None
+    search = request.args.get("search") or None
+    try:
+        cat_id = int(request.args["cat_id"]) if request.args.get("cat_id") not in (None, "") else None
+    except (TypeError, ValueError):
+        return _bad_request("'cat_id' phai la so nguyen")
+    limit = int(request.args.get("limit") or 300)
+    rows = shopee_db.list_keywords(DB_PATH, market=market, status=status,
+                                   search=search, cat_id=cat_id, limit=limit)
+    return jsonify({"keywords": rows})
+
+
+@app.route("/api/keywords/import", methods=["POST"])
+def keywords_import():
+    """Nhap 1 LO tu khoa (cung market + cung cat_id/cat_name cho CA LO - dung quyet dinh
+    "gắn cả lô khi người dùng ấn nút import"). CAC THONG SO SORT/FILTER/SOLD/HOA HONG KHONG
+    NHAN O DAY - chung la cau hinh KHI CAO (worker gui kem moi /api/keywords/page_done).
+    body: {market, keywords: [..] hoac text: "...", cat_id?, cat_name?}."""
+    body = request.get_json(force=True, silent=True) or {}
+    market = (body.get("market") or "").strip().lower()
+    if market not in KEYWORD_MARKETS:
+        return _bad_request(f"'market' phai la 1 trong: {', '.join(KEYWORD_MARKETS)}")
+    keywords = body.get("keywords")
+    if not isinstance(keywords, list):
+        keywords = _parse_keyword_text(body.get("text"))
+    if not isinstance(keywords, list) or not keywords:
+        return _bad_request("thieu tu khoa: gui 'keywords' (list) hoac 'text' (nhieu dong)")
+    try:
+        cat_id = int(body["cat_id"]) if body.get("cat_id") not in (None, "") else None
+    except (TypeError, ValueError):
+        return _bad_request("'cat_id' phai la so nguyen")
+    cat_name = (body.get("cat_name") or "").strip() or None
+    if cat_id is not None and not cat_name:
+        cat_name = shopee_categories.cat_name_for(market, cat_id)
+    result = shopee_db.import_keywords(
+        DB_PATH, market, keywords, cat_id=cat_id, cat_name=cat_name,
+    )
+    return jsonify({"ok": True, **result})
+
+
+@app.route("/api/keywords/claim", methods=["POST"])
+def keywords_claim():
+    """Worker goi khi ranh: nhan 1 tu khoa pending (hoac con sot/in_progress lease het)
+    DUNG market cua tab dang mo. Tra ve {'keyword': {...}} hoac keyword=null khi het viec."""
+    body = request.get_json(force=True, silent=True) or {}
+    device_key = (body.get("device_key") or "").strip()
+    market = (body.get("market") or "").strip().lower()
+    if not device_key:
+        return _bad_request("thieu 'device_key'")
+    if market not in KEYWORD_MARKETS:
+        return _bad_request(f"'market' phai la 1 trong: {', '.join(KEYWORD_MARKETS)}")
+    row = shopee_db.claim_keyword(DB_PATH, device_key, market)
+    return jsonify({"keyword": row})
+
+
+@app.route("/api/keywords/page_done", methods=["POST"])
+def keywords_page_done():
+    """Worker nop 1 trang (page_offset) item that da chup tu chinh trang affiliate. Server
+    loc (theo CAU HINH CAO worker gui kem: sold_min/comm_money_min/filter_types - khong luu
+    o import) + insert root pending moi (dedup toan DB) + cap nhat checkpoint/keyword."""
+    body = request.get_json(force=True, silent=True) or {}
+    keyword_id = body.get("keyword_id")
+    device_key = (body.get("device_key") or "").strip()
+    market = (body.get("market") or "").strip().lower()
+    items = body.get("items")
+    if keyword_id in (None, ""):
+        return _bad_request("thieu 'keyword_id'")
+    if not device_key:
+        return _bad_request("thieu 'device_key'")
+    if not market:
+        return _bad_request("thieu 'market'")
+    result = shopee_db.keyword_page_done(
+        DB_PATH, keyword_id, device_key, market,
+        body.get("page_offset"), body.get("page_limit"),
+        body.get("total_count"), items if isinstance(items, list) else [],
+        sold_min=body.get("sold_min"), comm_money_min=body.get("comm_money_min"),
+        filter_types=body.get("filter_types"),
+    )
+    if not result.get("ok"):
+        return jsonify(result), 409
+    return jsonify(result)
+
+
+@app.route("/api/keywords/<int:keyword_id>/fail", methods=["POST"])
+def keywords_fail(keyword_id):
+    body = request.get_json(force=True, silent=True) or {}
+    reason = (body.get("reason") or "unknown_error")[:500]
+    shopee_db.fail_keyword(DB_PATH, keyword_id, reason)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/keywords/<int:keyword_id>/reset", methods=["POST"])
+def keywords_reset_one(keyword_id):
+    ok = shopee_db.reset_keyword(DB_PATH, keyword_id)
+    if not ok:
+        return _bad_request("khong tim thay keyword nay")
+    return jsonify({"ok": True})
+
+
+@app.route("/api/keywords/<int:keyword_id>", methods=["DELETE"])
+def keywords_delete_one(keyword_id):
+    ok = shopee_db.delete_keyword(DB_PATH, keyword_id)
+    if not ok:
+        return _bad_request("khong tim thay keyword nay")
+    return jsonify({"ok": True})
+
+
+@app.route("/api/keywords/bulk_reset", methods=["POST"])
+def keywords_bulk_reset():
+    """Dat lai hang loat tu khoa khop bo loc ve pending (bo loc rong = tat ca)."""
+    body = request.get_json(force=True, silent=True) or {}
+    n = shopee_db.reset_keywords(DB_PATH, market=body.get("market") or None,
+                                 status=body.get("status") or None)
+    return jsonify({"ok": True, "reset": n})
+
+
+@app.route("/api/keywords/bulk_delete", methods=["POST"])
+def keywords_bulk_delete():
+    """Xoa hang loat tu khoa khop bo loc (KHONG dong cham toi root da bom)."""
+    body = request.get_json(force=True, silent=True) or {}
+    n = shopee_db.delete_keywords(DB_PATH, market=body.get("market") or None,
+                                  status=body.get("status") or None)
+    return jsonify({"ok": True, "deleted": n})
+
+
+# ============================================================================
 # Tab "Vận hành GPM" - dieu phoi worker cào qua GPM Login (Local API 9495).
 # Server lam proxy (GPM khong CORS) + quan ly tien trinh node cdp_worker.mjs.
 # ============================================================================
@@ -1247,6 +1419,7 @@ def _gpm_worker_status(profile_id):
         "profile_id": profile_id,
         "name": info.get("name"),
         "market": info.get("market"),
+        "mode": info.get("mode") or "root",
         "port": info.get("port"),
         "running": running,
         "exit_code": None if (proc is None or running) else proc.poll(),
@@ -1327,34 +1500,57 @@ def gpm_profiles():
 
 @app.route("/api/gpm/worker/start", methods=["POST"])
 def gpm_worker_start():
-    """Spawn 1 worker cdp_worker.mjs cho 1 profile GPM (tu start browser qua GPM khi chay)."""
+    """Spawn 1 worker cho 1 profile GPM (tu start browser qua GPM khi chay).
+    mode='root' (mac dinh): cdp_worker.mjs - cao tung root (offer/product/<item_id>).
+    mode='keyword': cdp_keyword_worker.mjs - cao root AFF theo TU KHOA (worker claim tu
+    khoa pending cua market, dieu khien chinh trang affiliate search + chup product/list)."""
     body = request.get_json(force=True, silent=True) or {}
     profile_id = (body.get("profile_id") or "").strip()
     name = (body.get("name") or profile_id).strip()
     market = (body.get("market") or "ph").strip()
+    mode = (body.get("mode") or "root").strip()
     max_roots = int(body.get("max_roots") or 0)
     hidden = bool(body.get("hidden"))
     if not profile_id:
         return _bad_request("thieu 'profile_id'")
-    print(f"[gpm] start worker {name} ({profile_id})...", flush=True)
+    if mode not in ("root", "keyword"):
+        return _bad_request("'mode' chi nhan 'root' hoac 'keyword'")
+    # Cau hinh "khi cào" (chi dung cho mode keyword): sort_type/filter_types/sold_min/hoa
+    # hong tien toi thieu - nguoi dung nhap o tab Vận hành GPM luc bam start, KHONG luu o
+    # import. Server truyen sang worker (--sold-min ...) de worker gui kem moi page_done.
+    try:
+        crawl_sort = int(body.get("sort_type") or 2)
+        if crawl_sort not in (1, 2):
+            crawl_sort = 2
+        crawl_filter = int(body.get("filter_types") or 0)
+        crawl_sold = max(0, int(body.get("sold_min") or 0))
+        crawl_comm = max(0.0, float(body.get("comm_money_min") or 0))
+    except (TypeError, ValueError):
+        return _bad_request("'sort_type'/'filter_types'/'sold_min'/'comm_money_min' phai la so")
+    worker_script = "cdp_worker.mjs" if mode == "root" else "cdp_keyword_worker.mjs"
+    print(f"[gpm] start worker {name} ({profile_id}) mode={mode} crawl(sort={crawl_sort}, filter={crawl_filter}, sold>={crawl_sold}, comm>={crawl_comm})...", flush=True)
     with _gpm_lock:
         st = _gpm_worker_status(profile_id)
         if st and st["running"]:
             return jsonify({"ok": False, "error": f"Worker '{st['name']}' dang chay roi (pid da co)."}), 409
         port = _gpm_alloc_port(profile_id)
-        log_path = _gpm_log_path(name)
+        log_path = _gpm_log_path(name + ("_keyword" if mode == "keyword" else ""))
         node_exe = shutil.which("node") or "node"
         cmd = [
             node_exe,
-            os.path.join(SCRIPTS_DIR, "cdp_worker.mjs"),
+            os.path.join(SCRIPTS_DIR, worker_script),
             "--gpm-profile", profile_id,
             "--port", str(port),
             "--device-key", name,
             "--market", market,
             "--log", log_path,
         ]
+        if mode == "keyword":
+            cmd += ["--sort-type", str(crawl_sort), "--filter-types", str(crawl_filter),
+                    "--sold-min", str(crawl_sold), "--comm-money-min", str(crawl_comm)]
         if max_roots > 0:
-            cmd += ["--max-roots", str(max_roots)]
+            limit_arg = "--max-keywords" if mode == "keyword" else "--max-roots"
+            cmd += [limit_arg, str(max_roots)]
         if hidden:
             cmd += ["--hidden", "1"]
     # spawn NGOAI lock de khong chan cac request khac
@@ -1366,11 +1562,11 @@ def gpm_worker_start():
         logf.close()
         return jsonify({"ok": False, "error": f"Khong spawn duoc worker: {e}"}), 500
     _gpm_workers[profile_id] = {
-        "proc": proc, "name": name, "market": market,
+        "proc": proc, "name": name, "market": market, "mode": mode,
         "port": port, "log": log_path,
         "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
-    print(f"[gpm] da spawn worker {name} (profile {profile_id}) pid={proc.pid} port={port}")
+    print(f"[gpm] da spawn worker {name} (profile {profile_id}) mode={mode} pid={proc.pid} port={port}")
     return jsonify({"ok": True, "worker": _gpm_worker_status(profile_id)})
 
 
@@ -1400,7 +1596,17 @@ def gpm_worker_log():
     name = (request.args.get("name") or "").strip()
     if not name:
         return _bad_request("thieu 'name'")
-    return jsonify({"ok": True, "log": _gpm_read_log_tail(name)})
+    # Log cua worker keyword duoc ghi vao file khac (co duoi _keyword) nen tim THEO worker
+    # dang chay truoc; fallback lai duong dan mac dinh theo ten (mode root / worker cu).
+    info = next((v for v in _gpm_workers.values() if v.get("name") == name), None)
+    log_path = info.get("log") if info and info.get("log") else _gpm_log_path(name)
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+        text = "".join(lines[-60:])
+    except OSError:
+        text = "(chua co log)"
+    return jsonify({"ok": True, "log": text})
 
 
 _GPM_HOME_URL = {

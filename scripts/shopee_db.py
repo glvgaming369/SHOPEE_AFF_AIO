@@ -217,6 +217,45 @@ create table if not exists products (
 );
 """
 
+# Bang tu khoa cào root AFF (tinh nang "Cào root AFF" - cao san pham root tu trang
+# affiliate offer product_offer bang cach TIM THEO TU KHOA, xem Cao_root_aff.txt):
+# - 1 keyword duy nhat trong 1 market (unique(market, keyword)).
+# - Worker (cdp_keyword_worker.mjs) claim 1 keyword dang 'pending' (hoac 'in_progress' ma
+#   lease het han / cua CHINH device do con sot) roi dieu huong tab tren affiliate page lam
+#   cho chinh trang goi /api/v3/offer/product/list theo keyword do (token chong bot hop le),
+#   hook Network chup TUNG trang (page_offset) roi day ve server qua /api/keywords/page_done.
+# - Server lo: loc san pham dat tieu chi (sold_min, hoa hong tien uoc tinh toi thieu) dua
+#   tren CAU HINH CAO worker gui kem moi trang (khong luu o import - xem keyword_page_done:
+#   sold_min/comm_money_min/filter_types nhan tu body) roi insert vao bang 'products' lam
+#   ROOT (link_type='root', status_link='pending', groupid=itemid) - cac link da ton tai O
+#   BAT KY dau trong DB deu bi bo (dup_skipped), dung y nghia "keyword crawler chi la nguon
+#   bom root moi vao hang doi Root Navigator".
+# - status: pending (cho claim) / in_progress (dang cao) / done / error.
+# - checkpoint_page/roots_found/... chi la thong tin hien thi + resume; viec dedup dua vao
+#   chinh bang products nen cao lai tu trang 0 van AN TOAN (insert-or-ignore).
+CREATE_KEYWORDS_TABLE_SQL = """
+create table if not exists keywords (
+    id integer primary key autoincrement,
+    market text not null,
+    keyword text not null,
+    cat_id integer,
+    cat_name text,
+    status text default 'pending',
+    assigned_key text,
+    claimed_at timestamp,
+    checkpoint_page integer default 0,
+    total_count integer,
+    roots_found integer default 0,
+    roots_inserted integer default 0,
+    dup_skipped integer default 0,
+    last_error text,
+    last_page_at timestamp,
+    created_at timestamp default current_timestamp,
+    updated_at timestamp default current_timestamp,
+    unique(market, keyword)
+);
+"""
+
 
 def init_db(db_path=DB_PATH_DEFAULT):
     dirname = os.path.dirname(db_path)
@@ -386,6 +425,22 @@ def init_db(db_path=DB_PATH_DEFAULT):
     conn.execute(CREATE_CANDIDATE_ROOT_SEEN_TABLE_SQL)
     conn.execute(
         "create index if not exists idx_candidate_root_seen_item on candidate_root_seen(itemid, market)"
+    )
+    conn.execute(CREATE_KEYWORDS_TABLE_SQL)
+    # Cau hinh CÀO (sort_type/filter_types/sold_min/hoa hong tien toi thieu) KHONG con luu
+    # tren bang keywords - chung la cau hinh "khi chay worker" (gui tu tab Vận hành GPM qua
+    # /api/gpm/worker/start, worker gui kem moi /api/keywords/page_done), con import chi luu
+    # tu khoa + market + danh muc. DB tao o phien truoc con giu may cot nay -> bo di cho
+    # dong nhat (khong anh huong gi du lieu khac).
+    kw_cols = {row[1] for row in conn.execute("pragma table_info(keywords)").fetchall()}
+    for legacy_col in ("sort_type", "filter_types", "sold_min", "comm_money_min", "seller_com_min"):
+        if legacy_col in kw_cols:
+            try:
+                conn.execute(f"alter table keywords drop column {legacy_col}")
+            except sqlite3.OperationalError:
+                pass  # SQLite cu khong ho tro DROP COLUMN - de nguyen cot thua (khong doc nua)
+    conn.execute(
+        "create index if not exists idx_keywords_claim on keywords(status, market)"
     )
     conn.commit()
     return conn
@@ -1193,11 +1248,13 @@ def remove_worker(db_path, device_key):
     tu xuat hien lai o lan bao cao ke tiep (khong ngan duoc viec do, chi xoa duoc 1 lan).
     Tra ve {"removed": bool, "released_claims": n}."""
     released = release_claims_for_device(db_path, device_key)
+    kw_released = release_keyword_claims_for_device(db_path, device_key)
     conn = _connect(db_path)
     try:
         cur = conn.execute("delete from workers where device_key=?", (device_key,))
         conn.commit()
-        return {"removed": cur.rowcount > 0, "released_claims": released}
+        return {"removed": cur.rowcount > 0, "released_claims": released,
+                "released_keywords": kw_released}
     finally:
         conn.close()
 
@@ -1632,21 +1689,63 @@ def count_roots_by_market(db_path):
 
 
 def category_stats(db_path, market=None):
-    """Tong so san pham (ca root lan related, moi status_link) theo TUNG danh muc
-    (cat_id/cat_name) - dung cho khoi 'Thong ke nganh hang' o tab 'Van hanh'. market: gioi
-    han 1 thi truong cu the (None/'' = tat ca). Cac dong cat_id IS NULL (cao ngoai tab danh
-    muc) gom chung thanh 1 nhom - SQLite coi NULL = NULL khi GROUP BY nen tu nhien gop dung,
-    KHONG can xu ly rieng. Sap giam dan theo so luong (nganh hang nhieu nhat len dau)."""
+    """Tong so san pham (ca root lan related, moi status_link) theo TUNG danh muc - dung
+    cho khoi 'Thong ke nganh hang' o tab 'Van hanh'. market: gioi han 1 thi truong cu the
+    (None/'' = tat ca thi truong).
+
+    Gop thanh 1 hang theo TEN danh muc (khong phan biet hoa/thuong). Ly do gop 2 cap:
+      - truoc day GROUP BY (cat_id, cat_name): cung cat_id ma cat_name lech (NULL/hoa thuong)
+        -> 1 danh muc nổ thanh nhieu hang trung.
+      - gop theo (market, cat_id): giai quyet tren, NHUNG nhieu cat_id khac nhau lai co cung
+        ten (products/cat-db luu ten trung, vd nhieu 'Home Appliances') -> ten van lap lai.
+    Ten hien thi uu tien bang cat-db chuan, fallback ten dang luu trong DB; xem 'Tat ca' thi
+    ghi them market vao nhan (cat_id cap rieng tung market)."""
+    import shopee_categories
     conn = _connect(db_path)
     try:
         where = "where market=?" if market else ""
         params = [market] if market else []
         rows = conn.execute(
-            f"select cat_id, cat_name, count(*) as total from products {where} "
-            "group by cat_id, cat_name order by total desc",
+            f"select market, cat_id, count(*) as total from products {where} "
+            "group by market, cat_id order by total desc",
             params,
         ).fetchall()
-        categories = [{"cat_id": cat_id, "cat_name": cat_name, "count": total} for cat_id, cat_name, total in rows]
+        stored = {}
+        stored_where = "where market=? and cat_name is not null" if market else "where cat_name is not null"
+        stored_params = [market] if market else []
+        for m, cid, name in conn.execute(
+            f"select market, cat_id, cat_name from products {stored_where} "
+            "group by market, cat_id, cat_name",
+            stored_params,
+        ).fetchall():
+            stored.setdefault((m, cid), name)
+
+        # Gop theo ten (khong phan biet hoa/thuong): count cong don; cat_id giu cua nhom lon nhat
+        merged = {}
+        for m, cat_id, cnt in rows:
+            name = None
+            if cat_id is not None:
+                name = shopee_categories.cat_name_for(m, cat_id)
+            if not name:
+                name = stored.get((m, cat_id))
+            if not name:
+                name = f"cat_id {cat_id} (chưa rõ tên)" if cat_id is not None else "Chưa gán danh mục"
+            if not market:
+                name = f"{name} ({m.upper()})"
+            key = (m, str(name).strip().lower())
+            prev = merged.get(key)
+            if prev is None:
+                merged[key] = {"market": m, "cat_name": name, "count": cnt, "cat_id": cat_id}
+            else:
+                prev["count"] += cnt
+                if cnt > prev.get("_max", -1):
+                    prev["_max"] = cnt
+                    prev["cat_id"] = cat_id
+        categories = []
+        for (_, _k), d in merged.items():
+            d.pop("_max", None)
+            categories.append(d)
+        categories.sort(key=lambda x: (-x["count"], str(x["cat_name"]).lower()))
         total_all = sum(c["count"] for c in categories)
         return {"total": total_all, "categories": categories}
     finally:
@@ -2663,6 +2762,503 @@ def count_status(db_path=DB_PATH_DEFAULT, groupid=None, link_type=None, status_l
             params.append(status_link)
         where_sql = f"where {' and '.join(where)}" if where else ""
         return conn.execute(f"select count(*) from products {where_sql}", params).fetchone()[0]
+    finally:
+        conn.close()
+
+
+# =====================================================================================
+# CAO ROOT AFF THEO TU KHOA (Cao_root_aff.txt) - tu khoa la hang doi viec RIENG cho
+# cdp_keyword_worker.mjs. Root dat tieu chi duoc insert vao bang 'products' chung
+# (link_type='root', status_link='pending', groupid=itemid) de Root Navigator/navigator
+# xu ly tiep - keyword crawler CHI la nguon BOM ROOT MOI, khong tu verify/gan group.
+# =====================================================================================
+
+def _parse_pct_rate(raw):
+    """'5%' / '11 %' / '-' / None -> float ty le % (5.0). Tra 0.0 khi khong doc duoc."""
+    if raw in (None, "", "-"):
+        return 0.0
+    try:
+        return float(str(raw).replace("%", "").replace(",", ".").strip())
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _normalize_keyword(text):
+    """Chuan hoa 1 tu khoa: bo khoang trang 2 dau, gom khoang trang lien tiep."""
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+def import_keywords(db_path, market, keywords, cat_id=None, cat_name=None):
+    """Nap 1 LO tu khoa vao bang 'keywords' (cung market + cung cat_id/cat_name cho CA LO -
+    dung quyet dinh "gắn cả lô khi người dùng ấn nút import"). CAC GIA TRI SORT/FILTER/
+    SOLD/HOA HONG KHONG LUU O DAY - chung la cau hinh "khi cào" (worker gui kem moi trang,
+    xem keyword_page_done). Tu khoa duy nhat tren 1 market (so sanh khong phan biet
+    hoa/thuong de tranh 'Mini Projector' vs 'mini projector' trung nhau). Tra ve so lieu:
+    {"added": n, "duplicates": n, "skipped": n, "keywords": [dong keyword moi them]}."""
+    if not market:
+        return {"added": 0, "duplicates": 0, "skipped": 0, "keywords": []}
+    try:
+        cat_id_int = int(cat_id) if cat_id not in (None, "") else None
+    except (TypeError, ValueError):
+        cat_id_int = None
+
+    rows_out = []
+    added = dup = skipped = 0
+    conn = _connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        existing = {
+            str(r["keyword"]).lower()
+            for r in conn.execute(
+                "select keyword from keywords where market=?", (market,)
+            ).fetchall()
+        }
+        seen_in_batch = set()
+        for raw in keywords:
+            kw = _normalize_keyword(raw)
+            if not kw:
+                skipped += 1
+                continue
+            key = kw.lower()
+            if key in existing or key in seen_in_batch:
+                dup += 1
+                continue
+            seen_in_batch.add(key)
+            cur = conn.execute(
+                "insert into keywords (market, keyword, cat_id, cat_name) values (?, ?, ?, ?)",
+                (market, kw, cat_id_int, cat_name),
+            )
+            if cur.rowcount:
+                added += 1
+                row = conn.execute("select * from keywords where id=?", (cur.lastrowid,)).fetchone()
+                if row:
+                    rows_out.append(dict(row))
+            else:
+                dup += 1
+        conn.commit()
+    finally:
+        conn.close()
+    return {"added": added, "duplicates": dup, "skipped": skipped, "keywords": rows_out}
+
+
+def list_keywords(db_path, market=None, status=None, search=None, cat_id=None, limit=500):
+    """Danh sach tu khoa (MOI nhat truoc) khop bo loc - cho UI quan ly + bo loc market/category."""
+    conn = _connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        where, params = [], []
+        if market:
+            where.append("market = ?")
+            params.append(market)
+        if status:
+            where.append("status = ?")
+            params.append(status)
+        if cat_id not in (None, ""):
+            where.append("cat_id = ?")
+            params.append(int(cat_id))
+        if search:
+            where.append("lower(keyword) like ?")
+            params.append("%" + str(search).lower() + "%")
+        where_sql = f"where {' and '.join(where)}" if where else ""
+        rows = conn.execute(
+            f"select * from keywords {where_sql} order by id desc limit ?",
+            params + [int(limit)],
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def keyword_summary(db_path, market=None):
+    """Tong hop so lieu tu khoa cho dashboard (dang cho/dang cao/xong/loi + root da bom)."""
+    conn = _connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        where, params = "", []
+        if market:
+            where = "where market=?"
+            params = [market]
+        rows = conn.execute(
+            f"select status, count(*) n, coalesce(sum(roots_inserted),0) ri, "
+            f"coalesce(sum(roots_found),0) rf, coalesce(sum(dup_skipped),0) d "
+            f"from keywords {where} group by status",
+            params,
+        ).fetchall()
+        total = {"pending": 0, "in_progress": 0, "done": 0, "error": 0}
+        roots = {"inserted": 0, "found": 0, "dup": 0}
+        for r in rows:
+            total[r["status"]] = r["n"]
+            roots["inserted"] += r["ri"]
+            roots["found"] += r["rf"]
+            roots["dup"] += r["d"]
+        total["all"] = sum(total.values())
+        markets = [
+            dict(r)
+            for r in conn.execute(
+                "select market, count(*) n from keywords group by market order by market",
+            ).fetchall()
+        ]
+        return {"counts": total, "roots": roots, "markets": markets}
+    finally:
+        conn.close()
+
+
+def get_keyword(db_path, keyword_id):
+    conn = _connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("select * from keywords where id=?", (int(keyword_id),)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def reset_keyword(db_path, keyword_id):
+    """Dat lai 1 tu khoa ve 'pending' (xoa claim/checkpoint/dem/lỗi) - tu khoa se duoc
+    cao lai tu dau. KHONG xoa cac root da bom vao products (dung thiet ke)."""
+    conn = _connect(db_path)
+    try:
+        cur = conn.execute(
+            "update keywords set status='pending', assigned_key=null, claimed_at=null, "
+            "checkpoint_page=0, roots_found=0, roots_inserted=0, dup_skipped=0, "
+            "last_error=null, updated_at=current_timestamp where id=?",
+            (int(keyword_id),),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def reset_keywords(db_path, market=None, status=None):
+    """Dat lai HANG LOAT tu khoa khop bo loc (bo loc rong = tat ca) ve 'pending'."""
+    conn = _connect(db_path)
+    try:
+        where, params = [], []
+        if market:
+            where.append("market = ?")
+            params.append(market)
+        if status:
+            where.append("status = ?")
+            params.append(status)
+        where_sql = f"where {' and '.join(where)}" if where else ""
+        cur = conn.execute(
+            f"update keywords set status='pending', assigned_key=null, claimed_at=null, "
+            f"checkpoint_page=0, roots_found=0, roots_inserted=0, dup_skipped=0, "
+            f"last_error=null, updated_at=current_timestamp {where_sql}",
+            params,
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def delete_keyword(db_path, keyword_id):
+    """Xoa 1 tu khoa khoi danh sach (KHONG dong cham toi root da bom - xem reset_keyword)."""
+    conn = _connect(db_path)
+    try:
+        cur = conn.execute("delete from keywords where id=?", (int(keyword_id),))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def delete_keywords(db_path, market=None, status=None):
+    conn = _connect(db_path)
+    try:
+        where, params = [], []
+        if market:
+            where.append("market = ?")
+            params.append(market)
+        if status:
+            where.append("status = ?")
+            params.append(status)
+        where_sql = f"where {' and '.join(where)}" if where else ""
+        cur = conn.execute(f"delete from keywords {where_sql}", params)
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def release_keyword_claims_for_device(db_path, device_key):
+    """Tra ve 'pending' cac tu khoa 'in_progress' dang bi DUNG device_key giu - dung khi xoa
+    worker/device (remove_worker) de tu khoa do khong bi khoa mo coi den het lease."""
+    conn = _connect(db_path)
+    try:
+        cur = conn.execute(
+            "update keywords set status='pending', assigned_key=null, claimed_at=null, "
+            "updated_at=current_timestamp where status='in_progress' and assigned_key=?",
+            (device_key,),
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def claim_keyword(db_path, device_key, market, lease_seconds=3600):
+    """Claim NGUYEN TU (BEGIN IMMEDIATE) 1 tu khoa cho worker cua DUNG market nay:
+      1) uu tien tu khoa 'in_progress' con sot cua CHINH device nay (worker vua restart),
+      2) tu khoa 'in_progress' ma lease het han (worker cu chet giua chung - cao lai tu dau,
+         dedup dua tren bang products nen an toan),
+      3) tu khoa 'pending' chua ai giu (hoac lease het).
+    Tra ve dict dong tu khoa (kem cat_id/thresholds de worker dieu khien search), hoac None."""
+    conn = _connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "select * from keywords where market=? and ("
+            "  (status='in_progress' and assigned_key=?) "
+            "  or (status='in_progress' and (claimed_at is null or claimed_at < datetime('now', ?))) "
+            "  or (status='pending' and (assigned_key is null or claimed_at is null "
+            "     or claimed_at < datetime('now', ?)))"
+            ") order by (case when status='in_progress' and assigned_key=? then 0 else 1 end), "
+            "id asc limit 1",
+            (market, device_key, f"-{lease_seconds} seconds", f"-{lease_seconds} seconds", device_key),
+        ).fetchone()
+        if row is None:
+            conn.commit()
+            return None
+        conn.execute(
+            "update keywords set status='in_progress', assigned_key=?, claimed_at=current_timestamp, "
+            "last_error=null, updated_at=current_timestamp where id=?",
+            (device_key, row["id"]),
+        )
+        conn.commit()
+        return dict(row)
+    finally:
+        conn.close()
+
+
+def _display_price_from_int(raw):
+    """Gia hien thi (don vi tien market) quy doi tu gia API (int price) - dung CUNG quy uoc
+    voi phan uoc tinh seller_commission cua candidate related (xem nav_complete trong
+    affiliate_scrape_server.py): price > 100000 -> /100000 (vd 19900000 -> 199.00), nguoc
+    lai giu nguyen (da la gia hien thi roi)."""
+    try:
+        p = int(raw or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return (p / 100000.0) if p > 100000 else float(p)
+
+
+def _commission_money_from_item(item, rate_pct):
+    """Uoc tinh SO TIEN hoa hong cua 1 item trong response /api/v3/offer/product/list -
+    response chi co ty le % (seller_commission_rate), khong kem so tien that, nen quy doi:
+    Tien hoa hong ~ rate% * gia hien thi (don vi tien cua market: PH=PHP, TH=THB, VN=VND...).
+    Dung cho: (1) loc 'comm_money_min' o keyword_page_done, (2) ghi seller_commission vao
+    root de dashboard hien thi so tien uoc tinh. Tra 0.0 neu khong tinh duoc."""
+    batch = item.get("batch_item_for_item_card_full") or {}
+    return round((float(rate_pct) / 100.0) * _display_price_from_int(batch.get("price")), 2)
+
+
+def _keyword_passes_filters(item, sold_min, comm_money_min):
+    """Kiem tra 1 item trong response product/list co dat tieu chi root cua keyword khong:
+      - sold (luot ban) >= sold_min
+      - Tien hoa hong uoc tinh (seller_commission_rate% * gia hien thi) >= comm_money_min -
+        "seller_com quy doi thanh tien" (mac dinh 0 = khong loc theo tien).
+    Tra ve None neu item khong hop le / khong dat, hoac dict metric da parse."""
+    batch = item.get("batch_item_for_item_card_full") or {}
+    itemid = str(item.get("item_id") or batch.get("itemid") or "")
+    if not itemid or not item.get("product_link"):
+        return None
+    try:
+        sold = int(batch.get("sold") or 0)
+    except (TypeError, ValueError):
+        sold = 0
+    if sold_min and sold < sold_min:
+        return None
+    rate = _parse_pct_rate(item.get("seller_commission_rate") or item.get("default_commission_rate"))
+    comm_money = _commission_money_from_item(item, rate)
+    if comm_money_min and comm_money < comm_money_min:
+        return None
+    return {"itemid": itemid, "sold": sold, "rate": rate,
+            "comm_money": comm_money, "batch": batch}
+
+
+def keyword_page_done(db_path, keyword_id, device_key, market, page_offset, page_limit,
+                      total_count, items, sold_min=None, comm_money_min=None,
+                      filter_types=None):
+    """Nhan 1 trang (page_offset) item that do CHINH TRANG affiliate goi (token hop le) tu
+    worker: loc tieu chi -> insert root pending moi vao 'products' (bo qua item da ton tai
+    BAT KY dau trong DB -> dup_skipped) -> cap nhat checkpoint/dem cua tu khoa. Trang cuoi
+    (trang rong / it hon page_limit / da toi duoi total_count) -> status='done', nha claim.
+    items: list raw data.list[] tu response product/list.
+
+    CAC NGUONG LOC (sold_min, comm_money_min, filter_types) la CAU HINH KHI CAO - worker gui
+    kem MOI trang nay (tu cau hinh bat dau o tab Vận hành GPM), KHONG luu tren keyword o luc
+    import. Neu khong gui (tuong thich client cu) thi mac dinh 0 / khong loc. Giao dich
+    NGUYEN TU de nhieu worker cung luc khong dem trung/insert trung."""
+    try:
+        page_offset = int(page_offset or 0)
+        page_limit = int(page_limit or 20)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "'page_offset'/'page_limit' phai la so nguyen"}
+    if not isinstance(items, list):
+        return {"ok": False, "error": "thieu 'items' (danh sach item cua trang)"}
+    try:
+        sold_min = max(0, int(sold_min or 0)) if sold_min is not None else 0
+        comm_money_min = max(0.0, float(comm_money_min or 0)) if comm_money_min is not None else 0.0
+        filter_types = int(filter_types or 0) if filter_types is not None else 0
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "'sold_min'/'comm_money_min'/'filter_types' phai la so"}
+
+    conn = _connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("select * from keywords where id=?", (int(keyword_id),)).fetchone()
+        if row is None:
+            conn.commit()
+            return {"ok": False, "error": "khong tim thay keyword nay"}
+        if market and row["market"] != market:
+            conn.commit()
+            return {"ok": False, "error": f"keyword thuoc market '{row['market']}', khong phai '{market}'"}
+        if row["assigned_key"] != device_key:
+            conn.commit()
+            return {"ok": False, "error": "keyword khong duoc giao cho device nay (bi worker khac giu?)"}
+
+        found = inserted = dup = 0
+        # Ban do cat_id (cap 1 trong cat-db cua market) -> ten: chi dung cat_id co trong ban
+        # do; con lai giu NGUYEN cat_id/cat_name cua LO KEYWORD de cat_id va cat_name luon
+        # di doi (tranh bug: cat_id that cua item khong co trong cat-db nhung lai gan ten cua
+        # keyword -> nhieu cat_id khac nhau cung 1 ten nhu 'Home Appliances').
+        import shopee_categories
+        cat_index = {
+            c["cat_id"]: c["cat_name"]
+            for c in shopee_categories.list_categories(row["market"])
+        }
+        for item in items:
+            metric = _keyword_passes_filters(item, sold_min, comm_money_min)
+            if metric is None:
+                continue
+            found += 1
+            # Da ton tai O BAT KY dau trong DB (root/related/pending/cached/member...) thi
+            # khong lay lam root nua - dung y nghia "link tu keyword la duy nhat toan DB".
+            ex = conn.execute(
+                "select 1 from products where itemid=? and market=?",
+                (metric["itemid"], row["market"]),
+            ).fetchone()
+            if ex is not None:
+                dup += 1
+                continue
+            # Map item -> row root pending (gio nguyen phong cach map_v2_data_to_row).
+            r = map_v2_data_to_row(
+                item, link_type="root", groupid=metric["itemid"],
+                status_link="pending", market=row["market"],
+            )
+            if not r.get("itemid") or not r.get("product_link"):
+                continue
+            batch = metric["batch"]
+            # Cat cua san pham: uu tien cat_id THAT tu response NHUNG chi khi cat-db biet ten
+            # cua no (bao dam cat_id+cat_name khop). Neu cat_id that khong co trong cat-db
+            # (pho bien: id leaf/chi tiet, cat-db chi chua danh muc cap 1) -> dung cat_id +
+            # cat_name cua LO KEYWORD (nguoi dung chon luc import) de 1 ten chi di voi 1 id.
+            real_cat_id = None
+            try:
+                real_cat_id = int(batch.get("catid")) if batch.get("catid") not in (None, "") else None
+            except (TypeError, ValueError):
+                real_cat_id = None
+            if real_cat_id is not None and real_cat_id in cat_index:
+                r["cat_id"] = real_cat_id
+                r["cat_name"] = cat_index[real_cat_id]
+            else:
+                r["cat_id"] = row["cat_id"]
+                r["cat_name"] = row["cat_name"]
+            # Xtra: filter_types=2 la loc "Comm Xtra" -> item trong ket qua do co hoa hong Xtra.
+            r["xtra"] = 1 if filter_types == 2 else None
+            # Ghi seller_commission = TIEN hoa hong UOC TINH (rate% * gia hien thi) de root
+            # co so tien hien thi tren dashboard; Root Navigator khi verify that se ghi de
+            # bang so tien that tu offer/product (neu co). Cot default/shopee_commission de
+            # None - product/list chi co ty le seller_commission_rate, khong co so tien that.
+            r["seller_commission"] = metric["comm_money"] if metric["comm_money"] > 0 else None
+            r["default_commission"] = None
+            r["shopee_commission"] = None
+            cols = [c for c in COLUMNS if r.get(c) is not None]
+            if not cols or "itemid" not in cols or "product_link" not in cols:
+                continue
+            cur = conn.execute(
+                f"insert or ignore into products ({', '.join(cols)}) "
+                f"values ({', '.join('?' for _ in cols)})",
+                [r[c] for c in cols],
+            )
+            if cur.rowcount:
+                inserted += 1
+            else:
+                dup += 1
+
+        # Trang cuoi hay chua? DA XAC MINH API product/list dung page_offset = so ITEM da bo
+        # qua (item-offset, KHONG phai so trang): probe offset=1 tra list bat dau tu item thu 2,
+        # offset=5 tu item thu 6; offset cua moi lan goi tiep = offset truoc + page_limit.
+        # Ket thuc khi: trang rong / it hon page_limit / da toi duoi total_count (offset +
+        # so item trang nay >= total_count - phu dung ca trang cuoi DAY du).
+        try:
+            total_count = int(total_count) if total_count not in (None, "") else None
+        except (TypeError, ValueError):
+            total_count = None
+        prev_total = row["total_count"]
+        got_total = total_count if total_count is not None else prev_total
+        got_len = len(items)
+        finished = (
+            got_len == 0
+            or got_len < page_limit
+            or (got_total is not None and page_offset + got_len >= got_total)
+        )
+        checkpoint = max(row["checkpoint_page"] or 0, page_offset)
+
+        if finished:
+            conn.execute(
+                "update keywords set status='done', assigned_key=null, claimed_at=null, "
+                "checkpoint_page=?, total_count=?, roots_found=roots_found+?, "
+                "roots_inserted=roots_inserted+?, dup_skipped=dup_skipped+?, "
+                "last_page_at=current_timestamp, updated_at=current_timestamp where id=?",
+                (checkpoint, got_total, found, inserted, dup, int(keyword_id)),
+            )
+        else:
+            # con trang -> gia han lease (claimed_at moi) de worker khac khong "cuop" giua chung
+            conn.execute(
+                "update keywords set checkpoint_page=?, total_count=?, "
+                "roots_found=roots_found+?, roots_inserted=roots_inserted+?, "
+                "dup_skipped=dup_skipped+?, last_page_at=current_timestamp, "
+                "claimed_at=current_timestamp, updated_at=current_timestamp where id=?",
+                (checkpoint, got_total, found, inserted, dup, int(keyword_id)),
+            )
+        conn.commit()
+        fresh = conn.execute("select * from keywords where id=?", (int(keyword_id),)).fetchone()
+        d = dict(fresh) if fresh else None
+        return {
+            "ok": True,
+            "keyword_id": int(keyword_id),
+            "found": found,
+            "inserted": inserted,
+            "dup_skipped": dup,
+            "finished": finished,
+            "checkpoint_page": d["checkpoint_page"] if d else checkpoint,
+            "roots_inserted_total": d["roots_inserted"] if d else None,
+            "roots_found_total": d["roots_found"] if d else None,
+            "dup_skipped_total": d["dup_skipped"] if d else None,
+            "status": d["status"] if d else None,
+        }
+    finally:
+        conn.close()
+
+
+def fail_keyword(db_path, keyword_id, reason):
+    """Danh dau tu khoa loi (worker khong the cao duoc - search bi chan, loi token...) -> nha
+    claim de khong bi nhan lai lien tuc; nguoi dung xem last_error tren dashboard roi bam
+    reset de chay lai."""
+    conn = _connect(db_path)
+    try:
+        conn.execute(
+            "update keywords set status='error', assigned_key=null, claimed_at=null, "
+            "last_error=?, updated_at=current_timestamp where id=?",
+            (str(reason or "")[:500], int(keyword_id)),
+        )
+        conn.commit()
     finally:
         conn.close()
 
