@@ -170,6 +170,17 @@ async function cleanReload(cdp) {
   await sleep(8000);
 }
 
+// Kiem tra tab co dang o trang CAPTCHA/verify cua Shopee khong (URL dang
+// /verify/captcha?...anti_bot_tracking_id=... hoac /verify/traffic...). Neu dung -> profile
+// dang dinh captcha: worker phai DUNG va khong nhan root moi nua cho den khi nguoi dung
+// giai captcha (tra ve true).
+async function pageIsCaptcha(cdp) {
+  try {
+    const u = await evaluate(cdp, 'location.href');
+    return /\/verify\/(captcha|traffic)(\?|$)/i.test(u || '') || /anti_bot_tracking_id/i.test(u || '');
+  } catch (e) { return false; }
+}
+
 async function processOfferData(root, res) {
   const itemid = String(root.itemid);
   try {
@@ -204,11 +215,29 @@ async function handleRoot(cdp, root, heartbeat) {
     log(`    fast-path khong ok (${JSON.stringify(res).slice(0, 100)}) -> dieu huong + chup`);
     res = await captureOfferByNavTimed(cdp, itemid);
   }
+  // Sau khi truy cap truc tiep 1 san pham: neu URL roi vao trang verify/captcha (VD
+  // /verify/captcha?...anti_bot_tracking_id=...) thi profile DANG DINH CAPTCHA -> DUNG ngay,
+  // khong nhan root moi (cho nguoi giai captcha roi chay lai).
+  if (await pageIsCaptcha(cdp)) {
+    log(`!!! Root ${itemid}: tab dang o trang CAPTCHA/verify (${String(await evaluate(cdp, 'location.href')).slice(0, 160)}) - DUNG worker, can giai captcha tren profile nay.`);
+    await heartbeat('blocked', itemid);
+    return 'blocked';
+  }
   if (looksBlocked(res)) {
     log(`    bi chan (${JSON.stringify(res).slice(0, 100)}) -> clean_reload roi thu lai 1 lan`);
     await cleanReload(cdp);
     await sleep(2000);
+    if (await pageIsCaptcha(cdp)) {
+      log(`!!! Root ${itemid}: sau reload van o trang CAPTCHA - DUNG worker (can giai captcha).`);
+      await heartbeat('blocked', itemid);
+      return 'blocked';
+    }
     res = mode === 'nav' ? await captureOfferByNavTimed(cdp, itemid) : await pageFetchOffer(cdp, itemid);
+  }
+  if (await pageIsCaptcha(cdp)) {
+    log(`!!! Root ${itemid}: tab van o trang CAPTCHA sau khi thu lai - DUNG worker (can giai captcha).`);
+    await heartbeat('blocked', itemid);
+    return 'blocked';
   }
   if (looksBlocked(res)) {
     log(`!!! Root ${itemid} VAN bi chan sau reload - dung worker, kiem tra login/captcha`);
@@ -216,6 +245,13 @@ async function handleRoot(cdp, root, heartbeat) {
     return 'blocked';
   }
   if (!res || res.code !== 0 || !res.data) {
+    // Truoc khi danh fail (co the la item het han), kiem tra lai 1 lan xem co phai dang
+    // ke 1 trang captcha khac dang load cham (de khong fail nham roi nhan root tiep theo).
+    if (await pageIsCaptcha(cdp)) {
+      log(`!!! Root ${itemid}: response khong chuan + tab dang o trang CAPTCHA - DUNG worker.`);
+      await heartbeat('blocked', itemid);
+      return 'blocked';
+    }
     const reason = (res && (res.head || ('code=' + res.code))) || 'unknown';
     await failRoot(root, reason);
     return 'ok';

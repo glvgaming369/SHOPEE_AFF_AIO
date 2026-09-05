@@ -209,6 +209,16 @@ async function cleanReload(cdp) {
   await sleep(13000);
 }
 
+// Kiem tra tab co dang o trang CAPTCHA/verify cua Shopee khong (VD
+// /verify/captcha?...anti_bot_tracking_id=... hoac /verify/traffic...). Neu dung -> profile
+// dang dinh captcha: worker phai DUNG va khong nhan keyword/root moi nua.
+async function pageIsCaptcha(cdp) {
+  try {
+    const u = await evaluate(cdp, 'location.href');
+    return /\/verify\/(captcha|traffic)(\?|$)/i.test(u || '') || /anti_bot_tracking_id/i.test(u || '');
+  } catch (e) { return false; }
+}
+
 async function ensureOnListing(cdp) {
   const cur = await evaluate(cdp, 'location.href');
   if (!/affiliate\.shopee/.test(String(cur || '')) || !/offer\/product_offer/.test(String(cur || ''))) {
@@ -217,6 +227,10 @@ async function ensureOnListing(cdp) {
     await sleep(6000);
   }
   const st = await settlePage(cdp);
+  if (await pageIsCaptcha(cdp)) {
+    log('!!! Tab dang o trang CAPTCHA/verify - DUNG worker (can giai captcha tren profile nay).');
+    return false;
+  }
   if (!st.ok) log('!!! Co ve dang o trang LOGIN - kiem tra profile da dang nhap affiliate.');
   return st.ok;
 }
@@ -251,6 +265,13 @@ async function handleKeyword(cdp, kw) {
   while (calls < MAX_PAGES) {
     calls++;
     const res = await evaluate(cdp, listCallExpr(text, offset));
+    // Neu tab dang o trang CAPTCHA/verify (VD sau khi dieu huong/reload) -> DUNG ngay, khong
+    // tiep tuc keyword moi - cho nguoi giai captcha roi chay lai.
+    if (await pageIsCaptcha(cdp)) {
+      log(`!!! Keyword ${label}: tab dang o trang CAPTCHA/verify (${String(await evaluate(cdp, 'location.href')).slice(0, 160)}) - DUNG worker.`);
+      await heartbeat(cdp, 'blocked', `kw#${id} ${text}`);
+      return 'blocked';
+    }
     if (res && (res.evalError || res.fetchErr)) {
       log('  loi goi list (ky thuat): ' + JSON.stringify(res).slice(0, 200) + ' - clean_reload + thu lai');
       await cleanReload(cdp);
