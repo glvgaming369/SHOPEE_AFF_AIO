@@ -10,7 +10,7 @@
 //  - goi product/list lien tuc 4+ lan trong CUNG page-view deu code:0 - khong gap loi
 //    "token 1 page-view dung 1 lan" (90309999) nhu offer/product cua root (xem RE_PLAN.md).
 //  - page_limit: chap nhan toi da 50 (>=60 tra code:400 "params error,property:page_limit";
-//    500 cung bi choi). Worker mac dinh PAGE_LIMIT=50 de giam request.
+//    500 cung bi choi). Mac dinh PAGE_LIMIT=20 (dung voi so item Shopee hien thi 1 trang listing).
 //  - page_offset la so ITEM da bo qua (item-offset, KHONG phai so trang): offset=1 tra list
 //    bat dau tu item thu 2 -> moi trang sau phai nhay offset += PAGE_LIMIT (0, 50, 100...).
 // Do do chi can fetch trực tiếp voi delay nho giua cac call, kem co che clean_reload+retry
@@ -37,10 +37,10 @@ const MAX_KEYWORDS = parseInt(arg('--max-keywords', '0'), 10);
 const MIN_DELAY_MS = parseInt(arg('--min-delay', '2500'), 10);
 const MAX_DELAY_MS = parseInt(arg('--max-delay', '5000'), 10);
 const NAV_TIMEOUT_MS = parseInt(arg('--nav-timeout', '20000'), 10);
-// Gioi han page_limit DA TEST THAT (profile SHOPEE 001): 50 la toi da chap nhan, >=60 tra
-// code:400 "params error,property:page_limit" (500 cung bi choi). Mac dinh dung 50 de giam
-// so request: keyword total_count=500 -> chi 10 trang (so voi 25 neu page_limit=20).
-const PAGE_LIMIT = parseInt(arg('--page-limit', '50'), 10) || 50;
+// page_limit: toi da chap nhan la 50 (>=60 tra code:400 "params error,property:page_limit").
+// Mac dinh 20 - dung voi so item Shopee hien thi 1 trang listing (50 = nhieu request bi lo
+// bot hon; de giam request co the chay --page-limit 50 neu can).
+const PAGE_LIMIT = parseInt(arg('--page-limit', '20'), 10) || 20;
 // Cau hinh "khi cào" - nhap o tab Vận hành GPM luc start worker (server truyen qua args),
 // KHONG luu o import. Worker gui kem MOI trang page_done de server loc dung 1 lan nay.
 const SORT_TYPE = parseInt(arg('--sort-type', '2'), 10) || 2;        // 1=Relevance 2=Top Sales
