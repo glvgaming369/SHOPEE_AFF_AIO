@@ -241,6 +241,7 @@ async function handleKeyword(cdp, kw) {
   await heartbeat(cdp, 'working', `kw#${id} ${text}`);
 
   let blockedCount = 0;
+  let badRespCount = 0; // response loi thoang qua (khong phai chan, khong phai data hop le)
   let pagesSinceReload = 0;
   let calls = 0; // so lan goi API (canh phong vong lap vo han; offset nhay PAGE_LIMIT/lan)
   let last = null;
@@ -270,10 +271,22 @@ async function handleKeyword(cdp, kw) {
       continue;
     }
     if (!res || res.code !== 0 || !Array.isArray(res.list)) {
-      log(`  response loi (code=${res && res.code}, http=${res && res.http}) - danh fail keyword.`);
-      try { await serverJson('POST', `/api/keywords/${id}/fail`, { reason: 'list_bad_response:' + String(res && res.code) }); } catch (e) {}
-      return 'fail';
+      // response khong hop le nhung cung khong phai chan ro rang - co the la loi thoang qua
+      // (SDK chua san, HTML loi khong khop heuristic, code khac 0 tam thoi...). Reload va thu
+      // lai CUNG offset toi 3 lan truoc khi danh fail that su.
+      const detail = JSON.stringify({ http: res && res.http, code: res && res.code, msg: res && res.msg, head: res && res.head }).slice(0, 200);
+      badRespCount++;
+      log(`  response loi (lan ${badRespCount}): ${detail} - clean_reload + thu lai offset ${offset}`);
+      await cleanReload(cdp);
+      if (badRespCount >= 3) {
+        log(`  van loi sau 3 lan reload -> danh fail keyword ${label}.`);
+        const reason = 'list_bad_response:' + JSON.stringify({ http: res && res.http, code: res && res.code, msg: res && res.msg });
+        try { await serverJson('POST', `/api/keywords/${id}/fail`, { reason }); } catch (e) {}
+        return 'fail';
+      }
+      continue;
     }
+    badRespCount = 0; // co response hop le - reset dem loi thoang qua
 
     const list = res.list;
     if (res.total_count != null) total = res.total_count;
