@@ -586,7 +586,22 @@ def group_count(groupid):
 @app.route("/api/roots/list", methods=["GET"])
 def list_roots():
     market = request.args.get("market") or None
-    return jsonify({"roots": shopee_db.list_roots_with_counts(DB_PATH, market=market)})
+    status = request.args.get("status") or None
+    return jsonify({"roots": shopee_db.list_roots_with_counts(DB_PATH, status=status, market=market)})
+
+
+@app.route("/api/roots/reset_by_filter", methods=["POST"])
+def reset_roots_by_filter():
+    """Dat lai (ve 'pending') toan bo root theo bo loc dang chon o UI (market + trang thai) -
+    dung cho nut 'Dat lai Root (theo bo loc)' o khoi 'Danh sach Root'. Chi cho phep reset root
+    dang 'done'/'fail' (root pending khong co gi de reset). Nha claim + xoa fail_reason."""
+    body = request.get_json(force=True, silent=True) or {}
+    market = (body.get("market") or "").strip() or None
+    status = (body.get("status") or "").strip()
+    if status not in ("done", "fail"):
+        return _bad_request("'status' chi ho tro 'done' hoac 'fail'")
+    count = shopee_db.reset_roots_by_filter(DB_PATH, market=market, statuses=(status,))
+    return jsonify({"ok": True, "reset_count": count, "market": market, "status": status})
 
 
 @app.route("/api/items/category_stats", methods=["GET"])
@@ -1413,6 +1428,30 @@ def _gpm_log_path(name):
     return os.path.join(log_dir, f"gpm_worker_{safe}.log")
 
 
+def _find_node():
+    """Tim node.exe de spawn worker - khong chi tin PATH (server co the duoc khoi dong tu moi
+    truong thieu node trong PATH, gay [WinError 2] 'Khong spawn duoc worker')."""
+    cands = []
+    try:
+        w = shutil.which("node")
+        if w:
+            cands.append(w)
+    except Exception:
+        pass
+    env_dirs = []
+    for key in ("ProgramFiles", "ProgramFiles(x86)"):
+        v = os.environ.get(key)
+        if v:
+            env_dirs.append(os.path.join(v, "nodejs", "node.exe"))
+    la = os.environ.get("LOCALAPPDATA")
+    if la:
+        env_dirs.append(os.path.join(la, "Programs", "nodejs", "node.exe"))
+    for p in env_dirs:
+        if p and os.path.isfile(p) and p not in cands:
+            cands.append(p)
+    return cands[0] if cands else "node"
+
+
 def _gpm_worker_status(profile_id):
     info = _gpm_workers.get(profile_id)
     if not info:
@@ -1537,7 +1576,7 @@ def gpm_worker_start():
             return jsonify({"ok": False, "error": f"Worker '{st['name']}' dang chay roi (pid da co)."}), 409
         port = _gpm_alloc_port(profile_id)
         log_path = _gpm_log_path(name + ("_keyword" if mode == "keyword" else ""))
-        node_exe = shutil.which("node") or "node"
+        node_exe = _find_node()
         cmd = [
             node_exe,
             os.path.join(SCRIPTS_DIR, worker_script),
