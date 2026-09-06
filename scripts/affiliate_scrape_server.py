@@ -715,6 +715,8 @@ def update_settings():
         auto_assign=body.get("auto_assign"),
         dongvanfb_api_key=body.get("dongvanfb_api_key"),
         auto_assign_market=body.get("auto_assign_market"),
+        kw_auto_assign=body.get("kw_auto_assign"),
+        kw_auto_market=body.get("kw_auto_market"),
     )
     return jsonify(result)
 
@@ -1293,7 +1295,9 @@ def keywords_import():
 @app.route("/api/keywords/claim", methods=["POST"])
 def keywords_claim():
     """Worker goi khi ranh: nhan 1 tu khoa pending (hoac con sot/in_progress lease het)
-    DUNG market cua tab dang mo. Tra ve {'keyword': {...}} hoac keyword=null khi het viec."""
+    DUNG market cua tab dang mo. Tra ve {'keyword': {...}} hoac keyword=null khi het viec
+    (hoac auto-nhan keyword dang TAT / market bi gioi han - xem kw_auto_assign/kw_auto_market
+    trong settings, bat/tat o tab 'Tu Khoa')."""
     body = request.get_json(force=True, silent=True) or {}
     device_key = (body.get("device_key") or "").strip()
     market = (body.get("market") or "").strip().lower()
@@ -1301,8 +1305,14 @@ def keywords_claim():
         return _bad_request("thieu 'device_key'")
     if market not in KEYWORD_MARKETS:
         return _bad_request(f"'market' phai la 1 trong: {', '.join(KEYWORD_MARKETS)}")
+    settings = shopee_db.get_settings(DB_PATH)
+    if not settings.get("kw_auto_assign", 1):
+        return jsonify({"keyword": None, "auto": False})
+    kw_market = (settings.get("kw_auto_market") or "").strip().lower()
+    if kw_market and kw_market != market:
+        return jsonify({"keyword": None, "auto": False, "limit_market": kw_market})
     row = shopee_db.claim_keyword(DB_PATH, device_key, market)
-    return jsonify({"keyword": row})
+    return jsonify({"keyword": row, "auto": True})
 
 
 @app.route("/api/keywords/page_done", methods=["POST"])

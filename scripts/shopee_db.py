@@ -408,6 +408,12 @@ def init_db(db_path=DB_PATH_DEFAULT):
     # tuong thich nguoc). Xem get_assigned_root_for_worker().
     if "auto_assign_market" not in existing_settings_cols:
         conn.execute("alter table settings add column auto_assign_market text default ''")
+    # Cot auto nhan KEYWORD (tuong tu auto_assign cua root): kw_auto_assign = worker tu nhan
+    # keyword moi hay khong; kw_auto_market = gioi han chi auto-nhan o 1 market (rong = tat ca).
+    if "kw_auto_assign" not in existing_settings_cols:
+        conn.execute("alter table settings add column kw_auto_assign integer default 1")
+    if "kw_auto_market" not in existing_settings_cols:
+        conn.execute("alter table settings add column kw_auto_market text default ''")
     conn.execute(CREATE_VIDEO_MACHINES_TABLE_SQL)
     conn.execute(CREATE_VIDEO_PUSH_LOG_TABLE_SQL)
     conn.execute("create index if not exists idx_video_push_log_created on video_push_log(created_at)")
@@ -480,14 +486,15 @@ def get_settings(db_path=DB_PATH_DEFAULT):
 
 def update_settings(db_path=DB_PATH_DEFAULT, promoted_7d_max=None, sold_min=None,
                      seller_commission_vnd_min=None, auto_assign=None, dongvanfb_api_key=None,
-                     auto_assign_market=None):
+                     auto_assign_market=None, kw_auto_assign=None, kw_auto_market=None):
     """Cap nhat MOT PHAN nguong loc (tham so None = giu nguyen gia tri cu). Tra ve settings
     day du sau khi cap nhat - dung cho endpoint POST /api/settings. dongvanfb_api_key dung
     chung cho tab "Tao tai khoan Shopee" (mua mail + lay code) - luu chung 1 dong settings
     nay thay vi bang rieng vi chi co DUY NHAT 1 key toan cuc, khong nhieu nhu video_machines.
     auto_assign_market: '' (chuoi rong) nghia la NGUOI DUNG CHU DINH chon "Tat ca market" -
     PHAI phan biet voi None (khong truyen = giu nguyen gia tri cu), nen dung is not None thay
-    vi truthy check nhu cac cot khac."""
+    vi truthy check nhu cac cot khac. kw_auto_assign/kw_auto_market: auto nhan KEYWORD moi
+    cua worker (xem ghi chu init_db) - cung quy tac None = giu nguyen."""
     current = get_settings(db_path)
     new_vals = {
         "promoted_7d_max": promoted_7d_max if promoted_7d_max is not None else current["promoted_7d_max"],
@@ -501,14 +508,20 @@ def update_settings(db_path=DB_PATH_DEFAULT, promoted_7d_max=None, sold_min=None
         "auto_assign_market": (
             auto_assign_market if auto_assign_market is not None else current["auto_assign_market"]
         ),
+        "kw_auto_assign": int(bool(kw_auto_assign)) if kw_auto_assign is not None else current.get("kw_auto_assign", 1),
+        "kw_auto_market": (
+            kw_auto_market if kw_auto_market is not None else current.get("kw_auto_market", "")
+        ),
     }
     conn = _connect(db_path)
     try:
         conn.execute(
             "update settings set promoted_7d_max=?, sold_min=?, seller_commission_vnd_min=?, "
-            "auto_assign=?, dongvanfb_api_key=?, auto_assign_market=? where id=1",
+            "auto_assign=?, dongvanfb_api_key=?, auto_assign_market=?, kw_auto_assign=?, kw_auto_market=? "
+            "where id=1",
             (new_vals["promoted_7d_max"], new_vals["sold_min"], new_vals["seller_commission_vnd_min"],
-             new_vals["auto_assign"], new_vals["dongvanfb_api_key"], new_vals["auto_assign_market"]),
+             new_vals["auto_assign"], new_vals["dongvanfb_api_key"], new_vals["auto_assign_market"],
+             new_vals["kw_auto_assign"], new_vals["kw_auto_market"]),
         )
         conn.commit()
     finally:

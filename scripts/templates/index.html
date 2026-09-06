@@ -912,6 +912,27 @@
   </section>
 
   <section>
+    <div class="row" style="background:var(--surface-2); padding:12px; border-radius:var(--radius-sm); border:1px solid var(--border);">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;">
+        <input type="checkbox" id="kw-auto-assign" onchange="saveKwAuto()">
+        Worker tự nhận keyword mới (auto claim)
+      </label>
+      <span style="color:var(--border-strong);">|</span>
+      <label style="white-space:nowrap;font-weight:500;">Chỉ auto nhận market:</label>
+      <select id="kw-auto-market" onchange="saveKwAuto()" style="max-width:160px;">
+        <option value="">-- Tất cả --</option>
+        <option value="ph">PH</option>
+        <option value="th">TH</option>
+        <option value="my">MY</option>
+        <option value="id">ID</option>
+        <option value="vn">VN</option>
+        <option value="sg">SG</option>
+      </select>
+      <span class="muted" style="font-size:12px;">Tắt để tạm dừng keyword worker (chúng sẽ báo idle, không nhận từ khoá mới).</span>
+    </div>
+  </section>
+
+  <section>
     <h2>Nhập từ khoá</h2>
     <div class="muted" style="margin-bottom:10px;">
       Danh mục (category) chọn dưới đây áp dụng cho <b>CẢ LÔ</b> từ khoá khi bấm Import.
@@ -1084,7 +1105,7 @@ function switchTab(name) {
   }
   if (name === 'sheets') { loadSheetsConfig(); loadSheetsAccounts(); }
   if (name === 'gpm') { loadGpmGroupsAndProfiles(); }
-  if (name === 'kw') { kwLoadCategories(true); kwReload(); }
+  if (name === 'kw') { kwLoadCategories(true); kwReload(); loadKwAuto(); }
 }
 
 async function withBusy(btn, fn) {
@@ -2848,6 +2869,33 @@ async function kwLoadCategories(resetFilters) {
 }
 
 function kwOnImportMarketChange() { kwLoadCategories(true); }
+
+// Auto nhan keyword moi cua worker - doc/luu kw_auto_assign + kw_auto_market (settings)
+async function loadKwAuto() {
+  try { const s = await api('GET', '/api/settings'); currentSettings = s; } catch (e) {}
+  applyKwAuto();
+}
+function applyKwAuto() {
+  const s = currentSettings || {};
+  const cb = document.getElementById('kw-auto-assign');
+  const sel = document.getElementById('kw-auto-market');
+  if (cb) cb.checked = !(s.kw_auto_assign === 0);
+  if (sel) sel.value = (s.kw_auto_market || '');
+}
+async function saveKwAuto() {
+  const cb = document.getElementById('kw-auto-assign');
+  const sel = document.getElementById('kw-auto-market');
+  try {
+    const s = await api('POST', '/api/settings', {
+      kw_auto_assign: (cb && cb.checked) ? 1 : 0,
+      kw_auto_market: (sel && sel.value) || '',
+    });
+    currentSettings = s;
+    applyKwAuto();
+  } catch (e) {
+    await customAlert('Lỗi lưu cấu hình auto keyword: ' + e.message, { danger: true });
+  }
+}
 
 function kwFilterMarketOptions(summary) {
   const sel = document.getElementById('kw-filter-market');
