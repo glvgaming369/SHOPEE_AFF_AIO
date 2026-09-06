@@ -1429,27 +1429,39 @@ def _gpm_log_path(name):
 
 
 def _find_node():
-    """Tim node.exe de spawn worker - khong chi tin PATH (server co the duoc khoi dong tu moi
-    truong thieu node trong PATH, gay [WinError 2] 'Khong spawn duoc worker')."""
+    """Tim node.exe de spawn worker - CHI nhan cac ban Node >= 22 (worker can WebSocket
+    global, chi co tu Node 22 tro len; Node 18/20 se loi 'WebSocket is not defined'). Uu tien
+    duong dan cai dat chuan (Program Files/LocalAppData) roi moi den PATH - tranh PATH tro
+    toi 1 ban Node cu khac."""
     cands = []
+    la = os.environ.get("LOCALAPPDATA")
+    if la:
+        cands.append(os.path.join(la, "Programs", "nodejs", "node.exe"))
+    for key in ("ProgramFiles", "ProgramFiles(x86)"):
+        v = os.environ.get(key)
+        if v:
+            cands.append(os.path.join(v, "nodejs", "node.exe"))
     try:
         w = shutil.which("node")
         if w:
             cands.append(w)
     except Exception:
         pass
-    env_dirs = []
-    for key in ("ProgramFiles", "ProgramFiles(x86)"):
-        v = os.environ.get(key)
-        if v:
-            env_dirs.append(os.path.join(v, "nodejs", "node.exe"))
-    la = os.environ.get("LOCALAPPDATA")
-    if la:
-        env_dirs.append(os.path.join(la, "Programs", "nodejs", "node.exe"))
-    for p in env_dirs:
-        if p and os.path.isfile(p) and p not in cands:
-            cands.append(p)
-    return cands[0] if cands else "node"
+    seen = []
+    for p in cands:
+        if p and os.path.isfile(p) and p not in seen:
+            seen.append(p)
+    first_existing = seen[0] if seen else "node"
+    for p in seen:
+        try:
+            out = subprocess.run([p, "-v"], capture_output=True, text=True, timeout=5)
+            ver = (out.stdout or out.stderr or "").strip()
+            m = re.match(r"v?(\d+)", ver)
+            if m and int(m.group(1)) >= 22:
+                return p
+        except Exception:
+            continue
+    return first_existing
 
 
 def _gpm_worker_status(profile_id):

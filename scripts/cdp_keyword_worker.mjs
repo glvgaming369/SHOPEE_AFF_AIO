@@ -23,6 +23,12 @@ import { appendFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 
+// Worker can Node >= 22 (WebSocket global chi co tu Node 22). Bao loi ro thay vi FATAL.
+if (typeof WebSocket === 'undefined') {
+  console.error('[cdp_keyword_worker] CAN Node.js >= 22 (thieu global WebSocket). Server tu dong tim node moi - kiem tra lai PATH hoac cai Node LTS.');
+  process.exit(3);
+}
+
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : d; };
 const PORT = parseInt(arg('--port', '9701'), 10);
 const DEVICE = arg('--device-key', 'cdp-keyword-worker');
