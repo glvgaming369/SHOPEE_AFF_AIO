@@ -583,7 +583,15 @@
       <select id="root-filter-market" onchange="loadRoots()" style="max-width:200px;">
         <option value="">-- Tất cả thị trường --</option>
       </select>
+      <label style="white-space:nowrap;font-weight:500;margin-left:8px;">Trạng thái root:</label>
+      <select id="root-filter-status" onchange="loadRoots()" style="max-width:150px;">
+        <option value="">-- Tất cả --</option>
+        <option value="pending">pending</option>
+        <option value="done">done</option>
+        <option value="fail">fail</option>
+      </select>
       <button class="secondary" onclick="loadRoots()">Làm mới</button>
+      <button class="secondary" onclick="resetRootsByFilter()" title="Đưa toàn bộ root đang lọc (theo thị trường + trạng thái) về 'pending' để giao lại">Đặt lại Root (theo bộ lọc)</button>
       <button class="secondary" onclick="recomputeMergedAll()">Gộp link TẤT CẢ Root</button>
       <button class="secondary" onclick="resetInsufficientAll()">Đặt lại TẤT CẢ Root thiếu</button>
       <button class="secondary" onclick="recheckCachedCandidates()" title="Giai phong related cua Root khong con dat chuan, roi quet lai toan bo cache doi chieu dieu kien hien tai - khong can cao lai Shopee">Kiểm tra lại Cache theo điều kiện mới</button>
@@ -1536,7 +1544,11 @@ function categoryCell(row) {
 
 async function loadRoots() {
   const market = document.getElementById('root-filter-market').value;
-  const qs = market ? `?market=${encodeURIComponent(market)}` : '';
+  const status = document.getElementById('root-filter-status').value;
+  const params = new URLSearchParams();
+  if (market) params.set('market', market);
+  if (status) params.set('status', status);
+  const qs = params.toString() ? '?' + params.toString() : '';
   const { roots } = await api('GET', `/api/roots/list${qs}`);
   const tbody = document.getElementById('roots-tbody');
   tbody.innerHTML = roots.map(r => `
@@ -1589,6 +1601,24 @@ async function resetInsufficientAll() {
     // tung dong), co the lau hon 15s mac dinh voi DB lon, xem ghi chu o api().
     const { reset_count } = await api('POST', '/api/roots/reset_insufficient_all', undefined, 60000);
     await customAlert(`Đã đặt lại ${reset_count} Root thiếu về trạng thái "pending".`);
+    loadRoots();
+  } catch (e) {
+    await customAlert('Lỗi: ' + e.message, { danger: true });
+  }
+}
+
+async function resetRootsByFilter() {
+  const market = document.getElementById('root-filter-market').value;
+  const status = document.getElementById('root-filter-status').value;
+  if (!status || status === 'pending') {
+    await customAlert('Chọn trạng thái root là "done" hoặc "fail" ở bộ lọc để đặt lại (root pending không cần đặt lại).', { danger: true });
+    return;
+  }
+  const marketLabel = market || 'TẤT CẢ thị trường';
+  if (!(await customConfirm(`Đưa VỀ "pending" toàn bộ Root đang ở trạng thái "${status}" thuộc ${marketLabel}?\n\nRoot sẽ được nhả claim và giao lại cho worker (giữ nguyên các related đã gom).`))) return;
+  try {
+    const { reset_count } = await api('POST', '/api/roots/reset_by_filter', { market, status }, 60000);
+    await customAlert(`Đã đặt lại ${reset_count} Root "${status}" (${marketLabel}) về "pending".`);
     loadRoots();
   } catch (e) {
     await customAlert('Lỗi: ' + e.message, { danger: true });

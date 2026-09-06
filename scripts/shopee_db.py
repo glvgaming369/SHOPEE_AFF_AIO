@@ -2092,6 +2092,31 @@ def reset_root_to_pending(db_path, itemid, market):
         conn.close()
 
 
+def reset_roots_by_filter(db_path, market=None, statuses=("done", "fail")):
+    """Dat lai (ve 'pending') toan bo root theo bo loc - dung cho nut 'Dat lai Root (theo bo
+    loc)' o khoi 'Danh sach Root'. statuses: danh sach status_link duoc reset (chi 'done'/
+    'fail' co y nghia - root pending khong can). Nha claim + xoa fail_reason. Tra so dong da
+    cap nhat. KHONG dong toi related da gan group (se duoc xu ly lai khi BFS chay lai)."""
+    if not statuses:
+        return 0
+    conn = _connect(db_path)
+    try:
+        where = ["link_type='root'", f"status_link in ({','.join('?' for _ in statuses)})"]
+        params = list(statuses)
+        if market:
+            where.append("market = ?")
+            params.append(market)
+        cur = conn.execute(
+            "update products set status_link='pending', assigned_key=null, claimed_at=null, "
+            "fail_reason=null where " + " and ".join(where),
+            params,
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
 def fetch_unfetched(db_path=DB_PATH_DEFAULT, link_type=None, groupid=None, min_sold=None,
                      order_by_sold_desc=False, limit=None):
     """Danh sach item CHUA CAO DU LIEU (affiliate_promoted_last_7days is null) - dung de
