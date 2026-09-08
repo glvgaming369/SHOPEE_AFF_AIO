@@ -278,6 +278,26 @@
   .market-check:hover { border-color: var(--ink-faint); color: var(--ink); }
   .market-check input { flex: none; accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; margin: 0; }
   .market-check:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-dark); }
+
+  /* Popup chon cot hien thi (nut "⚙ Cột") */
+  .col-pop {
+    position: absolute; right: 0; top: calc(100% + 8px); z-index: 60;
+    min-width: 250px; max-width: 320px;
+    background: var(--surface-2); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm); padding: 12px 14px;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.18);
+  }
+  .col-pop-title {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    font-weight: 700; margin-bottom: 8px; font-size: 13.5px;
+  }
+  .col-pop-list { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 2px 12px; }
+  .col-pop-item {
+    display: flex; align-items: center; gap: 7px; padding: 4px 2px; cursor: pointer;
+    font-size: 13px; white-space: nowrap; overflow: hidden;
+  }
+  .col-pop-item input { flex: none; accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; margin: 0; }
+
   .members-box {
     background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 14px; margin-top: 12px; font-size: 12.5px; max-height: 220px; overflow: auto;
@@ -765,12 +785,15 @@
 
   <section>
     <h2>Danh sách Email / Tài khoản Shopee</h2>
-    <div class="row">
+    <div class="row" style="position:relative; flex-wrap:wrap;">
       <select id="mailacc-filter-market" onchange="loadMailAccounts()" style="max-width:180px;">
         <option value="">-- Thị trường: Tất cả --</option>
         <option value="PH">PH (Philippines)</option>
         <option value="TH">TH (Thailand)</option>
-        <option value="MS">MS (Malaysia)</option>
+        <option value="MY">MY (Malaysia)</option>
+        <option value="ID">ID (Indonesia)</option>
+        <option value="VN">VN (Vietnam)</option>
+        <option value="SG">SG (Singapore)</option>
       </select>
       <select id="mailacc-filter-slot" onchange="loadMailAccounts()" style="max-width:160px;">
         <option value="">-- Slot: Tất cả --</option>
@@ -780,17 +803,31 @@
       </select>
       <input type="text" id="mailacc-filter-search" placeholder="Tìm theo email / shopee_id / device..." onkeydown="if(event.key==='Enter') loadMailAccounts()">
       <button class="secondary" onclick="loadMailAccounts()">Lọc danh sách</button>
-      <button class="secondary" onclick="exportMailAccountsXlsx()">Xuất Excel (Tài khoản đã tạo)</button>
+      <button class="secondary" onclick="exportMailAccountsXlsx()" title="Xuất Excel các dòng đang TÍCH CHỌN (kèm cột Group GPM / ID GPM để import lại)">Xuất Excel (đã chọn)</button>
+      <button class="secondary" onclick="createGpmProfilesSelected(this)" title="Tạo profile GPM cho các dòng đang tích chọn - dòng đã có ID GPM hoặc trùng tên trong cùng nhóm sẽ bỏ qua">Tạo profile (đã chọn)</button>
+      <button class="secondary" onclick="openGpmProfilesSelected(this)" title="Mở trang chủ Shopee của các dòng đang tích chọn - dòng chưa có ID GPM sẽ bỏ qua">Mở profile (đã chọn)</button>
+      <button class="secondary" onclick="syncMailAccountsGpm(this)" title="Lấy tên profile / nhóm mới nhất từ GPM ghi đè vào bảng; ID GPM không còn tồn tại trong GPM sẽ bị xóa">⟳ Đồng bộ GPM</button>
       <button class="secondary" onclick="document.getElementById('mailacc-import-file').click()">Import Excel</button>
       <input type="file" id="mailacc-import-file" accept=".xlsx" style="display:none;" onchange="importMailAccountsXlsx(this)">
       <button class="danger" onclick="clearMailAccounts()">Xóa tất cả</button>
+      <span style="margin-left:auto;"></span>
+      <button class="secondary" onclick="toggleMailAccColPop(event)" title="Chọn cột nào hiển thị / ẩn (bảng nhiều cột, có thể bị tràn màn hình)">⚙ Cột</button>
+      <div id="mailacc-col-pop" class="col-pop" style="display:none;">
+        <div class="col-pop-title">Cột hiển thị
+          <button class="secondary" onclick="resetMailAccCols()" title="Hiện lại tất cả cột">Đặt lại</button>
+        </div>
+        <div id="mailacc-col-pop-list"></div>
+        <div class="muted" style="margin-top:6px;font-size:12px;">Bỏ tick cột nào sẽ ẩn cột đó. Cột tích chọn &amp; Thao tác luôn hiện. Lựa chọn được nhớ theo trình duyệt.</div>
+      </div>
     </div>
     <div class="muted" style="margin-bottom:10px;" id="mailacc-count"></div>
+    <datalist id="gpm-group-names"></datalist>
     <div class="table-wrap"><table>
       <thead>
         <tr id="mailacc-thead-row">
+          <th style="width:36px;"><input type="checkbox" id="mailacc-sel-all" onclick="mailAccToggleAll(this)" title="Chọn / bỏ chọn tất cả dòng đang hiển thị"></th>
           <th>Thông tin đầy đủ</th><th>Email</th><th>Mật khẩu Mail</th><th>Shopee ID</th>
-          <th>Thiết bị</th><th>Profile</th><th>Slot</th><th>Thị trường</th><th>Mã Shopee</th><th>Thao tác</th><th>Thời gian tạo</th>
+          <th>Thiết bị</th><th>Profile</th><th>GROUP GPM</th><th>ID GPM</th><th>Slot</th><th>Thị trường</th><th>Mã Shopee</th><th>Thao tác</th><th>Thời gian tạo</th>
         </tr>
       </thead>
       <tbody id="mailacc-tbody"></tbody>
@@ -1102,6 +1139,8 @@ function switchTab(name) {
     loadMailAccountTypes();
     loadMailBalance();
     loadMailAccounts();
+    loadGpmGroupNames();
+    syncMailAccountsGpm(null, true); // tu dong dong bo GPM -> bang moi lan mo tab (khong hien popup)
   }
   if (name === 'sheets') { loadSheetsConfig(); loadSheetsAccounts(); }
   if (name === 'gpm') { loadGpmGroupsAndProfiles(); }
@@ -2042,14 +2081,20 @@ async function showVideoLogErrorDetail(id) {
 
 let mailAccountTypes = [];
 let lastMailAccountsList = [];
-const MAIL_MARKET_OPTIONS = ['PH', 'TH', 'MS'];
+// Tap id cac dong mail dang duoc TICH CHON - cac nut "Xuất Excel (đã chọn)" / "Tạo profile
+// (đã chọn)" / "Mở profile (đã chọn)" o toolbar chi tac dong len nhung dong trong tap nay.
+const mailAccSelected = new Set();
+const MAIL_MARKET_OPTIONS = ['PH', 'TH', 'MY', 'ID', 'VN', 'SG'];
 const MAILACC_COLUMNS = [
+  { field: '_sel', label: '' },
   { field: 'full_info', label: 'Thông tin đầy đủ' },
   { field: 'email', label: 'Email' },
   { field: 'password', label: 'Mật khẩu Mail' },
   { field: 'shopee_id', label: 'Shopee ID' },
   { field: 'device', label: 'Thiết bị' },
   { field: 'profile', label: 'Profile' },
+  { field: 'group_gpm', label: 'GROUP GPM' },
+  { field: 'id_gpm', label: 'ID GPM' },
   { field: 'slot', label: 'Slot' },
   { field: 'market', label: 'Thị trường' },
   { field: 'shopee_code', label: 'Mã Shopee' },
@@ -2058,7 +2103,112 @@ const MAILACC_COLUMNS = [
 ];
 let mailAccSort = { field: null, dir: 1 };
 
+// ---- An/hien cot (nut "⚙ Cột") - luu lua chon theo trinh duyet (localStorage) ----
+const MAILACC_COLS_STORAGE_KEY = 'dsh_mailacc_hidden_cols_v1';
+// Cac cot nguoi dung co the tick/tat (loai tru cot checkbox + Thao tac luon hien).
+const MAILACC_COL_SETTINGS = [
+  { field: 'full_info', label: 'Thông tin đầy đủ' },
+  { field: 'email', label: 'Email' },
+  { field: 'password', label: 'Mật khẩu Mail' },
+  { field: 'shopee_id', label: 'Shopee ID' },
+  { field: 'device', label: 'Thiết bị' },
+  { field: 'profile', label: 'Profile' },
+  { field: 'group_gpm', label: 'GROUP GPM' },
+  { field: 'id_gpm', label: 'ID GPM' },
+  { field: 'slot', label: 'Slot' },
+  { field: 'market', label: 'Thị trường' },
+  { field: 'shopee_code', label: 'Mã Shopee' },
+  { field: 'created_at', label: 'Thời gian tạo' },
+];
+let mailAccHiddenCols = new Set();
+
+function mailAccLoadHiddenCols() {
+  try {
+    const raw = localStorage.getItem(MAILACC_COLS_STORAGE_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr.filter(f => typeof f === 'string') : []);
+  } catch (e) {
+    return new Set();
+  }
+}
+mailAccHiddenCols = mailAccLoadHiddenCols();
+
+function mailAccSaveHiddenCols() {
+  try { localStorage.setItem(MAILACC_COLS_STORAGE_KEY, JSON.stringify([...mailAccHiddenCols])); } catch (e) { /* bo qua */ }
+}
+
+// So cot DANG hien (cho dong "chua co Email" can colspan dung).
+function mailAccVisibleColCount() {
+  return MAILACC_COLUMNS.filter(c => {
+    const k = c.field === null ? 'actions' : c.field;
+    return k === '_sel' || k === 'actions' || !mailAccHiddenCols.has(k);
+  }).length;
+}
+
+// Gan data-col cho tung thead th / tbody td theo thu tu cot (de an/hien theo cot dung vi tri).
+function mailAccTagCols() {
+  const order = MAILACC_COLUMNS.map(c => c.field === null ? 'actions' : c.field);
+  const tr = document.getElementById('mailacc-thead-row');
+  if (tr) {
+    Array.from(tr.children).forEach((th, i) => { if (i < order.length) th.dataset.col = order[i]; });
+  }
+  document.querySelectorAll('#mailacc-tbody tr').forEach(r => {
+    Array.from(r.children).forEach((td, i) => { if (i < order.length) td.dataset.col = order[i]; });
+  });
+}
+
+function mailAccApplyVisibility() {
+  document.querySelectorAll('#mailacc-thead-row th[data-col], #mailacc-tbody td[data-col]').forEach(el => {
+    const col = el.dataset.col;
+    const locked = col === '_sel' || col === 'actions';
+    el.style.display = (locked || !mailAccHiddenCols.has(col)) ? '' : 'none';
+  });
+}
+
+function mailAccBuildColPopList() {
+  const box = document.getElementById('mailacc-col-pop-list');
+  if (!box) return;
+  box.innerHTML = MAILACC_COL_SETTINGS.map(c => {
+    const checked = !mailAccHiddenCols.has(c.field) ? 'checked' : '';
+    return `<label class="col-pop-item"><input type="checkbox" data-field="${c.field}" ${checked} onchange="mailAccColToggle(this)"><span>${c.label}</span></label>`;
+  }).join('');
+}
+
+function mailAccColToggle(cb) {
+  const f = cb.dataset.field;
+  if (!f) return;
+  if (cb.checked) mailAccHiddenCols.delete(f);
+  else mailAccHiddenCols.add(f);
+  mailAccSaveHiddenCols();
+  mailAccApplyVisibility();
+}
+
+function resetMailAccCols() {
+  mailAccHiddenCols = new Set();
+  mailAccSaveHiddenCols();
+  mailAccBuildColPopList();
+  mailAccApplyVisibility();
+}
+
+function toggleMailAccColPop(e) {
+  if (e) e.stopPropagation();
+  const pop = document.getElementById('mailacc-col-pop');
+  if (!pop) return;
+  const show = pop.style.display === 'none';
+  if (show) mailAccBuildColPopList();
+  pop.style.display = show ? 'block' : 'none';
+}
+
+// Bam ra ngoai popup thi dong lai.
+document.addEventListener('click', (ev) => {
+  const pop = document.getElementById('mailacc-col-pop');
+  if (!pop || pop.style.display === 'none') return;
+  if (!pop.contains(ev.target)) pop.style.display = 'none';
+});
+
 function sortMailAccounts(field) {
+  if (field === '_sel') return; // cot checkbox khong sap xep
   if (mailAccSort.field === field) {
     mailAccSort.dir = -mailAccSort.dir;
   } else {
@@ -2076,10 +2226,56 @@ function renderMailAccHeader() {
   const tr = document.getElementById('mailacc-thead-row');
   if (!tr) return;
   tr.innerHTML = MAILACC_COLUMNS.map(c => {
+    if (c.field === '_sel') {
+      return '<th style="width:36px;"><input type="checkbox" id="mailacc-sel-all" onclick="mailAccToggleAll(this)" title="Chọn / bỏ chọn tất cả dòng đang hiển thị"></th>';
+    }
     if (!c.field) return '<th></th>';
     const arrow = mailAccSort.field === c.field ? (mailAccSort.dir === 1 ? ' ▲' : ' ▼') : '';
     return `<th class="sortable" onclick="sortMailAccounts('${c.field}')" title="Sắp xếp A-Z">${c.label}${arrow}</th>`;
   }).join('');
+}
+
+// ---- Tich chon dong (checkbox) ----
+function mailAccVisibleIds() {
+  return Array.from(document.querySelectorAll('#mailacc-tbody input.mailacc-sel'))
+    .map(el => parseInt(el.dataset.id, 10))
+    .filter(n => Number.isFinite(n));
+}
+
+function mailAccSelChanged(input) {
+  const id = parseInt(input.dataset.id, 10);
+  if (input.checked) mailAccSelected.add(id);
+  else mailAccSelected.delete(id);
+  refreshMailAccSelUI();
+}
+
+function mailAccToggleAll(header) {
+  const visible = mailAccVisibleIds();
+  if (header.checked) visible.forEach(id => mailAccSelected.add(id));
+  else visible.forEach(id => mailAccSelected.delete(id));
+  document.querySelectorAll('#mailacc-tbody input.mailacc-sel').forEach(el => { el.checked = header.checked; });
+  refreshMailAccSelUI();
+}
+
+function mailAccSelectedIds() {
+  // id dang duoc chon, gioi han trong cac dong DANG HIEN THI (de khong "chon nham" dong
+  // da bi bo loc / da xoa).
+  return mailAccVisibleIds().filter(id => mailAccSelected.has(id));
+}
+
+function refreshMailAccSelUI() {
+  const header = document.getElementById('mailacc-sel-all');
+  const visible = mailAccVisibleIds();
+  const selInVisible = visible.filter(id => mailAccSelected.has(id)).length;
+  if (header) {
+    header.checked = visible.length > 0 && selInVisible === visible.length;
+    header.indeterminate = selInVisible > 0 && selInVisible < visible.length;
+  }
+  const countEl = document.getElementById('mailacc-count');
+  if (countEl) {
+    countEl.textContent =
+      `Hiển thị ${visible.length} dòng (tối đa 300 - Lọc thêm để thu hẹp) — Đã chọn ${mailAccSelected.size}.`;
+  }
 }
 
 async function saveDongvanfbKey(btn) {
@@ -2166,10 +2362,20 @@ function renderMailAccounts() {
     lastMailAccountsList.sort((a, b) => mailAccSort.dir * compareMailAccVal(a[mailAccSort.field], b[mailAccSort.field]));
   }
   const accounts = lastMailAccountsList;
-  document.getElementById('mailacc-count').textContent = `Hiển thị ${accounts.length} dòng (tối đa 300 - Lọc thêm để thu hẹp).`;
+  // Bo cac id dang duoc chon nhung khong con nam trong danh sach dang hien thi (da xoa dong
+  // hoac doi bo loc) - tranh "chon ngam" cac dong da bien mat.
+  if (accounts.length) {
+    const present = new Set(accounts.map(a => a.id));
+    for (const id of Array.from(mailAccSelected)) {
+      if (!present.has(id)) mailAccSelected.delete(id);
+    }
+  } else {
+    mailAccSelected.clear();
+  }
   const tbody = document.getElementById('mailacc-tbody');
   tbody.innerHTML = accounts.map((a, idx) => `
     <tr>
+      <td class="sel-cell"><input type="checkbox" class="mailacc-sel" data-id="${a.id}" ${mailAccSelected.has(a.id) ? 'checked' : ''} onchange="mailAccSelChanged(this)" title="Tích chọn dòng này"></td>
       <td><span class="ellipsis" style="max-width:120px;" title="${(a.full_info || '').replace(/"/g, '&quot;')}">${a.full_info}</span>
         <button class="secondary" onclick="copyMailField(${idx}, 'full_info')">Sao chép</button></td>
       <td><b>${a.email}</b>
@@ -2178,7 +2384,9 @@ function renderMailAccounts() {
         ${a.password ? `<button class="secondary" onclick="copyMailField(${idx}, 'password')">Sao chép</button>` : ''}</td>
       <td><input type="text" value="${(a.shopee_id || '').replace(/"/g, '&quot;')}" onchange="updateShopeeId(${a.id}, this)" placeholder="Shopee ID" style="min-width:160px; width:100%;"></td>
       <td><input type="text" value="${(a.device || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'device', this.value)" placeholder="Tên thiết bị" style="min-width:160px; width:100%;"></td>
-      <td><input type="text" value="${(a.profile || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'profile', this.value)" placeholder="Profile" style="min-width:160px; width:100%;"></td>
+      <td><input type="text" data-field="profile" value="${(a.profile || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'profile', this.value)" placeholder="Profile" style="min-width:160px; width:100%;"></td>
+      <td><input type="text" data-field="group_gpm" list="gpm-group-names" value="${(a.group_gpm || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'group_gpm', this.value)" placeholder="Group GPM" title="Tên nhóm GPM muốn tạo profile - có gợi ý từ danh sách nhóm đang có" style="min-width:150px; width:100%;"></td>
+      <td><input type="text" value="${(a.id_gpm || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'id_gpm', this.value)" placeholder="ID GPM" title="ID profile GPM (tự điền sau khi bấm Tạo profile, hoặc dán tay)" style="min-width:150px; width:100%; font-family:monospace; font-size:12px;"></td>
       <td><input type="text" value="${(a.slot || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'slot', this.value)" placeholder="Slot" style="min-width:65px; width:65px; text-align:center;"></td>
       <td>
         <select onchange="updateMailAccountField(${a.id}, 'market', this.value)">
@@ -2187,13 +2395,18 @@ function renderMailAccounts() {
       </td>
       <td>${a.shopee_code ? `<b style="color:var(--success); font-size:14px;">${a.shopee_code}</b>` : (a.checked_at ? '<span class="muted">Chưa có</span>' : '-')}</td>
       <td style="white-space:nowrap;">
-        <button onclick="getMailCode(this, ${a.id})">Lấy mã (Get code)</button>
-        <button class="secondary" onclick="activateLoginLink(this, ${a.id})">Kích hoạt link đăng nhập</button>
+        <button onclick="getMailCode(this, ${a.id})" title="Lấy mã xác minh Shopee (Get code)">Code</button>
+        <button class="secondary" onclick="activateLoginLink(this, ${a.id})" title="Mở link kích hoạt đăng nhập Shopee">Link</button>
+        <button class="secondary" onclick="createGpmProfile(${a.id}, this)" ${a.id_gpm ? 'disabled title="Dòng này đã có ID GPM - xóa ID ở cột ID GPM để tạo profile mới"' : 'title="Tạo profile GPM từ tên ở cột Profile + GROUP GPM"'}">Tạo profile</button>
+        <button class="secondary" onclick="openGpmProfile(${a.id}, this)" ${a.id_gpm ? 'title="Mở trình duyệt GPM tới trang chủ Shopee theo thị trường của dòng"' : 'disabled title="Cần có ID GPM (bấm Tạo profile trước)"'}">Mở profile</button>
         <button class="secondary" onclick="deleteMailAccount(${a.id})">Xóa</button>
       </td>
       <td class="muted" style="white-space:nowrap;">${a.created_at || '-'}</td>
     </tr>
-  `).join('') || '<tr><td colspan="11" class="muted">Chưa có Email nào.</td></tr>';
+  `).join('') || `<tr><td colspan="${mailAccVisibleColCount()}" class="muted">Chưa có Email nào.</td></tr>`;
+  refreshMailAccSelUI();
+  mailAccTagCols();
+  mailAccApplyVisibility();
 }
 
 function copyMailField(idx, field) {
@@ -2247,7 +2460,8 @@ async function updateShopeeId(id, inputEl) {
   if (row) row.shopee_id = newValue;
 }
 
-const MAILACC_CODE_CELL_INDEX = 7;
+// Chi so (trong children cua <tr>) cua o 'Mã Shopee' - getMailCode hien "Đang lấy mã..." tai day.
+const MAILACC_CODE_CELL_INDEX = 11;
 
 async function getMailCode(btn, id) {
   const codeCell = btn.closest('tr').children[MAILACC_CODE_CELL_INDEX];
@@ -2279,14 +2493,225 @@ async function activateLoginLink(btn, id) {
   });
 }
 
+// Goi y ten nhom GPM cho o nhap "GROUP GPM" (datalist) - load danh sach nhom GPM that mot lan.
+// gpmGroupNames luu TEN cac nhom dang co de UI biet nhom nao CHUA ton tai (de hoi tao nhom moi
+// khi bam "Tạo profile").
+let gpmGroupNames = [];
+let gpmGroupNamesLoaded = false;
+async function loadGpmGroupNames() {
+  const dl = document.getElementById('gpm-group-names');
+  if (!dl) return;
+  try {
+    const g = await api('GET', '/api/gpm/groups');
+    const names = [];
+    for (const gr of (g.groups || [])) {
+      if (gr.name && !names.includes(gr.name)) names.push(gr.name);
+    }
+    gpmGroupNames = names;
+    dl.innerHTML = names.map(n => `<option value="${n.replace(/"/g, '&quot;')}">`).join('');
+    gpmGroupNamesLoaded = true;
+  } catch (e) { /* chi la goi y - khong can bao loi */ }
+}
+
+function mailAccGroupExists(name) {
+  const wanted = String(name || '').trim().toLowerCase();
+  if (!wanted) return true; // group rong = dung nhom mac dinh, khong can kiem tra
+  return gpmGroupNames.some(n => String(n).trim().toLowerCase() === wanted);
+}
+
+async function createGpmProfile(id, btn) {
+  await withBusy(btn, async () => {
+    const tr = btn.closest('tr');
+    const valOf = (field) => {
+      const el = tr ? tr.querySelector(`input[data-field="${field}"]`) : null;
+      return el ? el.value.trim() : '';
+    };
+    const profileVal = valOf('profile');
+    const groupVal = valOf('group_gpm');
+    let createGroup = false;
+    // Nhom dang go CHUA co trong GPM (theo danh sach da load) -> hoi truoc co tao nhom moi khong.
+    if (groupVal && !mailAccGroupExists(groupVal)) {
+      if (!(await customConfirm(
+        `Nhóm GPM "${groupVal}" chưa tồn tại trong GPM (các nhóm đang có: ${gpmGroupNames.join(', ') || 'chưa có nhóm nào'}).\n\n` +
+        `Bạn có muốn tạo nhóm mới "${groupVal}" trước rồi tạo profile trong nhóm đó không?`
+      ))) {
+        await customAlert('Đã hủy — chưa tạo nhóm / profile mới.');
+        return;
+      }
+      createGroup = true;
+    }
+    // Thu toi da 2 lan: lan 1 khong tao nhom; neu GPM van bao nhom khong ton tai (danh sach
+    // cache cu/thieu) se hoi tao nhom roi chay lai lan 2 voi create_group=true.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        // Luu truoc noi dung Profile / GROUP GPM dang go (neu chua kip luu qua onchange) de
+        // server tao dung theo gia tri hien tai.
+        const syncBody = { profile: profileVal, group_gpm: groupVal };
+        await api('POST', `/api/mail_accounts/${id}`, syncBody);
+        const r = await api('POST', `/api/mail_accounts/${id}/gpm/create`, createGroup ? { create_group: true } : undefined);
+        await customAlert(r.message || 'Đã tạo profile GPM.');
+        await loadMailAccounts();
+        loadGpmGroupNames(); // lam moi cache ten nhom (vua co the tao nhom moi)
+        return;
+      } catch (e) {
+        if (!createGroup && /Khong tim thay nhom GPM/.test(e.message || '')) {
+          const m = /'([^']+)'/.exec(e.message);
+          const gname = m ? m[1] : (groupVal || 'này');
+          if (await customConfirm(
+            `Nhóm GPM "${gname}" chưa tồn tại trong GPM.\n\nTạo nhóm mới "${gname}" trước rồi tạo profile không?`
+          )) {
+            createGroup = true;
+            continue;
+          }
+          await customAlert('Đã hủy — chưa tạo nhóm / profile mới.');
+          return;
+        }
+        await customAlert('Lỗi tạo profile GPM: ' + e.message, { danger: true });
+        await loadMailAccounts();
+        return;
+      }
+    }
+  });
+}
+
+async function openGpmProfile(id, btn) {
+  await withBusy(btn, async () => {
+    try {
+      await api('POST', `/api/mail_accounts/${id}/gpm/open`);
+      // Mo thanh cong: KHONG hien thong bao (chi bao khi loi - nguoi dung tu thay cua so GPM).
+    } catch (e) {
+      await customAlert('Lỗi mở profile GPM: ' + e.message, { danger: true });
+    }
+  });
+}
+
 async function deleteMailAccount(id) {
   if (!(await customConfirm('Bạn có chắc muốn xóa Email này?', { danger: true }))) return;
   await api('DELETE', `/api/mail_accounts/${id}`);
+  mailAccSelected.delete(id);
   loadMailAccounts();
 }
 
 function exportMailAccountsXlsx() {
-  window.location.href = '/api/mail_accounts/export.xlsx';
+  const ids = mailAccSelectedIds();
+  if (!ids.length) {
+    customAlert('Chưa chọn dòng nào — hãy tích chọn các dòng cần xuất Excel trước.', { danger: true });
+    return;
+  }
+  window.location.href = '/api/mail_accounts/export.xlsx?ids=' + ids.join(',');
+}
+
+async function mailAccSummarizeBulk(actionText, okCount, total, results, extraNote) {
+  const fails = (results || []).filter(r => !r.ok);
+  let msg = `${actionText} thành công ${okCount}/${total}.`;
+  if (extraNote) msg += '\n\n' + extraNote;
+  if (fails.length) {
+    msg += `\n\n${fails.length} dòng lỗi/bỏ qua:` +
+      fails.slice(0, 6).map(r => `\n- #${(r.id === null || r.id === undefined) ? '?' : r.id}: ${r.error || 'Lỗi không rõ'}`).join('') +
+      (fails.length > 6 ? `\n... và ${fails.length - 6} lỗi khác.` : '');
+  }
+  await customAlert(msg, { danger: !!fails.length });
+}
+
+async function createGpmProfilesSelected(btn) {
+  const ids = mailAccSelectedIds();
+  if (!ids.length) {
+    await customAlert('Chưa chọn dòng nào — hãy tích chọn các dòng cần tạo profile trước.', { danger: true });
+    return;
+  }
+  if (!(await customConfirm(
+    `Tạo profile GPM cho ${ids.length} dòng đang tích chọn?\n\n` +
+    `- Mỗi dòng tạo 1 profile GPM theo cột Profile + GROUP GPM.\n` +
+    `- Dòng đã có ID GPM hoặc trùng tên trong cùng nhóm GPM sẽ được bỏ qua.\n` +
+    `- Nếu cả Profile & GROUP GPM trống: tạo profile mặc định của GPM.`
+  ))) return;
+  const rows = ids.map(id => {
+    const cb = document.querySelector(`#mailacc-tbody input.mailacc-sel[data-id="${id}"]`);
+    const tr = cb ? cb.closest('tr') : null;
+    const profEl = tr ? tr.querySelector('input[data-field="profile"]') : null;
+    const grpEl = tr ? tr.querySelector('input[data-field="group_gpm"]') : null;
+    // Luon gui kem gia tri dang go trong o nhap (chua kip luu onchange) de tao dung theo noi dung hien tai.
+    return { id, profile: profEl ? profEl.value.trim() : '', group_gpm: grpEl ? grpEl.value.trim() : '' };
+  });
+  // Nhung nhom CHUA ton tai trong GPM (theo danh sach da load) -> hoi 1 lan co tao nhom moi khong.
+  const missingGroups = [];
+  for (const r of rows) {
+    if (r.group_gpm && !mailAccGroupExists(r.group_gpm) && !missingGroups.includes(r.group_gpm)) {
+      missingGroups.push(r.group_gpm);
+    }
+  }
+  let createMissingGroups = false;
+  if (missingGroups.length) {
+    if (!(await customConfirm(
+      `Các nhóm GPM sau chưa tồn tại trong GPM:\n- ${missingGroups.join('\n- ')}\n\n` +
+      `Tạo các nhóm mới này trước rồi tạo profile trong đó không?`
+    ))) {
+      await customAlert('Đã hủy — chưa tạo profile nào. Hãy đổi tên nhóm cho đúng hoặc bỏ chọn các dòng có nhóm chưa tồn tại.', { danger: true });
+      return;
+    }
+    createMissingGroups = true;
+  }
+  await withBusy(btn, async () => {
+    try {
+      const res = await api('POST', '/api/mail_accounts/gpm/create_bulk', { rows, create_missing_groups: createMissingGroups }, 300000);
+      const results = res.results || [];
+      const createdGroups = [...new Set(results.filter(r => r.ok && r.group_created).map(r => r.group_name).filter(Boolean))];
+      const groupNote = createdGroups.length ? `Đã tạo ${createdGroups.length} nhóm GPM mới: ${createdGroups.join(', ')}.` : undefined;
+      await mailAccSummarizeBulk('Tạo profile', res.created || 0, results.length, results, groupNote);
+      await loadMailAccounts();
+      loadGpmGroupNames(); // lam moi cache ten nhom (co the da tao nhom moi)
+    } catch (e) {
+      await customAlert('Lỗi tạo profile hàng loạt: ' + e.message, { danger: true });
+      await loadMailAccounts();
+    }
+  });
+}
+
+async function openGpmProfilesSelected(btn) {
+  const ids = mailAccSelectedIds();
+  if (!ids.length) {
+    await customAlert('Chưa chọn dòng nào — hãy tích chọn các dòng cần mở profile trước.', { danger: true });
+    return;
+  }
+  if (!(await customConfirm(
+    `Mở profile GPM cho ${ids.length} dòng đang tích chọn?\n\n` +
+    `- Mỗi dòng có ID GPM sẽ mở 1 cửa sổ GPM tới trang chủ Shopee theo thị trường của dòng đó.\n` +
+    `- Dòng chưa có ID GPM sẽ được bỏ qua.`
+  ))) return;
+  await withBusy(btn, async () => {
+    try {
+      const res = await api('POST', '/api/mail_accounts/gpm/open_bulk', { ids }, 300000);
+      // Chi bao khi co dong loi/khong mo duoc - thanh cong het thi khong hien popup.
+      const fails = (res.results || []).filter(r => !r.ok);
+      if (fails.length) {
+        await mailAccSummarizeBulk('Mở profile', res.opened || 0, (res.results || []).length, res.results);
+      }
+    } catch (e) {
+      await customAlert('Lỗi mở profile hàng loạt: ' + e.message, { danger: true });
+    }
+  });
+}
+
+// Dong bo GPM -> bang: cap nhat ten Profile/GROUP GPM theo GPM (GPM la nguon), tu xoa ID GPM
+// cua profile da khong con trong GPM. btn=null -> chay tham lang (tu dong moi khi mo tab).
+async function syncMailAccountsGpm(btn, silent) {
+  const run = async () => {
+    const r = await api('POST', '/api/mail_accounts/gpm/sync', undefined, 60000);
+    await loadMailAccounts();
+    loadGpmGroupNames();
+    if (!silent) {
+      const parts = [`Đã kiểm tra ${r.checked} dòng có ID GPM.`];
+      if (r.updated) parts.push(`Đã cập nhật tên Profile / GROUP GPM theo GPM: ${r.updated} dòng.`);
+      if (r.cleared) parts.push(`Đã xóa ${r.cleared} ID GPM không còn tồn tại trong GPM (profile đã bị xóa bên GPM).`);
+      if (!r.updated && !r.cleared) parts.push('Dữ liệu đã khớp với GPM — không có gì thay đổi.');
+      await customAlert(parts.join('\n'));
+    }
+  };
+  if (btn) {
+    await withBusy(btn, run);
+  } else {
+    try { await run(); } catch (e) { /* chay tu dong: nuot loi de khong lam phien nguoi dung */ }
+  }
 }
 
 async function importMailAccountsXlsx(input) {
@@ -2315,6 +2740,7 @@ async function clearMailAccounts() {
   if (!(await customConfirm('Xóa TOÀN BỘ danh sách Email đã mua? Không thể hoàn tác.', { danger: true }))) return;
   const { deleted } = await api('POST', '/api/mail_accounts/clear');
   await customAlert(`Đã xóa ${deleted} dòng.`);
+  mailAccSelected.clear();
   loadMailAccounts();
 }
 

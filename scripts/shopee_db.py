@@ -133,6 +133,8 @@ create table if not exists mail_accounts (
     shopee_id text default '',
     device text default '',
     profile text default '',
+    group_gpm text default '',
+    id_gpm text default '',
     slot text default '',
     market text default 'PH',
     shopee_code text,
@@ -425,9 +427,21 @@ def init_db(db_path=DB_PATH_DEFAULT):
         conn.execute("alter table mail_accounts add column slot text default ''")
     if "profile" not in existing_mail_cols:
         conn.execute("alter table mail_accounts add column profile text default ''")
+    # Cot GPM (them sau, 2026-09-06): group_gpm = TEN nhom GPM nguoi dung nhap (de dinh vi
+    # nhom khi tao profile), id_gpm = ID profile GPM that (duoc gan tu dong sau khi tao qua
+    # nut "Tạo profile" hoac nguoi dung dan tay vao) - DB cu (tao truoc khi co dong nay trong
+    # CREATE_MAIL_ACCOUNTS_TABLE_SQL) can ALTER TABLE rieng, cung ly do nhu slot/profile.
+    if "group_gpm" not in existing_mail_cols:
+        conn.execute("alter table mail_accounts add column group_gpm text default ''")
+    if "id_gpm" not in existing_mail_cols:
+        conn.execute("alter table mail_accounts add column id_gpm text default ''")
     conn.execute(
         "create index if not exists idx_mail_accounts_market on mail_accounts(market)"
     )
+    # Dong nhat ma thi truong: 'MS' la ma CU (malaysia) trong bang mail_accounts, chuyen thanh
+    # 'MY' cho khop ma chuan ca he thong dung (PH/TH/MY/ID/VN/SG). Lenh idempotent - chay lai
+    # moi lan boot khong co gi de chay cung khong hai.
+    conn.execute("update mail_accounts set market='MY' where market='MS'")
     conn.execute(CREATE_CANDIDATE_ROOT_SEEN_TABLE_SQL)
     conn.execute(
         "create index if not exists idx_candidate_root_seen_item on candidate_root_seen(itemid, market)"
@@ -2607,20 +2621,25 @@ def import_mail_accounts_from_rows(db_path, rows):
                 invalid += 1
                 continue
             existing_full_info.add(full_info)
+            market_val = _cell_str(row.get("market")).upper()
+            if market_val == "MS":  # ma cu cua Malaysia -> chuan hoa thanh 'MY'
+                market_val = "MY"
             parsed_rows.append((
                 full_info, parsed["email"], parsed["password"], parsed["refresh_token"],
                 parsed["client_id"], "import", None,
                 _cell_str(row.get("shopee_id")), _cell_str(row.get("device")),
-                _cell_str(row.get("profile")), _cell_str(row.get("slot")),
-                _cell_str(row.get("market")) or "PH",
+                _cell_str(row.get("profile")), _cell_str(row.get("group_gpm")),
+                _cell_str(row.get("id_gpm")),
+                _cell_str(row.get("slot")), market_val or "PH",
                 _cell_str(row.get("shopee_code")) or None,
             ))
         if not parsed_rows:
             return {"added": 0, "skipped_duplicate": skipped_duplicate, "invalid": invalid}
         conn.executemany(
             "insert into mail_accounts (full_info, email, password, refresh_token, "
-            "client_id, account_type, order_code, shopee_id, device, profile, slot, "
-            "market, shopee_code) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "client_id, account_type, order_code, shopee_id, device, profile, group_gpm, "
+            "id_gpm, slot, market, shopee_code) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+            "?, ?, ?, ?)",
             parsed_rows,
         )
         conn.commit()
@@ -2673,6 +2692,26 @@ def list_created_mail_accounts(db_path):
         conn.close()
 
 
+def list_mail_accounts_by_ids(db_path, ids):
+    """Lay dung cac dong mail co id trong danh sach (sap theo id tang dan, FIFO) - dung cho
+    nut 'Xuat Excel' khi nguoi dung TICH CHON cac dong can xuat (khong gioi han phai co
+    shopee_id - xuat dung nhung gi da chon). ids rong -> tra ve []."""
+    ids = [int(i) for i in ids if str(i).strip().lstrip('-').isdigit()]
+    if not ids:
+        return []
+    conn = _connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        placeholders = ",".join("?" for _ in ids)
+        rows = conn.execute(
+            f"select * from mail_accounts where id in ({placeholders}) order by id asc",
+            ids,
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 def get_mail_account(db_path, account_id):
     conn = _connect(db_path)
     try:
@@ -2683,9 +2722,9 @@ def get_mail_account(db_path, account_id):
         conn.close()
 
 
-def update_mail_account_fields(db_path, account_id, shopee_id=None, device=None, profile=None, slot=None, market=None):
+def update_mail_account_fields(db_path, account_id, shopee_id=None, device=None, profile=None, slot=None, market=None, group_gpm=None, id_gpm=None):
     """Cap nhat MOT PHAN cot nguoi dung tu nhap (tham so None = giu nguyen), dung cho nut
-    luu tung dong tren UI khi doi Shopee_id/Device/Profile/Slot/Market."""
+    luu tung dong tren UI khi doi Shopee_id/Device/Profile/Slot/Market/Group_GPM/Id_GPM."""
     current = get_mail_account(db_path, account_id)
     if not current:
         return None
@@ -2693,15 +2732,18 @@ def update_mail_account_fields(db_path, account_id, shopee_id=None, device=None,
         "shopee_id": shopee_id if shopee_id is not None else current["shopee_id"],
         "device": device if device is not None else current["device"],
         "profile": profile if profile is not None else current["profile"],
+        "group_gpm": group_gpm if group_gpm is not None else current["group_gpm"],
+        "id_gpm": id_gpm if id_gpm is not None else current["id_gpm"],
         "slot": slot if slot is not None else current["slot"],
         "market": market if market is not None else current["market"],
     }
     conn = _connect(db_path)
     try:
         conn.execute(
-            "update mail_accounts set shopee_id=?, device=?, profile=?, slot=?, market=? where id=?",
+            "update mail_accounts set shopee_id=?, device=?, profile=?, group_gpm=?, id_gpm=?, slot=?, market=? where id=?",
             (
                 new_vals["shopee_id"], new_vals["device"], new_vals["profile"],
+                new_vals["group_gpm"], new_vals["id_gpm"],
                 new_vals["slot"], new_vals["market"], account_id,
             ),
         )

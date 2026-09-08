@@ -1006,17 +1006,25 @@ def mail_accounts_list():
 
 @app.route("/api/mail_accounts/export.xlsx", methods=["GET"])
 def export_mail_accounts_xlsx():
-    """Xuat cac mail DA dung de tao tai khoan Shopee (co shopee_id) ra .xlsx - dung cho nut
-    'Xuat Excel' tren tab 'Tao tai khoan Shopee'."""
-    accounts = shopee_db.list_created_mail_accounts(DB_PATH)
+    """Xuat .xlsx: neu truyen ?ids=1,2,3 (danh sach dong dang TICH CHON tren UI) thi xuat
+    DUNG cac dong do (khong can phai co shopee_id); khong truyen ids thi xuat tat ca mail da
+    tao tai khoan (co shopee_id) nhu hanh vi cu. Cot 'Group GPM'/'ID GPM' kem theo de import
+    lai (nut Import Excel) khong mat du lieu GPM."""
+    ids_raw = (request.args.get("ids") or "").strip()
+    if ids_raw:
+        ids = [int(x) for x in ids_raw.split(",") if x.strip().lstrip("-").isdigit()]
+        accounts = shopee_db.list_mail_accounts_by_ids(DB_PATH, ids)
+    else:
+        accounts = shopee_db.list_created_mail_accounts(DB_PATH)
     wb = Workbook()
     ws = wb.active
     ws.title = "Tai khoan Shopee"
-    ws.append(["Full info", "Email", "PassEmail", "Shopee_id", "Device", "Profile", "Slot", "Market", "Shopee_code", "Thoi gian tao"])
+    ws.append(["Full info", "Email", "PassEmail", "Shopee_id", "Device", "Profile", "Group GPM", "ID GPM", "Slot", "Market", "Shopee_code", "Thoi gian tao"])
     for a in accounts:
         ws.append([
             a["full_info"], a["email"], a["password"], a["shopee_id"],
-            a["device"], a["profile"], a["slot"], a["market"], a["shopee_code"], a["created_at"],
+            a["device"], a["profile"], a.get("group_gpm") or "", a.get("id_gpm") or "",
+            a["slot"], a["market"], a["shopee_code"], a["created_at"],
         ])
     buf = io.BytesIO()
     wb.save(buf)
@@ -1034,6 +1042,8 @@ _IMPORT_MAIL_ACCOUNTS_COLUMN_MAP = {
     "shopee_id": "shopee_id",
     "device": "device",
     "profile": "profile",
+    "group gpm": "group_gpm",
+    "id gpm": "id_gpm",
     "slot": "slot",
     "market": "market",
     "shopee_code": "shopee_code",
@@ -1092,7 +1102,9 @@ def mail_accounts_update(account_id):
     row = shopee_db.update_mail_account_fields(
         DB_PATH, account_id,
         shopee_id=body.get("shopee_id"), device=body.get("device"),
-        profile=body.get("profile"), slot=body.get("slot"), market=body.get("market"),
+        profile=body.get("profile"), group_gpm=body.get("group_gpm"),
+        id_gpm=body.get("id_gpm"),
+        slot=body.get("slot"), market=body.get("market"),
     )
     if row is None:
         return _bad_request(f"khong tim thay mail id={account_id}")
@@ -1171,6 +1183,318 @@ def mail_accounts_activate_login(account_id):
     except (RuntimeError, ValueError) as e:
         return jsonify({"error": str(e)}), 500
     return jsonify({"link": link, "note": note, "pid": proc.pid, "profile": matched_device["name"] if matched_device else "ActivationLinks"})
+
+
+# ============================================================================
+# Nut "Tạo profile" / "Mở profile" tren tab Mail Accounts (dong mail -> profile GPM).
+# ============================================================================
+
+# Market nguoi dung nhap o cot 'Thị trường' cua tab Mail (chi co PH/TH/MS trong dropdown)
+# -> code GPM nho thuong dung trong _GPM_HOME_URL (ph/th/my/...).
+_GPM_MARKET_CODE = {
+    "PH": "ph", "TH": "th", "MS": "my", "MY": "my",
+    "ID": "id", "VN": "vn", "SG": "sg",
+}
+
+
+def _gpm_market_home(market):
+    """Market tren dong mail (PH/TH/MS/...) -> (url trang chu Shopee, code GPM). Mac dinh PH."""
+    code = _GPM_MARKET_CODE.get(str(market or "").strip().upper(), "ph")
+    return _GPM_HOME_URL.get(code, _GPM_HOME_URL["ph"]), code
+
+
+def _gpm_list_page_items(payload):
+    """GPM Local API tra list dang {"data": {...phan trang, "data": [items...]}} hoac truc tiep
+    [items] - trich ra dung danh sach item (cung kieu xu ly nhu gpm_groups()/gpm_profiles())."""
+    raw = payload.get("data")
+    if isinstance(raw, dict):
+        return raw.get("data") or []
+    return raw or []
+
+
+def _gpm_create_profile_row(account_id, profile_name=None, group_name=None,
+                            group_items=None, profile_items=None, batch_seen=None,
+                            create_group=False):
+    """Tao 1 profile GPM cho 1 dong mail - DUNG CHUNG cho nut 'Tạo profile' (1 dong) va
+    'Tạo profile' hang loat (cac dong duoc tich chon). profile_name/group_name truyen vao khi
+    nguoi dung dang sua tren UI (chua kip luu); None = lay gia tri dang luu trong DB cua dong.
+    group_items/profile_items la danh sach nhom/profile GPM da load SAN (None = ham tu load
+    khi can - dung cho goi 1 dong). batch_seen la set (name_lower, group_id) cac profile da tao
+    trong CUNG dot nay (chan trung ten noi bo). create_group=True: neu ten nhom CHUA ton tai
+    trong GPM thi TU DONG tao nhom moi truoc roi tao profile trong nhom do (dung sau khi
+    nguoi dung da xac nhan o UI). Tra ve dict:
+    {"ok": True, "account", "gpm": {id, name}, "message"} hoac
+    {"ok": False, "error", "conflict"? (da co ID/trung ten), "gpm_down"? (GPM khong goi duoc)}."""
+    row = shopee_db.get_mail_account(DB_PATH, account_id)
+    if not row:
+        return {"ok": False, "error": f"khong tim thay mail id={account_id}"}
+    if (row.get("id_gpm") or "").strip():
+        return {
+            "ok": False, "conflict": True,
+            "error": f"Dong nay da co ID GPM '{row['id_gpm']}' - xoa ID o cot ID GPM truoc khi tao profile moi.",
+        }
+    profile_name = (profile_name if profile_name is not None else row.get("profile") or "").strip()
+    group_name = (group_name if group_name is not None else row.get("group_gpm") or "").strip()
+    if group_items is None:
+        try:
+            group_items = _gpm_list_page_items(_gpm_api("GET", "/api/v1/groups"))
+        except Exception as e:
+            return {"ok": False, "gpm_down": True, "error": f"Khong goi duoc GPM Local API ({GPM_BASE}): {e}"}
+    group_id = None
+    new_group_created = False
+    if group_name:
+        wanted = group_name.strip().lower()
+        matches = [g for g in group_items if str(g.get("name") or "").strip().lower() == wanted]
+        if not matches:
+            if not create_group:
+                known = ", ".join(str(g.get("name")) for g in group_items if g.get("name"))
+                return {"ok": False,
+                        "error": f"Khong tim thay nhom GPM '{group_name}'. Cac nhom dang co: {known or '(chua co nhom nao)'}."}
+            # Nhom chua ton tai + nguoi dung da xac nhan tao moi -> tao nhom truoc (POST
+            # /api/v1/groups/create, body {"name": ...} - xem tai lieu GPM da luu trong
+            # "gpm Login/"), roi tao profile trong nhom vua tao. Them vao group_items de cac
+            # dong SAU trong cung dot bulk dung lai (khong tao nhom trung).
+            try:
+                new_group = _gpm_api("POST", "/api/v1/groups/create", body={"name": group_name})
+            except Exception as e:
+                return {"ok": False, "gpm_down": True, "error": f"GPM tao nhom '{group_name}' loi: {e}"}
+            if not new_group.get("success"):
+                msg = str(new_group.get("message") or new_group.get("error") or "GPM tu choi tao nhom")
+                return {"ok": False, "error": f"GPM tao nhom '{group_name}' that bai: {msg}"}
+            gdata = new_group.get("data") or {}
+            gid = str(gdata.get("id") or "").strip()
+            if not gid:
+                return {"ok": False, "gpm_down": True,
+                        "error": f"GPM bao tao nhom thanh cong nhung khong co id nhom: {new_group}"}
+            if group_items is not None:
+                group_items.append({"id": gid, "name": group_name})
+            group_id = gid
+            new_group_created = True
+    # Chong tao trung: da co profile cung ten trong CUNG nhom (hoac trung trong dot tao nay)
+    # -> bao loi thay vi tao them (tranh tao trung khi bam nham/lap).
+    if profile_name and group_id:
+        if profile_items is None:
+            try:
+                profile_items = _gpm_list_page_items(_gpm_api("GET", "/api/v1/profiles"))
+            except Exception as e:
+                return {"ok": False, "gpm_down": True, "error": f"Khong goi duoc GPM Local API ({GPM_BASE}): {e}"}
+        same = [p for p in profile_items
+                if str(p.get("group_id") or "") == str(group_id)
+                and str(p.get("name") or "").strip() == profile_name]
+        in_batch = batch_seen is not None and (profile_name.lower(), str(group_id)) in batch_seen
+        if same or in_batch:
+            existing_id = same[0].get("id") if same else None
+            msg = f"GPM da co profile '{profile_name}' trong nhom '{group_name}'"
+            if existing_id:
+                msg += f" (id {existing_id})"
+            else:
+                msg += " (trung voi profile khac tao trong dot nay)"
+            msg += ". Dan id vao cot ID GPM hoac doi ten o cot Profile truoc khi tao."
+            return {"ok": False, "conflict": True, "error": msg}
+    try:
+        created = _gpm_api("POST", "/api/v1/profiles/create", body={"name": profile_name, "group_id": group_id})
+    except Exception as e:
+        return {"ok": False, "gpm_down": True, "error": f"GPM tao profile loi: {e}"}
+    if not created.get("success"):
+        msg = str(created.get("message") or created.get("error") or "GPM tu choi tao profile")
+        return {"ok": False, "error": f"GPM tao profile that bai: {msg}"}
+    data = created.get("data") or {}
+    new_id = str(data.get("id") or "").strip()
+    if not new_id:
+        return {"ok": False, "gpm_down": True,
+                "error": f"GPM bao tao thanh cong nhung khong co id profile: {created}"}
+    account = shopee_db.update_mail_account_fields(DB_PATH, account_id, id_gpm=new_id)
+    if batch_seen is not None:
+        batch_seen.add((profile_name.lower(), str(group_id)))
+    created_name = data.get("name") or profile_name or "(ten mac dinh)"
+    if new_group_created:
+        message = (f"Da tao nhom GPM '{group_name}' (id {group_id}) va profile GPM "
+                   f"'{created_name}' trong nhom do (profile id {new_id}).")
+    else:
+        message = ("Da tao profile GPM '" + created_name + "'" +
+                   (f" trong nhom '{group_name}'" if group_name else " theo mac dinh cua GPM") +
+                   f" (id {new_id}).")
+    return {
+        "ok": True, "account": account,
+        "gpm": {"id": new_id, "name": data.get("name")},
+        "group_created": new_group_created,
+        "group_name": group_name,
+        "group_id": group_id,
+        "message": message,
+    }
+
+
+@app.route("/api/mail_accounts/<int:account_id>/gpm/create", methods=["POST"])
+def mail_accounts_gpm_create(account_id):
+    """Nut 'Tạo profile' tren 1 dong mail (xem _gpm_create_profile_row - goi don le, tu load
+    nhom/profile GPM). Body tuy chon: {"create_group": true} = neu ten nhom o cot GROUP GPM
+    chua ton tai trong GPM thi tao nhom moi truoc (nguoi dung da xac nhan o UI) roi moi tao
+    profile trong nhom do."""
+    body = request.get_json(force=True, silent=True) or {}
+    res = _gpm_create_profile_row(account_id, create_group=bool(body.get("create_group")))
+    if res.get("ok"):
+        return jsonify({"ok": True, "account": res["account"], "gpm": res["gpm"], "message": res["message"]})
+    if res.get("gpm_down"):
+        return jsonify({"ok": False, "error": res["error"]}), 502
+    return jsonify({"ok": False, "error": res["error"]}), (409 if res.get("conflict") else 400)
+
+
+@app.route("/api/mail_accounts/gpm/create_bulk", methods=["POST"])
+def mail_accounts_gpm_create_bulk():
+    """Nut 'Tạo profile' hang loat cho cac dong dang duoc TICH CHON: tao 1 profile GPM cho
+    tung dong. Load danh sach nhom + profile GPM 1 LAN cho ca dot (khong goi lap cho tung
+    dong) va chan trung ten noi bo trong cung dot (2 dong cung ten Profile + cung nhom).
+    Body tuy chon: {"create_missing_groups": true} = nhom nao chua ton tai trong GPM thi tao
+    nhom moi truoc (nguoi dung da xac nhan o UI) roi moi tao profile trong nhom do."""
+    body = request.get_json(force=True, silent=True) or {}
+    rows = body.get("rows")
+    if not isinstance(rows, list) or not rows:
+        return _bad_request("thieu 'rows' (danh sach {id, profile?, group_gpm?})")
+    create_missing_groups = bool(body.get("create_missing_groups"))
+    try:
+        group_items = _gpm_list_page_items(_gpm_api("GET", "/api/v1/groups"))
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Khong goi duoc GPM Local API ({GPM_BASE}): {e}"}), 502
+    try:
+        profile_items = _gpm_list_page_items(_gpm_api("GET", "/api/v1/profiles"))
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Khong goi duoc GPM Local API ({GPM_BASE}): {e}"}), 502
+    batch_seen = set()
+    results = []
+    for it in rows:
+        if not isinstance(it, dict):
+            results.append({"id": None, "ok": False, "error": "Dong khong hop le."})
+            continue
+        try:
+            aid = int(str(it.get("id") or "").strip())
+        except (TypeError, ValueError):
+            results.append({"id": None, "ok": False, "error": "Thieu hoac sai 'id' trong dong."})
+            continue
+        res = _gpm_create_profile_row(
+            aid, it.get("profile"), it.get("group_gpm"),
+            group_items=group_items, profile_items=profile_items, batch_seen=batch_seen,
+            create_group=create_missing_groups,
+        )
+        results.append({
+            "id": aid, "ok": res.get("ok"),
+            "error": res.get("error"), "gpm": res.get("gpm"), "message": res.get("message"),
+            "group_created": res.get("group_created"), "group_name": res.get("group_name"),
+        })
+    created = sum(1 for r in results if r["ok"])
+    return jsonify({"ok": True, "created": created, "skipped": len(results) - created, "results": results})
+
+
+@app.route("/api/mail_accounts/<int:account_id>/gpm/open", methods=["POST"])
+def mail_accounts_gpm_open(account_id):
+    """Nut 'Mở profile' tren 1 dong mail: mo browser GPM cua profile (cot ID GPM) roi mo 1 tab
+    toi trang CHU Shopee cua 'Thị trường' dang chon tren chinh dong mail do (PH/TH/MS/...).
+    Chi cho phep khi cot ID GPM da co gia tri."""
+    row = shopee_db.get_mail_account(DB_PATH, account_id)
+    if not row:
+        return _bad_request(f"khong tim thay mail id={account_id}")
+    profile_id = (row.get("id_gpm") or "").strip()
+    if not profile_id:
+        return jsonify({
+            "ok": False,
+            "error": "Dong nay chua co ID GPM - bam 'Tạo profile' (hoac dan ID vao cot ID GPM) truoc.",
+        }), 400
+    url, code = _gpm_market_home(row.get("market"))
+    try:
+        port = _gpm_open_url(profile_id, url)
+    except RuntimeError as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+    return jsonify({
+        "ok": True, "url": url, "market_code": code, "port": port,
+        "message": f"Da mo {url}",
+    })
+
+
+@app.route("/api/mail_accounts/gpm/open_bulk", methods=["POST"])
+def mail_accounts_gpm_open_bulk():
+    """Nut 'Mở profile' hang loat cho cac dong dang duoc TICH CHON: mo browser GPM cua tung
+    dong CO ID GPM (dong chua co ID se bo qua va dem vao skipped) roi mo trang chu Shopee theo
+    'Thị trường' cua dong do."""
+    body = request.get_json(force=True, silent=True) or {}
+    ids = body.get("ids")
+    if not isinstance(ids, list) or not ids:
+        return _bad_request("thieu 'ids'")
+    results = []
+    opened = 0
+    for raw in ids:
+        try:
+            aid = int(str(raw).strip())
+        except (TypeError, ValueError):
+            results.append({"id": None, "ok": False, "error": "id khong hop le."})
+            continue
+        row = shopee_db.get_mail_account(DB_PATH, aid)
+        if not row:
+            results.append({"id": aid, "ok": False, "error": f"khong tim thay mail id={aid}"})
+            continue
+        profile_id = (row.get("id_gpm") or "").strip()
+        if not profile_id:
+            results.append({"id": aid, "ok": False, "error": "Chua co ID GPM (bo qua)."})
+            continue
+        url, code = _gpm_market_home(row.get("market"))
+        try:
+            port = _gpm_open_url(profile_id, url)
+        except RuntimeError as e:
+            results.append({"id": aid, "ok": False, "error": str(e)})
+            continue
+        opened += 1
+        results.append({"id": aid, "ok": True, "url": url, "market_code": code, "port": port})
+    return jsonify({"ok": True, "opened": opened, "skipped": len(results) - opened, "results": results})
+
+
+@app.route("/api/mail_accounts/gpm/sync", methods=["POST"])
+def mail_accounts_gpm_sync():
+    """Dong bo danh sach mail_accounts theo GPM (GPM lam NGUON):
+    - Dong nao co ID GPM: cap nhat lai cot Profile (ten profile that) + GROUP GPM theo GPM,
+      KE CA khi nguoi dung da doi ten/doi nhom ngay ben GPM. Profile KHONG thuoc nhom nao
+      (ungrouped) se hien thi GROUP GPM = "Default group" (chu khong de trong).
+    - ID GPM khong con ton tai trong GPM (profile da bi xoa) -> TU XOA ID GPM (dong tro ve
+      trang thai chua tao, van GIU ten Profile/GROUP GPM da nhap de tao lai neu can).
+    Load nhom + profile GPM 1 lan cho ca dot. Dong chua co ID GPM khong dong cham toi."""
+    try:
+        groups = _gpm_list_page_items(_gpm_api("GET", "/api/v1/groups"))
+        profiles = _gpm_list_page_items(_gpm_api("GET", "/api/v1/profiles"))
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Khong goi duoc GPM Local API ({GPM_BASE}): {e}"}), 502
+    group_name_by_id = {str(g.get("id")): str(g.get("name") or "") for g in groups}
+    prof_by_id = {}
+    for p in profiles:
+        pid = str(p.get("id") or "").strip()
+        if pid:
+            prof_by_id[pid] = p
+    accounts = shopee_db.list_mail_accounts(DB_PATH, limit=1000000)
+    checked = updated = cleared = 0
+    for a in accounts:
+        pid = str(a.get("id_gpm") or "").strip()
+        if not pid:
+            continue
+        checked += 1
+        prof = prof_by_id.get(pid)
+        if prof is None:
+            # Profile khong con trong GPM (da xoa) -> xoa ID GPM de dong ve trang thai chua tao.
+            shopee_db.update_mail_account_fields(DB_PATH, a["id"], id_gpm="")
+            cleared += 1
+            continue
+        gid = str(prof.get("group_id") or "").strip()
+        if gid:
+            # Profile thuoc 1 nhom co id -> ten nhom that cua GPM (ke ca nhom ten "Default group").
+            group_name = group_name_by_id.get(gid, "")
+        else:
+            # Profile KHONG thuoc nhom nao (ungrouped) -> hien thi "Default group" cho de nhan biet.
+            group_name = "Default group"
+        real_profile = str(prof.get("name") or "").strip()
+        if (a.get("profile") or "") != real_profile or (a.get("group_gpm") or "") != group_name:
+            shopee_db.update_mail_account_fields(
+                DB_PATH, a["id"], profile=real_profile, group_gpm=group_name,
+            )
+            updated += 1
+    return jsonify({
+        "ok": True, "checked": checked, "updated": updated, "cleared": cleared,
+        "message": f"Da kiem tra {checked} dong co ID GPM: cap nhat {updated} dong, xoa {cleared} ID GPM khong con ton tai.",
+    })
 
 
 @app.route("/api/reset", methods=["POST"])
@@ -1398,8 +1722,8 @@ _gpm_workers = {}   # profile_id -> {proc, name, market, port, log}
 _gpm_lock = threading.RLock()  # RLock: _gpm_alloc_port() giu lock khi duoc goi tu trong handler cung lock
 
 
-def _gpm_api(method, path, params=None, timeout=10):
-    r = _requests.request(method, GPM_BASE + path, params=params, timeout=timeout)
+def _gpm_api(method, path, params=None, body=None, timeout=10):
+    r = _requests.request(method, GPM_BASE + path, params=params, json=body, timeout=timeout)
     r.raise_for_status()
     try:
         return r.json()
@@ -1713,23 +2037,13 @@ def _gpm_ensure_browser(profile_id):
     return None
 
 
-@app.route("/api/gpm/browser/open", methods=["POST"])
-def gpm_browser_open():
-    """Mo browser GPM cua profile (neu chua chay) va mo 1 tab toi 'url' - dung cho nut
-    'Home-Shopee' (mo trang chu shopee.<market> theo market dang chon cua profile)."""
-    body = request.get_json(force=True, silent=True) or {}
-    profile_id = (body.get("profile_id") or "").strip()
-    url = (body.get("url") or "").strip()
-    market = (body.get("market") or "").strip()
-    if not profile_id:
-        return _bad_request("thieu 'profile_id'")
-    if not url and market in _GPM_HOME_URL:
-        url = _GPM_HOME_URL[market]
-    if not url or not (url.startswith("https://") or url.startswith("http://")):
-        return _bad_request("thieu 'url' hop le")
+def _gpm_open_url(profile_id, url):
+    """Mo browser GPM cua profile (neu chua chay) va mo 1 tab toi 'url' - dung chung cho nut
+    'Home-Shopee' o tab Vận hành GPM va nut 'Mở profile' o tab Mail Accounts. Raise
+    RuntimeError kem thong diep ro rang khi that bai; tra ve CDP port neu mo tab thanh cong."""
     port = _gpm_ensure_browser(profile_id)
     if not port:
-        return jsonify({"ok": False, "error": "GPM khong start duoc browser (kiem tra GPM app / profile dang mo)."}), 502
+        raise RuntimeError("GPM khong start duoc browser (kiem tra GPM app / profile dang mo).")
     up = False
     for _ in range(90):  # cho toi 45s browser bind CDP
         if _gpm_tcp_up(port):
@@ -1737,7 +2051,7 @@ def gpm_browser_open():
             break
         time.sleep(0.5)
     if not up:
-        return jsonify({"ok": False, "error": f"Browser GPM start nhung CDP port {port} khong len."}), 502
+        raise RuntimeError(f"Browser GPM start nhung CDP port {port} khong len.")
     # mo tab moi bang CDP HTTP endpoint /json/new?<url> - CHU Y: url phai nam THANG trong query
     # (khong phai param ten 'url' - Chrome bo qua neu dung dang '?url=...' va chi mo about:blank)
     created = False
@@ -1756,7 +2070,28 @@ def gpm_browser_open():
         except Exception:
             pass
     if not created:
-        return jsonify({"ok": False, "error": f"Mo tab that bai tren port {port}."}), 502
+        raise RuntimeError(f"Mo tab that bai tren port {port}.")
+    return port
+
+
+@app.route("/api/gpm/browser/open", methods=["POST"])
+def gpm_browser_open():
+    """Mo browser GPM cua profile (neu chua chay) va mo 1 tab toi 'url' - dung cho nut
+    'Home-Shopee' (mo trang chu shopee.<market> theo market dang chon cua profile)."""
+    body = request.get_json(force=True, silent=True) or {}
+    profile_id = (body.get("profile_id") or "").strip()
+    url = (body.get("url") or "").strip()
+    market = (body.get("market") or "").strip()
+    if not profile_id:
+        return _bad_request("thieu 'profile_id'")
+    if not url and market in _GPM_HOME_URL:
+        url = _GPM_HOME_URL[market]
+    if not url or not (url.startswith("https://") or url.startswith("http://")):
+        return _bad_request("thieu 'url' hop le")
+    try:
+        port = _gpm_open_url(profile_id, url)
+    except RuntimeError as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
     return jsonify({"ok": True, "url": url, "port": port, "message": f"Da mo {url}"})
 
 
