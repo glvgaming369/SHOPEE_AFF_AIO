@@ -36,6 +36,12 @@ const MARKET = arg('--market', 'ph');
 const SERVER = arg('--server', 'http://127.0.0.1:8877');
 const GPM_PORT = parseInt(arg('--gpm-port', '9495'), 10);
 const GPM_PROFILE = arg('--gpm-profile', '');
+// Engine antidetect: 'gpm' (GPMLogin) mac dinh khi co --gpm-profile; 'gem' = GemLogin khi co
+// --gem-profile (server truyen --engine gem). Khong co profile -> dung Chrome debug co san.
+const ENGINE_ARG = arg('--engine', '');
+const GEM_BASE = arg('--gem-base', 'http://127.0.0.1:1010');
+const GEM_PROFILE = arg('--gem-profile', '');
+const ENGINE = ENGINE_ARG || (GEM_PROFILE ? 'gem' : (GPM_PROFILE ? 'gpm' : ''));
 const STOP_ON_EXIT = arg('--stop-on-exit', '1') === '1';
 const HIDDEN = arg('--hidden', '0') === '1';
 const POLL_MS = parseInt(arg('--poll', '4000'), 10);
@@ -153,6 +159,23 @@ async function gpmStartProfile() {
     if (pid) { minimizeWindowByPid(pid); log('(hidden) da yeu cau thu nho cua so worker.'); }
   }
   return d;
+}
+
+async function gemStartProfile() {
+  // GemLogin: GET /api/profiles/start/{id} -> data.remote_debugging_address "127.0.0.1:PORT"
+  const url = `${GEM_BASE}/api/profiles/start/${GEM_PROFILE}`;
+  const r = await fetch(url);
+  const t = await r.text();
+  let j = null; try { j = JSON.parse(t); } catch (e) {}
+  if (!r.ok || !(j && j.success)) throw new Error('GemLogin start fail: ' + t.slice(0, 200));
+  const d = (j && j.data) || {};
+  const addr = String(d.remote_debugging_address || '');
+  const m = /:(\d+)\s*$/.exec(addr);
+  if (!m) throw new Error('GemLogin start khong tra CDP address: ' + t.slice(0, 200));
+  const port = parseInt(m[1], 10);
+  log(`GemLogin start: ${GEM_PROFILE} -> debug=${addr}`);
+  if (HIDDEN) log('(hidden) GemLogin khong co process_id de thu nho cua so - de nguyen.');
+  return { port };
 }
 
 async function waitCdpUp(port, tries = 40) {
@@ -361,8 +384,22 @@ async function handleKeyword(cdp, kw) {
 
 async function main() {
   let cdpPort = PORT;
-  log(`CDP keyword worker v2 start: port=${PORT} device=${DEVICE} market=${MARKET} page_limit=${PAGE_LIMIT}` + (GPM_PROFILE ? ` gpm-profile=${GPM_PROFILE}` : ' (chrome debug co san)'));
-  if (GPM_PROFILE) {
+  log(`CDP keyword worker v2 start: port=${PORT} device=${DEVICE} market=${MARKET} engine=${ENGINE || 'chrome'} page_limit=${PAGE_LIMIT}` + ((GPM_PROFILE || GEM_PROFILE) ? ` profile=${GPM_PROFILE || GEM_PROFILE}` : ' (chrome debug co san)'));
+  if (ENGINE === 'gem') {
+    log('Start profile qua GemLogin...');
+    try {
+      const d = await gemStartProfile();
+      if (d.port && d.port !== PORT) {
+        cdpPort = d.port;
+        log(`GemLogin cap port khac -> dung port ${cdpPort}`);
+      }
+    } catch (e) { log('GemLogin start loi: ' + e.message); }
+    if (!(await waitCdpUp(cdpPort))) {
+      log('KHONG mo duoc CDP port ' + cdpPort + ' sau khi GemLogin start - kiem tra GemLogin app/port');
+      return;
+    }
+    log('CDP san sang qua GemLogin (port ' + cdpPort + ').');
+  } else if (GPM_PROFILE) {
     log('Start profile qua GPM Login...');
     try {
       const d = await gpmStartProfile();
@@ -417,7 +454,12 @@ async function main() {
   }
   log('Keyword worker ket thuc.');
   cdp.close();
-  if (GPM_PROFILE && STOP_ON_EXIT) {
+  if (STOP_ON_EXIT && GEM_PROFILE && ENGINE === 'gem') {
+    try {
+      const r = await fetch(`${GEM_BASE}/api/profiles/close/${GEM_PROFILE}`);
+      log('GemLogin close: HTTP ' + r.status);
+    } catch (e) { log('GemLogin close loi: ' + e.message); }
+  } else if (STOP_ON_EXIT && GPM_PROFILE) {
     try {
       const r = await fetch(`http://127.0.0.1:${GPM_PORT}/api/v1/profiles/stop/${GPM_PROFILE}`);
       log('GPM stop: HTTP ' + r.status);

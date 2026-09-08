@@ -135,6 +135,7 @@ create table if not exists mail_accounts (
     profile text default '',
     group_gpm text default '',
     id_gpm text default '',
+    engine text default 'gpm',
     slot text default '',
     market text default 'PH',
     shopee_code text,
@@ -435,6 +436,12 @@ def init_db(db_path=DB_PATH_DEFAULT):
         conn.execute("alter table mail_accounts add column group_gpm text default ''")
     if "id_gpm" not in existing_mail_cols:
         conn.execute("alter table mail_accounts add column id_gpm text default ''")
+    # Cot 'engine' (them sau, 2026-09-08): antidetect dung cho dong nay - 'gpm' (GPMLogin,
+    # mac dinh / du lieu cu) hoac 'gem' (GemLogin). Neu nguoi dung tu dan gia tri chu hoa
+    # ('GPM'/'GEM') thi chuan hoa ve chu thuong de so sanh don gian.
+    if "engine" not in existing_mail_cols:
+        conn.execute("alter table mail_accounts add column engine text default 'gpm'")
+    conn.execute("update mail_accounts set engine=lower(trim(engine)) where engine is not null and engine != ''")
     conn.execute(
         "create index if not exists idx_mail_accounts_market on mail_accounts(market)"
     )
@@ -2722,9 +2729,9 @@ def get_mail_account(db_path, account_id):
         conn.close()
 
 
-def update_mail_account_fields(db_path, account_id, shopee_id=None, device=None, profile=None, slot=None, market=None, group_gpm=None, id_gpm=None):
+def update_mail_account_fields(db_path, account_id, shopee_id=None, device=None, profile=None, slot=None, market=None, group_gpm=None, id_gpm=None, engine=None):
     """Cap nhat MOT PHAN cot nguoi dung tu nhap (tham so None = giu nguyen), dung cho nut
-    luu tung dong tren UI khi doi Shopee_id/Device/Profile/Slot/Market/Group_GPM/Id_GPM."""
+    luu tung dong tren UI khi doi Shopee_id/Device/Profile/Slot/Market/Group_GPM/Id_GPM/Engine."""
     current = get_mail_account(db_path, account_id)
     if not current:
         return None
@@ -2736,15 +2743,17 @@ def update_mail_account_fields(db_path, account_id, shopee_id=None, device=None,
         "id_gpm": id_gpm if id_gpm is not None else current["id_gpm"],
         "slot": slot if slot is not None else current["slot"],
         "market": market if market is not None else current["market"],
+        "engine": (str(engine).strip().lower() or "gpm") if engine is not None else (current.get("engine") or "gpm"),
     }
     conn = _connect(db_path)
     try:
         conn.execute(
-            "update mail_accounts set shopee_id=?, device=?, profile=?, group_gpm=?, id_gpm=?, slot=?, market=? where id=?",
+            "update mail_accounts set shopee_id=?, device=?, profile=?, group_gpm=?, id_gpm=?, "
+            "slot=?, market=?, engine=? where id=?",
             (
                 new_vals["shopee_id"], new_vals["device"], new_vals["profile"],
                 new_vals["group_gpm"], new_vals["id_gpm"],
-                new_vals["slot"], new_vals["market"], account_id,
+                new_vals["slot"], new_vals["market"], new_vals["engine"], account_id,
             ),
         )
         conn.commit()
