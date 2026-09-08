@@ -1,11 +1,14 @@
-// cdp_get_shopee_id.mjs - Lấy "Shopee ID" (Username) cua profile dang dang nhap Shopee.
+// cdp_get_shopee_id.mjs - Lấy "Shopee ID" (ten user) cua profile dang dang nhap Shopee.
 // Dung chung cho engine GPM (GPMLogin) va GEM (GemLogin):
 //  1) start profile (qua Local API) -> CDP port that
-//  2) mo tab toi {url} (trang user/account/profile)
-//  3) poll: neu bi chuyen sang /buyer/login  -> chua dang nhap
-//          neu bi chuyen sang /verify/...     -> captcha/traffic
-//          neu DOM co "Username" (XPath nhu UI yeu cau) -> lay text lam Shopee ID
-//  4) IN RA DUY NHAT 1 dong JSON len stdout de server doc; log loi ra stderr.
+//  2) mo trang buyer {url} (https://shopee.<tld>/user/account/profile) - khong vao seller
+//  3) cai hook fetch/XHR tu document-start: BAT RESPONSE cua request den seller.shopee.*
+//     (webchat .../mini/login) -> lay o.user.name lam Shopee ID (thay XPath da loi); hook
+//     chay duoc ca trong iframe (seller) nho postMessage day nguoc len tab chinh.
+//  4) poll: URL bi dan sang login (buyer/seller/accounts) -> chua dang nhap
+//          URL chua /verify/...                    -> captcha/traffic
+//          da bat duoc user.name                   -> ok
+//  5) IN RA DUY NHAT 1 dong JSON len stdout de server doc; log loi ra stderr.
 //
 // Args: --engine gpm|gem --profile <id> --url <profile-url>
 //       [--gpm-base http://127.0.0.1:9495] [--gem-base http://127.0.0.1:1010]
@@ -23,6 +26,13 @@ const TIMEOUT = parseInt(arg('--timeout', '60000'), 10) || 60000;
 const POLL = parseInt(arg('--poll', '900'), 10) || 900;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// fetch noi bo (GPM/GEM/CDP) phai co timeout - neu khong the treo vi nhan trang.
+const ft = (u, opts = {}) => {
+  const ms = opts.ms || 20000;
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), ms);
+  return fetch(u, Object.assign({}, opts, { signal: ctl.signal })).finally(() => clearTimeout(t));
+};
 
 function out(obj) { process.stdout.write(JSON.stringify(obj) + '\n'); }
 function fail(status, detail) { out({ status, shopee_id: null, url: URL, detail }); process.exit(0); }
@@ -32,7 +42,7 @@ async function startProfile() {
   const base = ENGINE === 'gem' ? GEM_BASE : GPM_BASE;
   const path = ENGINE === 'gem' ? `/api/profiles/start/${PROFILE}` : `/api/v1/profiles/start/${PROFILE}`;
   const doStart = async () => {
-    const r = await fetch(base + path);
+    const r = await ft(base + path, { ms: 20000 });
     const t = await r.text();
     let j = null; try { j = JSON.parse(t); } catch (e) {}
     if (!r.ok || !(j && j.success)) return { ok: false, raw: t };
@@ -42,7 +52,7 @@ async function startProfile() {
   if (!res.ok && /InUse/i.test(res.raw)) {
     try {
       const stop = ENGINE === 'gem' ? `/api/profiles/close/${PROFILE}` : `/api/v1/profiles/stop/${PROFILE}`;
-      await fetch(base + stop);
+      await ft(base + stop, { ms: 20000 });
     } catch (e) {}
     await sleep(2500);
     res = await doStart();
@@ -62,7 +72,7 @@ async function startProfile() {
 
 async function waitCdpUp(port, tries = 60) {
   for (let i = 0; i < tries; i++) {
-    try { const v = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json(); if (v.Browser) return true; } catch (e) {}
+    try { const v = await (await ft(`http://127.0.0.1:${port}/json/version`, { ms: 6000 })).json(); if (v.Browser) return true; } catch (e) {}
     await sleep(500);
   }
   return false;
@@ -72,7 +82,7 @@ async function openTab(port, url) {
   const u = `http://127.0.0.1:${port}/json/new?${url}`;
   for (const method of ['PUT', 'GET']) {
     try {
-      const r = await fetch(u, { method });
+      const r = await ft(u, { method, ms: 15000 });
       if (r.ok) {
         const tab = await r.json();
         if (tab && tab.webSocketDebuggerUrl) return tab;
@@ -114,18 +124,50 @@ async function main() {
   try { st = await startProfile(); }
   catch (e) { process.stderr.write('START_ERR: ' + e.message + '\n'); process.exit(3); }
   if (!(await waitCdpUp(st.port))) { process.stderr.write('CDP khong len port ' + st.port + '\n'); process.exit(4); }
-  const tab = await openTab(st.port, URL);
+  // Mo tab about:blank truoc -> cai hook fetch/XHR (document-start) -> moi dieu huong sang URL
+  const tab = await openTab(st.port, 'about:blank');
   if (!tab) { process.stderr.write('Mo tab that bai\n'); process.exit(5); }
   const cdp = new Cdp(tab.webSocketDebuggerUrl);
   try { await cdp.connect(); } catch (e) { process.stderr.write('WS loi: ' + e.message + '\n'); process.exit(6); }
+  await cdp.send('Page.enable').catch(() => {});
   await cdp.send('Runtime.enable').catch(() => {});
-  const xpathExpr = `(() => {
-    try {
-      const el = document.evaluate('//*[text()="Username"]/parent::*/parent::*//div//div',
-        document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-      return el ? String(el.innerText || el.textContent || '').trim() : null;
-    } catch (e) { return null; }
-  })()`;
+  const HOOK = `(() => {
+    if (window.__dshHooked) return; window.__dshHooked = 1;
+    const setAndPropagate = (n) => {
+      if (!n) return;
+      if (!window.__dshName) window.__dshName = String(n);
+      try { if (window.parent && window.parent !== window) window.parent.postMessage({ __dsh: String(window.__dshName) }, '*'); } catch (e) {}
+    };
+    window.addEventListener('message', (ev) => { try { const d = ev.data; if (d && d.__dsh) setAndPropagate(d.__dsh); } catch (e) {} });
+    const wanted = /seller\\.shopee/i;          // request den seller.shopee.* (webchat mini/login)
+    const pathWanted = /mini\\/login/i;
+    const parse = (txt, u) => {
+      try {
+        const us = String(u || '');
+        if (!wanted.test(us) || !pathWanted.test(us)) return;
+        const o = JSON.parse(txt);
+        if (o && o.user && o.user.name) setAndPropagate(o.user.name);
+      } catch (e) {}
+    };
+    const of = window.fetch;
+    if (of) window.fetch = function () {
+      const u = typeof arguments[0] === 'string' ? arguments[0] : (arguments[0] && arguments[0].url) || '';
+      const p = of.apply(this, arguments);
+      p.then(function (r) { if (r && r.ok) { try { const c = r.clone(); c.text().then(function (t) { parse(t, u); }); } catch (e) {} } }).catch(function () {});
+      return p;
+    };
+    const ox = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (m, u) { this.__dshUrl = u; return ox.apply(this, arguments); };
+    const osend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function () {
+      this.addEventListener('readystatechange', function () {
+        if (this.readyState === 4 && this.status === 200) { try { parse(this.responseText, this.__dshUrl); } catch (e) {} }
+      });
+      return osend.apply(this, arguments);
+    };
+  })();`;
+  try { await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: HOOK }); } catch (e) {}
+  try { await cdp.send('Page.navigate', { url: URL }); } catch (e) { process.stderr.write('NAV loi: ' + (e && e.message) + '\n'); process.exit(7); }
 
   const deadline = Date.now() + TIMEOUT;
   let current = '';
@@ -133,14 +175,14 @@ async function main() {
   while (Date.now() < deadline) {
     try { current = String(await cdp.evaluate('location.href') || ''); } catch (e) { lastErr = e.message; }
     const u = current || '';
-    if (/\/buyer\/login(\?|$)/.test(u)) { fail('no_login', 'Chua dang nhap: ' + u); return; }
+    if (/\/login(\?|$)/.test(u) || /accounts\.shopee/.test(u)) { fail('no_login', 'Chua dang nhap: ' + u); return; }
     if (/\/verify\/(captcha|traffic)/.test(u)) { fail('captcha', 'Bi chan captcha/traffic: ' + u); return; }
-    let idText = null;
-    try { idText = await cdp.evaluate(xpathExpr); } catch (e) { lastErr = e.message; }
-    if (idText) { out({ status: 'ok', shopee_id: idText, url: URL, detail: '' }); return; }
+    let name = null;
+    try { name = String(await cdp.evaluate('window.__dshName || ""') || ''); } catch (e) { lastErr = e.message; }
+    if (name) { out({ status: 'ok', shopee_id: name, url: URL, detail: 'Lay tu response mini/login (user.name).' }); process.exit(0); }
     await sleep(POLL);
   }
   fail('timeout', (lastErr ? 'last err: ' + lastErr + ' | ' : '') + 'current url: ' + (current || 'unknown'));
 }
 
-main().catch((e) => { process.stderr.write('FATAL: ' + (e && e.message) + '\n'); process.exit(1); });
+main().then(() => process.exit(0)).catch((e) => { process.stderr.write('FATAL: ' + (e && e.message) + '\n'); process.exit(1); });

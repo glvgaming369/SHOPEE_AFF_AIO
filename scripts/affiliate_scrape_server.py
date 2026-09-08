@@ -1570,15 +1570,18 @@ def mail_accounts_gpm_open_bulk():
 
 
 def _shopee_profile_base(market):
-    """Base https://shopee.<tld> theo market cua dong (PH/TH/MY/ID/VN/SG) - tu bang home da co."""
+    """URL trang ho so buyer https://shopee.<tld>/user/account/profile theo market cua dong.
+    KHONG vao thang seller.shopee (nguoi dung chua dang ky seller) - chi mo trang buyer, con
+    response seller.shopee (mini/login) do trang nay kich hoat se duoc hook bat - xem cdp_get_shopee_id.mjs."""
     code = _GPM_MARKET_CODE.get(str(market or "").strip().upper(), "ph")
-    return _GPM_HOME_URL.get(code, _GPM_HOME_URL["ph"]).rstrip("/")
+    return _GPM_HOME_URL.get(code, _GPM_HOME_URL["ph"]).rstrip("/") + "/user/account/profile"
 
 
 @app.route("/api/mail_accounts/<int:account_id>/get_shopee_id", methods=["POST"])
 def mail_accounts_get_shopee_id(account_id):
-    """Nut 'Get Shopee ID' (hang loat): mo browser cua dong (engine GPM/GEM), mo tab
-    https://shopee.<tld>/user/account/profile, doc Username (XPath) lam Shopee ID.
+    """Nut 'Get Shopee ID' (hang loat): mo browser cua dong (engine GPM/GEM), mo trang
+    buyer https://shopee.<tld>/user/account/profile va BAT RESPONSE cua request den
+    seller.shopee (webchat .../mini/login) de lay user.name lam Shopee ID (thay XPath da loi).
     Tra ve theo trang thai:
       status ok        -> da co shopee_id (chua ghi neu trung -> status duplicate + duplicates)
       no_login/captcha -> de cua so do lai cho nguoi dung xu ly (khong ghi)
@@ -1591,7 +1594,7 @@ def mail_accounts_get_shopee_id(account_id):
     if not profile_id:
         return jsonify({"ok": True, "status": "no_id", "detail": "Chua co ID GPM/GEM (bo qua)."})
     engine = _row_engine(row)
-    profile_url = _shopee_profile_base(row.get("market")) + "/user/account/profile"
+    profile_url = _shopee_profile_base(row.get("market"))
     node_exe = _find_node()
     cmd = [node_exe, os.path.join(SCRIPTS_DIR, "cdp_get_shopee_id.mjs"),
            "--engine", engine, "--profile", profile_id, "--url", profile_url,
