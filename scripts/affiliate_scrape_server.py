@@ -1569,6 +1569,65 @@ def mail_accounts_gpm_open_bulk():
     return jsonify({"ok": True, "opened": opened, "skipped": len(results) - opened, "results": results})
 
 
+def _shopee_profile_base(market):
+    """Base https://shopee.<tld> theo market cua dong (PH/TH/MY/ID/VN/SG) - tu bang home da co."""
+    code = _GPM_MARKET_CODE.get(str(market or "").strip().upper(), "ph")
+    return _GPM_HOME_URL.get(code, _GPM_HOME_URL["ph"]).rstrip("/")
+
+
+@app.route("/api/mail_accounts/<int:account_id>/get_shopee_id", methods=["POST"])
+def mail_accounts_get_shopee_id(account_id):
+    """Nut 'Get Shopee ID' (hang loat): mo browser cua dong (engine GPM/GEM), mo tab
+    https://shopee.<tld>/user/account/profile, doc Username (XPath) lam Shopee ID.
+    Tra ve theo trang thai:
+      status ok        -> da co shopee_id (chua ghi neu trung -> status duplicate + duplicates)
+      no_login/captcha -> de cua so do lai cho nguoi dung xu ly (khong ghi)
+      timeout/error    -> loi/qua han (khong ghi)
+    Ghi vao cot shopee_id CHI khi khong trung dong khac (exclude_id=chinh dong)."""
+    row = shopee_db.get_mail_account(DB_PATH, account_id)
+    if not row:
+        return _bad_request(f"khong tim thay mail id={account_id}")
+    profile_id = (row.get("id_gpm") or "").strip()
+    if not profile_id:
+        return jsonify({"ok": True, "status": "no_id", "detail": "Chua co ID GPM/GEM (bo qua)."})
+    engine = _row_engine(row)
+    profile_url = _shopee_profile_base(row.get("market")) + "/user/account/profile"
+    node_exe = _find_node()
+    cmd = [node_exe, os.path.join(SCRIPTS_DIR, "cdp_get_shopee_id.mjs"),
+           "--engine", engine, "--profile", profile_id, "--url", profile_url,
+           "--gpm-base", GPM_BASE, "--gem-base", GEM_BASE]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=110)
+    except subprocess.TimeoutExpired:
+        return jsonify({"ok": True, "status": "error", "detail": "Chay qua 110s (timeout).",
+                        "engine": engine, "url": profile_url})
+    out_text = (proc.stdout or "").strip()
+    last_line = out_text.splitlines()[-1] if out_text else ""
+    import json as _json
+    try:
+        res = _json.loads(last_line)
+    except Exception:
+        stderr_tail = (proc.stderr or "").strip().splitlines()
+        tail = (stderr_tail[-1] if stderr_tail else "") or (proc.stdout or "")[:200]
+        return jsonify({"ok": True, "status": "error", "detail": f"Helper loi: {tail[:240]}",
+                        "engine": engine, "url": profile_url})
+    status = str(res.get("status") or "error")
+    sid = str(res.get("shopee_id") or "").strip()
+    if status == "ok" and sid:
+        dups = shopee_db.find_mail_accounts_by_shopee_id(DB_PATH, sid, exclude_id=account_id)
+        if dups:
+            return jsonify({"ok": True, "status": "duplicate", "shopee_id": sid,
+                            "duplicates": [d["email"] for d in dups],
+                            "detail": f"Shopee ID '{sid}' da duoc dung o dong khac.", "url": profile_url})
+        shopee_db.update_mail_account_fields(DB_PATH, account_id, shopee_id=sid)
+        return jsonify({"ok": True, "status": "ok", "written": True, "shopee_id": sid,
+                        "detail": f"Da ghi Shopee ID '{sid}'.", "url": profile_url})
+    return jsonify({"ok": True, "status": status,
+                    "shopee_id": sid if sid else None,
+                    "detail": res.get("detail") or "", "url": profile_url,
+                    "user_handle": status in ("no_login", "captcha")})
+
+
 @app.route("/api/mail_accounts/gpm/sync", methods=["POST"])
 def mail_accounts_gpm_sync():
     """Dong bo danh sach mail_accounts theo engine CUA TUNG DONG (GPM va GEM lam NGUON):

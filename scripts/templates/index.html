@@ -807,6 +807,8 @@
       <button class="secondary" onclick="createGpmProfilesSelected(this)" title="Tạo profile theo engine từng dòng (GPM/GEM) - dòng đã có ID GPM/GEM hoặc trùng tên trong cùng nhóm sẽ bỏ qua">Tạo profile (đã chọn)</button>
       <button class="secondary" onclick="openGpmProfilesSelected(this)" title="Mở trang chủ Shopee của các dòng đang tích chọn theo engine từng dòng - dòng chưa có ID GPM/GEM sẽ bỏ qua">Mở profile (đã chọn)</button>
       <button class="secondary" onclick="syncMailAccountsGpm(this)" title="Lấy tên profile / nhóm mới nhất từ GPM & GemLogin ghi đè vào bảng (theo engine từng dòng); ID không còn tồn tại sẽ bị xóa">⟳ Đồng bộ GPM/GEM</button>
+      <input type="number" id="mailacc-getid-threads" min="1" max="6" value="2" style="max-width:62px;" title="Số profile chạy song song khi Get Shopee ID">
+      <button class="secondary" onclick="getShopeeIdsSelected(this)" title="Với từng dòng đang tích: mở trang hồ sơ Shopee theo market, lấy Username (Shopee ID) ghi vào cột Shopee ID; chưa login/captcha thì mở sẵn cửa sổ để xử lý">Get Shopee ID</button>
       <button class="secondary" onclick="document.getElementById('mailacc-import-file').click()">Import Excel</button>
       <input type="file" id="mailacc-import-file" accept=".xlsx" style="display:none;" onchange="importMailAccountsXlsx(this)">
       <button class="danger" onclick="clearMailAccounts()">Xóa tất cả</button>
@@ -2758,6 +2760,84 @@ async function openGpmProfilesSelected(btn) {
     } catch (e) {
       await customAlert('Lỗi mở profile hàng loạt: ' + e.message, { danger: true });
     }
+  });
+}
+
+// ---- Get Shopee ID (hang loat): doc Username tu trang user/account/profile cua tung dong ----
+async function getShopeeIdsSelected(btn) {
+  const ids = mailAccSelectedIds();
+  if (!ids.length) {
+    await customAlert('Chưa chọn dòng nào — hãy tích chọn các dòng cần lấy Shopee ID trước.', { danger: true });
+    return;
+  }
+  const rowById = new Map(lastMailAccountsList.map(a => [a.id, a]));
+  const valid = ids.filter(id => {
+    const a = rowById.get(id);
+    return a && String(a.id_gpm || '').trim() !== '';
+  });
+  const skipped = ids.length - valid.length;
+  if (!valid.length) {
+    await customAlert('Không có dòng nào đang tích có ID GPM/GEM — hãy tạo profile trước.', { danger: true });
+    return;
+  }
+  const threadsEl = document.getElementById('mailacc-getid-threads');
+  const threads = Math.max(1, Math.min(6, parseInt(threadsEl ? threadsEl.value : '2', 10) || 2));
+  const skipNote = skipped ? `- ${skipped} dòng chưa có ID profile sẽ bỏ qua.\n` : '';
+  if (!(await customConfirm(
+    `Lấy Shopee ID cho ${valid.length} dòng đang tích chọn (chạy ${threads} dòng song song)?\n\n` +
+    `- Mở trang hồ sơ Shopee theo market của từng dòng, lấy Username rồi ghi vào cột Shopee ID (ghi đè nếu đã có).\n` +
+    `- Dòng chưa đăng nhập / bị captcha sẽ MỞ SẴN cửa sổ để bạn xử lý (không ghi ID).\n` +
+    skipNote +
+    `- Quá trình mỗi dòng có thể mất 30-60s, cửa sổ sẽ mở ra trong lúc chạy.`
+  ))) return;
+  await withBusy(btn, async () => {
+    const results = [];
+    let cursor = 0;
+    const next = () => { const i = cursor++; return i < valid.length ? valid[i] : undefined; };
+    const worker = async () => {
+      for (let id; (id = next()) !== undefined;) {
+        try {
+          const r = await api('POST', `/api/mail_accounts/${id}/get_shopee_id`, undefined, 135000);
+          results.push({ id, ...r });
+        } catch (e) {
+          results.push({ id, status: 'error', detail: e.message || 'Lỗi không rõ' });
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: threads }, () => worker()));
+    // Xu ly trung Shopee ID: hoi 1 lan, dong y thi ghi de
+    const dups = results.filter(r => r.status === 'duplicate');
+    let dupWrote = 0;
+    if (dups.length) {
+      const sample = [...new Set(dups.map(d => d.shopee_id))].slice(0, 5).join(', ');
+      if (await customConfirm(
+        `${dups.length} dòng lấy được Shopee ID đang TRÙNG dòng khác (vd: ${sample}...).\n\n` +
+        `Vẫn ghi đè các giá trị trùng này? (không đồng ý thì các dòng đó bỏ qua)`
+      )) {
+        for (const d of dups) {
+          try { await api('POST', `/api/mail_accounts/${d.id}`, { shopee_id: d.shopee_id }); dupWrote++; } catch (e) {}
+        }
+      }
+    }
+    const okWrote = results.filter(r => r.status === 'ok').length + dupWrote;
+    const noLogin = results.filter(r => r.status === 'no_login').length;
+    const captcha = results.filter(r => r.status === 'captcha').length;
+    const errs = results.filter(r => ['timeout', 'error', 'no_id'].includes(r.status));
+    const noIdCount = results.filter(r => r.status === 'no_id').length;
+    const parts = [`Lấy được Shopee ID và ghi: ${okWrote}/${results.length} dòng.`];
+    const extra = [];
+    if (noLogin) extra.push(`Chưa đăng nhập (đã mở sẵn cửa sổ): ${noLogin}`);
+    if (captcha) extra.push(`Bị captcha/traffic (đã mở sẵn cửa sổ): ${captcha}`);
+    if (noIdCount) extra.push(`Không có ID profile: ${noIdCount}`);
+    if (errs.length) {
+      extra.push(`Lỗi/timeout: ${errs.length}`);
+      parts.push('Chi tiết lỗi:');
+      errs.slice(0, 6).forEach(e => parts.push(`- #${e.id}: ${e.detail || e.status || 'lỗi'}`));
+      if (errs.length > 6) parts.push(`... và ${errs.length - 6} lỗi khác.`);
+    }
+    if (extra.length) parts.push(extra.join(' — '));
+    await customAlert(parts.join('\n'), { danger: errs.length > 0 });
+    await loadMailAccounts();
   });
 }
 
