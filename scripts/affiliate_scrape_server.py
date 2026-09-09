@@ -1215,6 +1215,29 @@ def _gpm_list_page_items(payload):
     return raw or []
 
 
+def _gpm_api_all_pages(path, page_size=5000, timeout=10):
+    """GET /api/v1/profiles va /api/v1/groups cua GPM CO PHAN TRANG, mac dinh page_size=30
+    (xem "gpm Login/https___gpmlogin_com_doc_.html.txt") - goi _gpm_api() 1 lan nhu truoc day
+    CHI lay toi da 30 item dau, khien cac dong co id_gpm/nhom NAM NGOAI 30 item do bi
+    mail_accounts_gpm_sync() hieu nham la "khong con ton tai" roi TU XOA id_gpm dang dung (bug
+    nguoi dung bao 2026-09-09: dan tay ID hoac tao profile moi deu bi mat sau khi dong bo).
+    Lap qua het cac trang (dung 'last_page' server tra ve) roi gop lai thanh 1 list day du."""
+    all_items = []
+    page = 1
+    while True:
+        payload = _gpm_api("GET", path, params={"page": page, "page_size": page_size}, timeout=timeout)
+        if not payload.get("success"):
+            raise RuntimeError(str(payload.get("message") or "GPM API loi"))
+        raw = payload.get("data")
+        items = raw.get("data") if isinstance(raw, dict) else (raw or [])
+        all_items.extend(items or [])
+        last_page = raw.get("last_page") if isinstance(raw, dict) else None
+        if not items or not last_page or page >= last_page:
+            break
+        page += 1
+    return all_items
+
+
 def _gpm_create_profile_row(account_id, profile_name=None, group_name=None,
                             group_items=None, profile_items=None, batch_seen=None,
                             create_group=False):
@@ -1240,7 +1263,7 @@ def _gpm_create_profile_row(account_id, profile_name=None, group_name=None,
     group_name = (group_name if group_name is not None else row.get("group_gpm") or "").strip()
     if group_items is None:
         try:
-            group_items = _gpm_list_page_items(_gpm_api("GET", "/api/v1/groups"))
+            group_items = _gpm_api_all_pages("/api/v1/groups")
         except Exception as e:
             return {"ok": False, "gpm_down": True, "error": f"Khong goi duoc GPM Local API ({GPM_BASE}): {e}"}
     group_id = None
@@ -1282,7 +1305,7 @@ def _gpm_create_profile_row(account_id, profile_name=None, group_name=None,
     if profile_name and group_id:
         if profile_items is None:
             try:
-                profile_items = _gpm_list_page_items(_gpm_api("GET", "/api/v1/profiles"))
+                profile_items = _gpm_api_all_pages("/api/v1/profiles")
             except Exception as e:
                 return {"ok": False, "gpm_down": True, "error": f"Khong goi duoc GPM Local API ({GPM_BASE}): {e}"}
         same = [p for p in profile_items
@@ -1743,10 +1766,13 @@ def mail_accounts_gpm_sync():
             by_engine[_row_engine(a)].append(a)
 
     def _sync_engine_gpm(rows):
-        """GPM: group_id uuid / name tu /api/v1/groups; ungrouped hien 'Default group'."""
+        """GPM: group_id uuid / name tu /api/v1/groups; ungrouped hien 'Default group'.
+        Dung _gpm_api_all_pages (KHONG phai goi 1 lan la xong) - GPM phan trang mac dinh 30
+        item/lan, goi thieu page_size se bo sot profile/nhom khien dong hop le bi hieu nham
+        'khong con ton tai' roi bi TU XOA id_gpm (bug nguoi dung bao 2026-09-09)."""
         try:
-            groups = _gpm_list_page_items(_gpm_api("GET", "/api/v1/groups"))
-            profiles = _gpm_list_page_items(_gpm_api("GET", "/api/v1/profiles"))
+            groups = _gpm_api_all_pages("/api/v1/groups")
+            profiles = _gpm_api_all_pages("/api/v1/profiles")
         except Exception as e:
             raise RuntimeError(f"Khong goi duoc GPM Local API ({GPM_BASE}): {e}")
         group_name_by_id = {str(g.get("id")): str(g.get("name") or "") for g in groups}
@@ -2205,29 +2231,27 @@ def _gpm_kill_proc(proc):
 
 @app.route("/api/gpm/groups", methods=["GET"])
 def gpm_groups():
-    """Danh sach nhom (group) cua GPM - de UI chon nhom roi moi load profile cua nhom do."""
+    """Danh sach nhom (group) cua GPM - de UI chon nhom roi moi load profile cua nhom do.
+    Dung _gpm_api_all_pages (GPM phan trang mac dinh 30 nhom/lan, goi 1 lan se bo sot nhom
+    neu co >30 nhom)."""
     try:
-        data = _gpm_api("GET", "/api/v1/groups")
+        items = _gpm_api_all_pages("/api/v1/groups")
     except Exception as e:
         return jsonify({"ok": False, "error": f"Khong goi duoc GPM Local API ({GPM_BASE}): {e}"}), 502
-    raw = data.get("data")
-    if isinstance(raw, dict):
-        items = raw.get("data") or []
-    else:
-        items = raw or []
     groups = [{"id": g.get("id"), "name": g.get("name") or g.get("id")} for g in items if g.get("id")]
     return jsonify({"ok": True, "groups": groups})
 
 
 @app.route("/api/gpm/profiles", methods=["GET"])
 def gpm_profiles():
-    """Danh sach profile GPM + trang thai (port, worker, CDP). Loc theo ?group_id=<id> neu co."""
+    """Danh sach profile GPM + trang thai (port, worker, CDP). Loc theo ?group_id=<id> neu co.
+    Dung _gpm_api_all_pages (GPM phan trang mac dinh 30 profile/lan, goi 1 lan se bo sot
+    profile neu co >30 profile)."""
     group_id = (request.args.get("group_id") or "").strip()
     try:
-        data = _gpm_api("GET", "/api/v1/profiles")
+        profiles = _gpm_api_all_pages("/api/v1/profiles")
     except Exception as e:
         return jsonify({"ok": False, "error": f"Khong goi duoc GPM Local API ({GPM_BASE}): {e}"}), 502
-    profiles = (data.get("data") or {}).get("data") or []
     if group_id:
         profiles = [p for p in profiles if str(p.get("group_id") or "") == str(group_id)]
     out = []
