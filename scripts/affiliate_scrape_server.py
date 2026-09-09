@@ -1375,21 +1375,40 @@ def _cdp_navigate_first_tab(port, url, timeout=8):
     dang trong) sang 'url' qua CDP WebSocket (Page.navigate), KHONG tao them tab moi - tranh
     tinh trang tab 0 bo trong con Shopee lai bi mo o tab 1 (yeu cau nguoi dung 2026-09-09).
     Tra ve True neu da gui navigate thanh cong, False neu khong tim duoc tab / loi WS (goi
-    noi de fallback sang cach cu /json/new tao tab moi)."""
+    noi de fallback sang cach cu /json/new tao tab moi).
+
+    CDP port "len" (TCP connect duoc) KHONG co nghia la tab dau tien da xuat hien trong
+    /json/list ngay - co khoang tre nho luc browser vua khoi dong. Truoc day chi thu 1 lan
+    nen hay bi race, roi vao dung fallback tao tab moi (nguoi dung bao lai 2026-09-09: tab 0
+    van trong, Shopee mo o tab 1) - gio thu lai vai lan trong vai giay truoc khi bo cuoc."""
     import json as _json
     import websocket as _ws
-    try:
-        r = _requests.get(f"http://127.0.0.1:{port}/json/list", timeout=timeout)
-        targets = r.json() if r.ok else []
-    except Exception:
-        return False
-    target = next(
-        (t for t in targets if t.get("type") == "page" and t.get("webSocketDebuggerUrl")), None
-    )
+    target = None
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            r = _requests.get(f"http://127.0.0.1:{port}/json/list", timeout=3)
+            targets = r.json() if r.ok else []
+        except Exception:
+            targets = []
+        target = next(
+            (t for t in targets if t.get("type") == "page" and t.get("webSocketDebuggerUrl")), None
+        )
+        if target:
+            break
+        time.sleep(0.4)
     if not target:
         return False
     try:
-        ws = _ws.create_connection(target["webSocketDebuggerUrl"], timeout=timeout)
+        # suppress_origin=True: BAT BUOC - websocket-client tu gan header "Origin: http://<host:port>"
+        # (trung CHINH host:port dang connect) neu khong noi ro, va Chrome tu ban 111+ CHAN thang
+        # WS connect nao co Origin khong nam trong allowlist --remote-allow-origins (mac dinh
+        # trong, tuc LA CHAN CA origin tu suy) -> 403 Forbidden. Day chinh la ly do fix truoc
+        # (chi thu lai /json/list) khong het bug: tim dung tab nhung ket noi WS luon that bai,
+        # roi lai fallback /json/new tao tab moi (nguoi dung bao lai 2026-09-09 lan 2). Cac cong
+        # cu CDP thuc su (Puppeteer, chrome-remote-interface...) deu KHONG gui Origin de tranh
+        # dung check nay - suppress_origin lam dung y do.
+        ws = _ws.create_connection(target["webSocketDebuggerUrl"], timeout=timeout, suppress_origin=True)
     except Exception:
         return False
     try:

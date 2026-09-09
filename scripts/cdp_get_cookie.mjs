@@ -108,18 +108,23 @@ async function openTab(port, url) {
 
 // Tab DAU TIEN (tab 0) da co san khi profile vua start (GPM/GEM thuong tu mo 1 tab trong) -
 // dung lai tab nay (roi Page.navigate sau) thay vi tao tab moi qua openTab(), tranh tinh
-// trang tab 0 bo trong con Shopee lai bi mo o tab 1 (yeu cau nguoi dung 2026-09-09).
-async function firstPageTarget(port) {
-  try {
-    const r = await ft(`http://127.0.0.1:${port}/json/list`, { ms: 8000 });
-    if (r.ok) {
-      const list = await r.json();
-      if (Array.isArray(list)) {
-        const tab = list.find((t) => t.type === 'page' && t.webSocketDebuggerUrl);
-        if (tab) return tab;
+// trang tab 0 bo trong con Shopee lai bi mo o tab 1 (yeu cau nguoi dung 2026-09-09). CDP port
+// "len" (waitCdpUp qua) KHONG co nghia tab dau tien da xuat hien trong /json/list ngay - co
+// khoang tre nho luc browser vua khoi dong, nen thu lai vai lan truoc khi bo cuoc.
+async function firstPageTarget(port, tries = 15) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const r = await ft(`http://127.0.0.1:${port}/json/list`, { ms: 4000 });
+      if (r.ok) {
+        const list = await r.json();
+        if (Array.isArray(list)) {
+          const tab = list.find((t) => t.type === 'page' && t.webSocketDebuggerUrl);
+          if (tab) return tab;
+        }
       }
-    }
-  } catch (e) {}
+    } catch (e) {}
+    await sleep(400);
+  }
   return null;
 }
 
