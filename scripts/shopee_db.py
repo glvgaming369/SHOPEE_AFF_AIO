@@ -261,6 +261,36 @@ create table if not exists keywords (
 """
 
 
+# Log 1 dong / 1 lan goi post_video_to_shopee() (xem shopee_video_post.py) - khac
+# video_push_log (log 1 dong / 1 LO goi VideoAI) o cho bang nay log TUNG VIDEO rieng, vi
+# post_videos_from_folder() khong con "hang doi" nao khac de biet video nao da dang thanh
+# cong (Chill 68 dung cot J tren Google Sheet cho viec nay, tool cua chinh chung ta doc
+# thang tu thu muc + xlsx nen KHONG co san cho de danh dau - xem yeu cau nguoi dung
+# 2026-09-10: "nap vao du lieu cua chung ta tu build" thay vi gsheet). unique(market, sp_id,
+# folder): 1 sp_id o 1 folder cu the co the dang lai (vd sua caption roi chay lai) nhung
+# lan sau se GHI DE (on conflict) thay vi cong don thanh nhieu dong rac - xem
+# log_video_post(). folder nam trong khoa unique (khac video_push_log khong can) vi cung 1
+# sp_id co the xuat hien o NHIEU thu muc video khac nhau (vd tao lai video moi) va can
+# duoc coi la lan dang doc lap.
+CREATE_VIDEO_POST_LOG_TABLE_SQL = """
+create table if not exists video_post_log (
+    id integer primary key autoincrement,
+    sp_id text not null,
+    market text not null,
+    folder text not null,
+    product_name text,
+    merge_links text,
+    success integer not null default 0,
+    post_id text,
+    vid text,
+    error text,
+    created_at timestamp default current_timestamp,
+    updated_at timestamp default current_timestamp,
+    unique(market, sp_id, folder)
+);
+"""
+
+
 def init_db(db_path=DB_PATH_DEFAULT):
     dirname = os.path.dirname(db_path)
     if dirname:
@@ -421,6 +451,10 @@ def init_db(db_path=DB_PATH_DEFAULT):
     conn.execute(CREATE_VIDEO_MACHINES_TABLE_SQL)
     conn.execute(CREATE_VIDEO_PUSH_LOG_TABLE_SQL)
     conn.execute("create index if not exists idx_video_push_log_created on video_push_log(created_at)")
+    conn.execute(CREATE_VIDEO_POST_LOG_TABLE_SQL)
+    conn.execute(
+        "create index if not exists idx_video_post_log_lookup on video_post_log(market, sp_id, success)"
+    )
     conn.execute(CREATE_MAIL_ACCOUNTS_TABLE_SQL)
     # Cot 'slot' them sau - DB cu (tao truoc khi co dong nay trong
     # CREATE_MAIL_ACCOUNTS_TABLE_SQL) can ALTER TABLE rieng, cung ly do nhu xtra/fail_reason.
@@ -891,6 +925,77 @@ def video_ready_items(db_path=DB_PATH_DEFAULT, market=None, search=None, groupid
             f"select * from products {where_sql} order by id asc limit ?", params + [limit]
         ).fetchall()
         return [dict(r) for r in rows], total
+    finally:
+        conn.close()
+
+
+# --- Log ket qua dang video Shopee (post_video_to_shopee()/post_videos_from_folder() trong
+# shopee_video_post.py) - xem CREATE_VIDEO_POST_LOG_TABLE_SQL o tren cho ly do co bang rieng
+# thay vi tai dung video_push_log. ---
+
+def already_posted(db_path, sp_id, market, folder):
+    """True neu (market, sp_id, folder) da co dong LOG THANH CONG truoc do - dung de
+    post_videos_from_folder() bo qua, tranh dang trung 1 video (ton chi phi that: 1 lan goi
+    server ky + 1 lan upload video that) khi chay lai cung 1 thu muc nhieu lan. Dong that
+    bai (success=0) KHONG tinh - video loi van duoc thu lai o lan chay sau."""
+    conn = _connect(db_path)
+    try:
+        row = conn.execute(
+            "select 1 from video_post_log where market=? and sp_id=? and folder=? and success=1",
+            (market, str(sp_id), str(folder)),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
+def log_video_post(db_path, sp_id, market, folder, product_name=None, merge_links=None,
+                    success=False, post_id=None, vid=None, error=None):
+    """Ghi/ghi de 1 dong ket qua dang video (on conflict tren unique(market, sp_id,
+    folder) - xem CREATE_VIDEO_POST_LOG_TABLE_SQL). Goi 1 lan/video NGAY SAU khi
+    post_video_to_shopee() tra ve (ca thanh cong lan that bai) - KHONG doi den cuoi batch,
+    de 1 video loi giua chung (vd mat mang) khong lam mat log cac video da xong truoc do
+    trong cung lan chay."""
+    conn = _connect(db_path)
+    try:
+        conn.execute(
+            "insert into video_post_log "
+            "(sp_id, market, folder, product_name, merge_links, success, post_id, vid, error, updated_at) "
+            "values (?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp) "
+            "on conflict(market, sp_id, folder) do update set "
+            "product_name=excluded.product_name, merge_links=excluded.merge_links, "
+            "success=excluded.success, post_id=excluded.post_id, vid=excluded.vid, "
+            "error=excluded.error, updated_at=current_timestamp",
+            (str(sp_id), market, str(folder), product_name, merge_links,
+             int(bool(success)), post_id, vid, error),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_video_post_log(db_path=DB_PATH_DEFAULT, market=None, folder=None, success=None, limit=500):
+    """Doc lai lich su dang video - dung cho man hinh xem ket qua (tab moi neu can, hoac
+    debug qua python -c truc tiep). success=None: tat ca; True/False: loc dung 1 loai."""
+    conn = _connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        where, params = [], []
+        if market:
+            where.append("market = ?")
+            params.append(market)
+        if folder:
+            where.append("folder = ?")
+            params.append(str(folder))
+        if success is not None:
+            where.append("success = ?")
+            params.append(int(bool(success)))
+        where_sql = f"where {' and '.join(where)}" if where else ""
+        params.append(limit)
+        rows = conn.execute(
+            f"select * from video_post_log {where_sql} order by id desc limit ?", params
+        ).fetchall()
+        return [dict(r) for r in rows]
     finally:
         conn.close()
 
