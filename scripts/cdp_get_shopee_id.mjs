@@ -92,6 +92,30 @@ async function openTab(port, url) {
   return null;
 }
 
+// Tab DAU TIEN (tab 0) da co san khi profile vua start (GPM/GEM thuong tu mo 1 tab trong) -
+// dung lai tab nay thay vi tao tab moi qua openTab(), tranh tinh trang tab 0 bo trong con
+// Shopee lai bi mo o tab 1 (yeu cau nguoi dung 2026-09-09).
+async function firstPageTarget(port) {
+  try {
+    const r = await ft(`http://127.0.0.1:${port}/json/list`, { ms: 8000 });
+    if (r.ok) {
+      const list = await r.json();
+      if (Array.isArray(list)) {
+        const tab = list.find((t) => t.type === 'page' && t.webSocketDebuggerUrl);
+        if (tab) return tab;
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
+// Uu tien tab 0 co san; chi tao tab moi (openTab) neu khong tim thay tab nao (edge case).
+async function pickTab(port, fallbackUrl) {
+  const existing = await firstPageTarget(port);
+  if (existing) return existing;
+  return await openTab(port, fallbackUrl);
+}
+
 class Cdp {
   constructor(wsUrl) { this.wsUrl = wsUrl; this.ws = null; this.id = 0; this.pending = new Map(); }
   async connect() {
@@ -124,8 +148,10 @@ async function main() {
   try { st = await startProfile(); }
   catch (e) { process.stderr.write('START_ERR: ' + e.message + '\n'); process.exit(3); }
   if (!(await waitCdpUp(st.port))) { process.stderr.write('CDP khong len port ' + st.port + '\n'); process.exit(4); }
-  // Mo tab about:blank truoc -> cai hook fetch/XHR (document-start) -> moi dieu huong sang URL
-  const tab = await openTab(st.port, 'about:blank');
+  // Dung tab 0 co san (khong tao tab moi) -> cai hook fetch/XHR (document-start) -> moi dieu
+  // huong sang URL. Page.addScriptToEvaluateOnNewDocument ap dung cho LAN navigate KE TIEP
+  // nen khong can tab dang o about:blank truoc do.
+  const tab = await pickTab(st.port, 'about:blank');
   if (!tab) { process.stderr.write('Mo tab that bai\n'); process.exit(5); }
   const cdp = new Cdp(tab.webSocketDebuggerUrl);
   try { await cdp.connect(); } catch (e) { process.stderr.write('WS loi: ' + e.message + '\n'); process.exit(6); }

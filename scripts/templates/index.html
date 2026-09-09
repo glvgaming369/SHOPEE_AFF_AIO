@@ -807,8 +807,9 @@
       <button class="secondary" onclick="createGpmProfilesSelected(this)" title="Tạo profile theo engine từng dòng (GPM/GEM) - dòng đã có ID GPM/GEM hoặc trùng tên trong cùng nhóm sẽ bỏ qua">Tạo profile (đã chọn)</button>
       <button class="secondary" onclick="openGpmProfilesSelected(this)" title="Mở trang chủ Shopee của các dòng đang tích chọn theo engine từng dòng - dòng chưa có ID GPM/GEM sẽ bỏ qua">Mở profile (đã chọn)</button>
       <button class="secondary" onclick="syncMailAccountsGpm(this)" title="Lấy tên profile / nhóm mới nhất từ GPM & GemLogin ghi đè vào bảng (theo engine từng dòng); ID không còn tồn tại sẽ bị xóa">⟳ Đồng bộ GPM/GEM</button>
-      <input type="number" id="mailacc-getid-threads" min="1" max="6" value="2" style="max-width:62px;" title="Số profile chạy song song khi Get Shopee ID">
+      <input type="number" id="mailacc-getid-threads" min="1" max="6" value="2" style="max-width:62px;" title="Số profile chạy song song khi Get Shopee ID / Get Cookie">
       <button class="secondary" onclick="getShopeeIdsSelected(this)" title="Với từng dòng đang tích: mở trang hồ sơ Shopee theo market, lấy Username (Shopee ID) ghi vào cột Shopee ID; chưa login/captcha thì mở sẵn cửa sổ để xử lý">Get Shopee ID</button>
+      <button class="secondary" onclick="getCookiesSelected(this)" title="Với từng dòng đang tích: mở trang chủ Shopee theo market, lấy toàn bộ cookie đăng nhập ghi vào cột Cookie; chưa login/captcha thì mở sẵn cửa sổ để xử lý">Get Cookie</button>
       <button class="secondary" onclick="document.getElementById('mailacc-import-file').click()">Import Excel</button>
       <input type="file" id="mailacc-import-file" accept=".xlsx" style="display:none;" onchange="importMailAccountsXlsx(this)">
       <button class="danger" onclick="clearMailAccounts()">Xóa tất cả</button>
@@ -830,7 +831,7 @@
         <tr id="mailacc-thead-row">
           <th style="width:36px;"><input type="checkbox" id="mailacc-sel-all" onclick="mailAccToggleAll(this)" title="Chọn / bỏ chọn tất cả dòng đang hiển thị"></th>
           <th style="width:64px;">Engine</th>
-          <th>Thông tin đầy đủ</th><th>Email</th><th>Mật khẩu Mail</th><th>Shopee ID</th>
+          <th>Thông tin đầy đủ</th><th>Email</th><th>Mật khẩu Mail</th><th>Shopee ID</th><th>Cookie</th>
           <th>Thiết bị</th><th>Profile</th><th>GROUP GPM</th><th>ID GPM</th><th>Slot</th><th>Thị trường</th><th>Mã Shopee</th><th>Thao tác</th><th>Thời gian tạo</th>
         </tr>
       </thead>
@@ -2101,6 +2102,7 @@ const MAILACC_COLUMNS = [
   { field: 'email', label: 'Email' },
   { field: 'password', label: 'Mật khẩu Mail' },
   { field: 'shopee_id', label: 'Shopee ID' },
+  { field: 'cookie', label: 'Cookie' },
   { field: 'device', label: 'Thiết bị' },
   { field: 'profile', label: 'Profile' },
   { field: 'group_gpm', label: 'GROUP GPM' },
@@ -2121,6 +2123,7 @@ const MAILACC_COL_SETTINGS = [
   { field: 'email', label: 'Email' },
   { field: 'password', label: 'Mật khẩu Mail' },
   { field: 'shopee_id', label: 'Shopee ID' },
+  { field: 'cookie', label: 'Cookie' },
   { field: 'device', label: 'Thiết bị' },
   { field: 'profile', label: 'Profile' },
   { field: 'group_gpm', label: 'GROUP GPM' },
@@ -2399,6 +2402,8 @@ function renderMailAccounts() {
       <td><code>${a.password || '-'}</code>
         ${a.password ? `<button class="secondary" onclick="copyMailField(${idx}, 'password')">Sao chép</button>` : ''}</td>
       <td><input type="text" value="${(a.shopee_id || '').replace(/"/g, '&quot;')}" onchange="updateShopeeId(${a.id}, this)" placeholder="Shopee ID" style="min-width:160px; width:100%;"></td>
+      <td>${a.cookie ? `<span class="ellipsis" style="max-width:140px;" title="${a.cookie.replace(/"/g, '&quot;')}">${a.cookie}</span>
+        <button class="secondary" onclick="copyMailField(${idx}, 'cookie')">Sao chép</button>` : '<span class="muted">Chưa có</span>'}</td>
       <td><input type="text" value="${(a.device || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'device', this.value)" placeholder="Tên thiết bị" style="min-width:160px; width:100%;"></td>
       <td><input type="text" data-field="profile" value="${(a.profile || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'profile', this.value)" placeholder="Profile" style="min-width:160px; width:100%;"></td>
       <td><input type="text" data-field="group_gpm" list="${(a.engine || 'gpm') === 'gem' ? 'gem-group-names' : 'gpm-group-names'}" value="${(a.group_gpm || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'group_gpm', this.value)" placeholder="Group GPM/GEM" title="Tên nhóm muốn tạo profile (gợi ý theo engine của dòng)" style="min-width:150px; width:100%;"></td>
@@ -2837,6 +2842,75 @@ async function getShopeeIdsSelected(btn) {
     }
     if (extra.length) parts.push(extra.join(' — '));
     await customAlert(parts.join('\n'), { danger: errs.length > 0 });
+    await loadMailAccounts();
+  });
+}
+
+// ---- Get Cookie (hang loat): lay toan bo cookie dang nhap (qua CDP Network.getCookies) cua tung dong ----
+async function getCookiesSelected(btn) {
+  const ids = mailAccSelectedIds();
+  if (!ids.length) {
+    await customAlert('Chưa chọn dòng nào — hãy tích chọn các dòng cần lấy Cookie trước.', { danger: true });
+    return;
+  }
+  const rowById = new Map(lastMailAccountsList.map(a => [a.id, a]));
+  const valid = ids.filter(id => {
+    const a = rowById.get(id);
+    return a && String(a.id_gpm || '').trim() !== '';
+  });
+  const skipped = ids.length - valid.length;
+  if (!valid.length) {
+    await customAlert('Không có dòng nào đang tích có ID GPM/GEM — hãy tạo profile trước.', { danger: true });
+    return;
+  }
+  const threadsEl = document.getElementById('mailacc-getid-threads');
+  const threads = Math.max(1, Math.min(6, parseInt(threadsEl ? threadsEl.value : '2', 10) || 2));
+  const skipNote = skipped ? `- ${skipped} dòng chưa có ID profile sẽ bỏ qua.\n` : '';
+  if (!(await customConfirm(
+    `Lấy Cookie cho ${valid.length} dòng đang tích chọn (chạy ${threads} dòng song song)?\n\n` +
+    `- Mở trang chủ Shopee theo market của từng dòng, lấy toàn bộ cookie đăng nhập rồi ghi vào cột Cookie (ghi đè nếu đã có).\n` +
+    `- Dòng chưa đăng nhập / bị captcha sẽ MỞ SẴN cửa sổ để bạn xử lý (không ghi cookie).\n` +
+    skipNote +
+    `- Quá trình mỗi dòng có thể mất 30-60s, cửa sổ sẽ mở ra trong lúc chạy.`
+  ))) return;
+  await withBusy(btn, async () => {
+    const results = [];
+    let cursor = 0;
+    const next = () => { const i = cursor++; return i < valid.length ? valid[i] : undefined; };
+    const worker = async () => {
+      for (let id; (id = next()) !== undefined;) {
+        try {
+          const r = await api('POST', `/api/mail_accounts/${id}/get_cookie`, undefined, 135000);
+          results.push({ id, ...r });
+        } catch (e) {
+          results.push({ id, status: 'error', detail: e.message || 'Lỗi không rõ' });
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: threads }, () => worker()));
+    const okWrote = results.filter(r => r.status === 'ok').length;
+    const noLoginRows = results.filter(r => r.status === 'no_login');
+    const captchaRows = results.filter(r => r.status === 'captcha');
+    const errs = results.filter(r => ['timeout', 'error', 'no_id'].includes(r.status));
+    const noIdCount = results.filter(r => r.status === 'no_id').length;
+    const parts = [`Lấy được Cookie và ghi: ${okWrote}/${results.length} dòng.`];
+    const extra = [];
+    if (noLoginRows.length) {
+      extra.push(`Chưa đăng nhập (đã mở sẵn cửa sổ): ${noLoginRows.length}`);
+      parts.push('Chi tiết "chưa đăng nhập" (kiểm tra lại nếu bạn chắc profile đã login):');
+      noLoginRows.slice(0, 6).forEach(r => parts.push(`- #${r.id}: ${r.detail || ''}`));
+      if (noLoginRows.length > 6) parts.push(`... và ${noLoginRows.length - 6} dòng khác.`);
+    }
+    if (captchaRows.length) extra.push(`Bị captcha/traffic (đã mở sẵn cửa sổ): ${captchaRows.length}`);
+    if (noIdCount) extra.push(`Không có ID profile: ${noIdCount}`);
+    if (errs.length) {
+      extra.push(`Lỗi/timeout: ${errs.length}`);
+      parts.push('Chi tiết lỗi:');
+      errs.slice(0, 6).forEach(e => parts.push(`- #${e.id}: ${e.detail || e.status || 'lỗi'}`));
+      if (errs.length > 6) parts.push(`... và ${errs.length - 6} lỗi khác.`);
+    }
+    if (extra.length) parts.push(extra.join(' — '));
+    await customAlert(parts.join('\n'), { danger: errs.length > 0 || noLoginRows.length > 0 });
     await loadMailAccounts();
   });
 }

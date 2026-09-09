@@ -1107,7 +1107,7 @@ def mail_accounts_update(account_id):
         profile=body.get("profile"), group_gpm=body.get("group_gpm"),
         id_gpm=body.get("id_gpm"),
         slot=body.get("slot"), market=body.get("market"),
-        engine=body.get("engine"),
+        engine=body.get("engine"), cookie=body.get("cookie"),
     )
     if row is None:
         return _bad_request(f"khong tim thay mail id={account_id}")
@@ -1347,6 +1347,53 @@ def _row_engine(row):
     return e if e in (_ad.ENGINE_GPM, _ad.ENGINE_GEM) else _ad.ENGINE_GPM
 
 
+def _cdp_navigate_first_tab(port, url, timeout=8):
+    """Dieu huong TAB DAU TIEN (tab 0 - tab GPM/GEM da tu mo san khi start profile, thuong
+    dang trong) sang 'url' qua CDP WebSocket (Page.navigate), KHONG tao them tab moi - tranh
+    tinh trang tab 0 bo trong con Shopee lai bi mo o tab 1 (yeu cau nguoi dung 2026-09-09).
+    Tra ve True neu da gui navigate thanh cong, False neu khong tim duoc tab / loi WS (goi
+    noi de fallback sang cach cu /json/new tao tab moi)."""
+    import json as _json
+    import websocket as _ws
+    try:
+        r = _requests.get(f"http://127.0.0.1:{port}/json/list", timeout=timeout)
+        targets = r.json() if r.ok else []
+    except Exception:
+        return False
+    target = next(
+        (t for t in targets if t.get("type") == "page" and t.get("webSocketDebuggerUrl")), None
+    )
+    if not target:
+        return False
+    try:
+        ws = _ws.create_connection(target["webSocketDebuggerUrl"], timeout=timeout)
+    except Exception:
+        return False
+    try:
+        ws.send(_json.dumps({"id": 1, "method": "Page.navigate", "params": {"url": url}}))
+        ws.settimeout(timeout)
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                msg = ws.recv()
+            except Exception:
+                break
+            try:
+                data = _json.loads(msg)
+            except Exception:
+                continue
+            if data.get("id") == 1:
+                break
+        return True
+    except Exception:
+        return False
+    finally:
+        try:
+            ws.close()
+        except Exception:
+            pass
+
+
 def _gem_open_url(profile_id, url):
     """Mo browser GEM (neu chua chay) roi mo 1 tab toi url. Raise RuntimeError khi loi;
     tra ve port CDP. Start cua GEM tu cap port nen doc tu remote_debugging_address."""
@@ -1365,6 +1412,9 @@ def _gem_open_url(profile_id, url):
         time.sleep(0.5)
     if not up:
         raise RuntimeError(f"Browser GemLogin start nhung CDP port {port} khong len.")
+    # Uu tien dieu huong tab 0 co san (khong tao them tab) - xem _cdp_navigate_first_tab().
+    if _cdp_navigate_first_tab(port, url):
+        return port
     created = False
     new_tab = f"http://127.0.0.1:{port}/json/new?{url}"
     try:
@@ -1628,6 +1678,52 @@ def mail_accounts_get_shopee_id(account_id):
     return jsonify({"ok": True, "status": status,
                     "shopee_id": sid if sid else None,
                     "detail": res.get("detail") or "", "url": profile_url,
+                    "user_handle": status in ("no_login", "captcha")})
+
+
+@app.route("/api/mail_accounts/<int:account_id>/get_cookie", methods=["POST"])
+def mail_accounts_get_cookie(account_id):
+    """Nut 'Get Cookie' (hang loat): mo browser cua dong (engine GPM/GEM), mo trang chu
+    Shopee theo market va lay TOAN BO cookie dang nhap qua CDP Network.getCookies (ke ca
+    HttpOnly/Secure - xem cdp_get_cookie.mjs). Tra ve theo trang thai:
+      status ok        -> da co cookie, ghi vao cot cookie
+      no_login/captcha -> de cua so do lai cho nguoi dung xu ly (khong ghi)
+      timeout/error    -> loi/qua han (khong ghi)."""
+    row = shopee_db.get_mail_account(DB_PATH, account_id)
+    if not row:
+        return _bad_request(f"khong tim thay mail id={account_id}")
+    profile_id = (row.get("id_gpm") or "").strip()
+    if not profile_id:
+        return jsonify({"ok": True, "status": "no_id", "detail": "Chua co ID GPM/GEM (bo qua)."})
+    engine = _row_engine(row)
+    home_url, _code = _gpm_market_home(row.get("market"))
+    node_exe = _find_node()
+    cmd = [node_exe, os.path.join(SCRIPTS_DIR, "cdp_get_cookie.mjs"),
+           "--engine", engine, "--profile", profile_id, "--url", home_url,
+           "--gpm-base", GPM_BASE, "--gem-base", GEM_BASE]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=110)
+    except subprocess.TimeoutExpired:
+        return jsonify({"ok": True, "status": "error", "detail": "Chay qua 110s (timeout).",
+                        "engine": engine, "url": home_url})
+    out_text = (proc.stdout or "").strip()
+    last_line = out_text.splitlines()[-1] if out_text else ""
+    import json as _json
+    try:
+        res = _json.loads(last_line)
+    except Exception:
+        stderr_tail = (proc.stderr or "").strip().splitlines()
+        tail = (stderr_tail[-1] if stderr_tail else "") or (proc.stdout or "")[:200]
+        return jsonify({"ok": True, "status": "error", "detail": f"Helper loi: {tail[:240]}",
+                        "engine": engine, "url": home_url})
+    status = str(res.get("status") or "error")
+    cookie_val = str(res.get("cookie") or "").strip()
+    if status == "ok" and cookie_val:
+        shopee_db.update_mail_account_fields(DB_PATH, account_id, cookie=cookie_val)
+        return jsonify({"ok": True, "status": "ok", "written": True, "cookie": cookie_val,
+                        "detail": res.get("detail") or "Da ghi cookie.", "url": home_url})
+    return jsonify({"ok": True, "status": status, "cookie": None,
+                    "detail": res.get("detail") or "", "url": home_url,
                     "user_handle": status in ("no_login", "captcha")})
 
 
@@ -2335,8 +2431,12 @@ def _gpm_open_url(profile_id, url):
         time.sleep(0.5)
     if not up:
         raise RuntimeError(f"Browser GPM start nhung CDP port {port} khong len.")
-    # mo tab moi bang CDP HTTP endpoint /json/new?<url> - CHU Y: url phai nam THANG trong query
-    # (khong phai param ten 'url' - Chrome bo qua neu dung dang '?url=...' va chi mo about:blank)
+    # Uu tien dieu huong tab 0 co san (khong tao them tab) - xem _cdp_navigate_first_tab().
+    if _cdp_navigate_first_tab(port, url):
+        return port
+    # Fallback: mo tab moi bang CDP HTTP endpoint /json/new?<url> - CHU Y: url phai nam THANG
+    # trong query (khong phai param ten 'url' - Chrome bo qua neu dung dang '?url=...' va chi
+    # mo about:blank)
     created = False
     new_tab = f"http://127.0.0.1:{port}/json/new?{url}"
     try:

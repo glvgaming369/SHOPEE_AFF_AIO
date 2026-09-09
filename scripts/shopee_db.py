@@ -139,6 +139,7 @@ create table if not exists mail_accounts (
     slot text default '',
     market text default 'PH',
     shopee_code text,
+    cookie text default '',
     checked_at timestamp,
     created_at timestamp default current_timestamp
 );
@@ -442,6 +443,11 @@ def init_db(db_path=DB_PATH_DEFAULT):
     if "engine" not in existing_mail_cols:
         conn.execute("alter table mail_accounts add column engine text default 'gpm'")
     conn.execute("update mail_accounts set engine=lower(trim(engine)) where engine is not null and engine != ''")
+    # Cot 'cookie' (them sau, 2026-09-09): chuoi cookie dang nhap Shopee cua profile, lay qua
+    # nut "Get Cookie" (CDP Network.getCookies - xem cdp_get_cookie.mjs) - DB cu can ALTER
+    # TABLE rieng, cung ly do nhu slot/profile/group_gpm/id_gpm/engine.
+    if "cookie" not in existing_mail_cols:
+        conn.execute("alter table mail_accounts add column cookie text default ''")
     conn.execute(
         "create index if not exists idx_mail_accounts_market on mail_accounts(market)"
     )
@@ -2729,9 +2735,9 @@ def get_mail_account(db_path, account_id):
         conn.close()
 
 
-def update_mail_account_fields(db_path, account_id, shopee_id=None, device=None, profile=None, slot=None, market=None, group_gpm=None, id_gpm=None, engine=None):
+def update_mail_account_fields(db_path, account_id, shopee_id=None, device=None, profile=None, slot=None, market=None, group_gpm=None, id_gpm=None, engine=None, cookie=None):
     """Cap nhat MOT PHAN cot nguoi dung tu nhap (tham so None = giu nguyen), dung cho nut
-    luu tung dong tren UI khi doi Shopee_id/Device/Profile/Slot/Market/Group_GPM/Id_GPM/Engine."""
+    luu tung dong tren UI khi doi Shopee_id/Device/Profile/Slot/Market/Group_GPM/Id_GPM/Engine/Cookie."""
     current = get_mail_account(db_path, account_id)
     if not current:
         return None
@@ -2744,16 +2750,17 @@ def update_mail_account_fields(db_path, account_id, shopee_id=None, device=None,
         "slot": slot if slot is not None else current["slot"],
         "market": market if market is not None else current["market"],
         "engine": (str(engine).strip().lower() or "gpm") if engine is not None else (current.get("engine") or "gpm"),
+        "cookie": cookie if cookie is not None else current.get("cookie", ""),
     }
     conn = _connect(db_path)
     try:
         conn.execute(
             "update mail_accounts set shopee_id=?, device=?, profile=?, group_gpm=?, id_gpm=?, "
-            "slot=?, market=?, engine=? where id=?",
+            "slot=?, market=?, engine=?, cookie=? where id=?",
             (
                 new_vals["shopee_id"], new_vals["device"], new_vals["profile"],
                 new_vals["group_gpm"], new_vals["id_gpm"],
-                new_vals["slot"], new_vals["market"], new_vals["engine"], account_id,
+                new_vals["slot"], new_vals["market"], new_vals["engine"], new_vals["cookie"], account_id,
             ),
         )
         conn.commit()
