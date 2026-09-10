@@ -15,7 +15,9 @@ Chay:
 """
 import argparse
 import io
+import json
 import os
+import random
 import re
 import shutil
 import socket
@@ -24,6 +26,7 @@ import sys
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, render_template, request
 from openpyxl import Workbook, load_workbook
@@ -31,9 +34,11 @@ from openpyxl import Workbook, load_workbook
 import chrome_launcher
 import dongvanfb_client
 import gsheet_push_api
+import gsheet_video_scanner
 import microsoft_mail_client
 import shopee_categories
 import shopee_db
+import shopee_video_post
 import videoai_client
 
 import antidetect as _ad  # adapter chung GPM/GemLogin - xem scripts/antidetect.py
@@ -45,6 +50,21 @@ LAUNCH_URL_DEFAULT = "https://affiliate.shopee.ph/offer/product_offer"
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 USERSCRIPTS_DIR = os.path.join(SCRIPTS_DIR, "userscripts")
 REPO_ROOT = os.path.dirname(SCRIPTS_DIR)  # thu muc goc git (chua .git/) - dung cho /api/update/*
+DEVICE_FINGERPRINTS_PATH = os.path.join(SCRIPTS_DIR, "device_fingerprints.json")
+
+
+def _load_device_fingerprint_pool():
+    """Doc lai file scripts/device_fingerprints.json MOI LAN goi (khong cache) - file nay nho
+    (~75 dong) va co the duoc sua tay/ghi de bang tay giua luc server dang chay, doc lai luon
+    tranh phai restart server moi khi cap nhat mau. Tra ve (templates, rn_version_default);
+    file thieu/loi -> tra ve ([], '') va de caller tu bao loi ro rang (KHONG fallback bia du
+    lieu gia)."""
+    try:
+        with open(DEVICE_FINGERPRINTS_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("templates") or [], data.get("rn_version_default") or ""
+    except (OSError, ValueError):
+        return [], ""
 UPDATE_RESTART_EXIT_CODE = 42  # start_affiliate_scraper.bat doc ma nay de tu khoi dong lai
 
 # Nguon chan ly DUY NHAT cho moi thu lien quan userscript - dashboard (index.html) doc
@@ -1001,9 +1021,475 @@ def mail_accounts_list():
     market = request.args.get("market") or None
     slot = request.args.get("slot") or None
     search = request.args.get("search") or None
+    group_gpm = request.args.get("group_gpm") or None
     limit = request.args.get("limit", 500, type=int)
-    rows = shopee_db.list_mail_accounts(DB_PATH, market=market, slot=slot, search=search, limit=limit)
+    rows = shopee_db.list_mail_accounts(DB_PATH, market=market, slot=slot, search=search, group_gpm=group_gpm, limit=limit)
+    # with_today_count=1: kem so video da dang THANH CONG HOM NAY moi dong - dung cho bang
+    # chon tai khoan o tab "Đăng video" (doi chieu voi rate_limit_video). 1 query GROUP BY
+    # chung cho CA trang (xem count_success_today_by_account()), khong phai N query rieng.
+    if request.args.get("with_today_count"):
+        today_counts = shopee_db.count_success_today_by_account(DB_PATH)
+        for r in rows:
+            r["posted_today"] = today_counts.get(r["id"], 0)
     return jsonify({"accounts": rows})
+
+
+@app.route("/api/mail_accounts/groups", methods=["GET"])
+def mail_accounts_groups():
+    """Danh sach GROUP GPM/GEM dang co trong DB (khong rong) - dung cho dropdown loc "Nhom
+    GPM" o toolbar (xem shopee_db.list_mail_account_groups())."""
+    groups = shopee_db.list_mail_account_groups(DB_PATH)
+    return jsonify({"groups": groups})
+
+
+@app.route("/api/device_fingerprints", methods=["GET"])
+def device_fingerprints_list():
+    """Tra ve nguyen pool mau device fingerprint (xem scripts/device_fingerprints.json) - chu
+    yeu de debug/xem lai trong DevTools, nut "Tạo device fingerprint" tren UI goi thang
+    /assign_bulk ben duoi chu khong can fetch pool nay truoc."""
+    templates, rn_default = _load_device_fingerprint_pool()
+    return jsonify({"templates": templates, "rn_version_default": rn_default, "count": len(templates)})
+
+
+@app.route("/api/mail_accounts/device_fingerprint/assign_bulk", methods=["POST"])
+def mail_accounts_device_fingerprint_assign_bulk():
+    """Nut "Tạo device fingerprint" hang loat cho cac dong dang TICH CHON: MOI dong duoc gan
+    NGAU NHIEN 1 mau (device_model + device_os_version that, xem scripts/device_fingerprints.
+    json) - random.choice() TUNG dong rieng (khong phai 1 mau chung ca lo) de cac tai khoan
+    khac fingerprint nhau that su. device_rn_version LUON gan dung 1 gia tri 'rn_version_default'
+    (KHONG random - day la phien ban bundle React Native cua app Shopee, khong phai thong so
+    rieng tung may, xem ghi chu trong file JSON). device_id KHONG dong cham toi - van la hang
+    so tinh trong shopee_video_post.py, khong thuoc dien "fingerprint" duoc random o day."""
+    templates, rn_default = _load_device_fingerprint_pool()
+    if not templates:
+        return _bad_request(f"Khong doc duoc pool mau device fingerprint ({DEVICE_FINGERPRINTS_PATH}) - kiem tra file scripts/device_fingerprints.json.")
+    body = request.get_json(force=True, silent=True) or {}
+    ids = body.get("ids")
+    if not isinstance(ids, list) or not ids:
+        return _bad_request("thieu 'ids'")
+    results = []
+    assigned = 0
+    for raw in ids:
+        try:
+            aid = int(str(raw).strip())
+        except (TypeError, ValueError):
+            results.append({"id": None, "ok": False, "error": "id khong hop le."})
+            continue
+        tpl = random.choice(templates)
+        row = shopee_db.update_mail_account_fields(
+            DB_PATH, aid,
+            device_model=tpl.get("device_model", ""),
+            device_os_version=tpl.get("device_os_version", ""),
+            device_rn_version=rn_default,
+        )
+        if row is None:
+            results.append({"id": aid, "ok": False, "error": f"khong tim thay mail id={aid}"})
+            continue
+        assigned += 1
+        results.append({"id": aid, "ok": True, "device_model": tpl.get("device_model", ""), "device_os_version": tpl.get("device_os_version", "")})
+    return jsonify({"ok": True, "assigned": assigned, "skipped": len(results) - assigned, "results": results})
+
+
+# ============================================================================================
+# Tab "Quan ly nguon video" - dang ky thu muc video (<sp_id>.mp4 + *_results.xlsx, xem
+# gsheet_video_scanner.build_matched_pool()) lam "nguon", theo doi thong ke da dang/pending/
+# loi (dua tren shopee_db video_post_log - bang ghi lai tung lan goi shopee_video_post.
+# post_video_to_shopee(), xem post_videos_cli.py). Route prefix '/api/video_sources/*' - CO Y
+# KHONG dung '/api/videos/*' vi prefix do DA thuoc ve tinh nang khac hoan toan (tab "video" cu
+# = VideoAI tu dong TAO video tu san pham, xem video_machines/video_push_log O TREN) - 2 tinh
+# nang cung ten "video" nhung khong lien quan gi nhau, tranh nham lan route.
+# ============================================================================================
+
+def _scan_video_source(row):
+    """Quet 1 nguon (build_matched_pool() + dem theo status trong video_post_log), cap nhat
+    cache trong video_sources, tra ve row MOI NHAT sau khi cap nhat. Loi (thu muc bi xoa/mat
+    quyen doc, thieu hoac thua file *_results.xlsx) KHONG raise - ghi vao last_scan_error va
+    GIU NGUYEN cac count cu (xem update_video_source_stats()), de 1 nguon loi tam thoi khong
+    lam mat du lieu thong ke da co. Luon xoa cache _MATCHED_POOL_CACHE cua thu muc nay - dung
+    y (KHONG doi den khi dinh nghia cache, ham nay dung TRUOC trong file nhung Python chi
+    resolve bien global luc GOI ham, khong phai luc dinh nghia): moi lan nguoi dung chu dong
+    quet lai (rescan/rescan_all/them nguon/xoa video) phai phan anh dung ngay o post_next()."""
+    folder, market, source_id = row["folder"], row["market"], row["id"]
+    _MATCHED_POOL_CACHE.pop(str(folder), None)
+    try:
+        matched = gsheet_video_scanner.build_matched_pool(folder)
+    except (FileNotFoundError, ValueError, OSError) as e:
+        return shopee_db.update_video_source_stats(DB_PATH, source_id, last_scan_error=str(e))
+    total = len(matched)
+    logs = shopee_db.list_video_post_log(DB_PATH, market=market, folder=folder, limit=1000000)
+    log_by_sp_id = {log_row["sp_id"]: log_row for log_row in logs}
+    success = sum(1 for r in matched if (log_by_sp_id.get(r.sp_id) or {}).get("success"))
+    error = sum(1 for r in matched if r.sp_id in log_by_sp_id and not log_by_sp_id[r.sp_id]["success"])
+    pending = total - success - error
+    return shopee_db.update_video_source_stats(
+        DB_PATH, source_id, total_count=total, success_count=success,
+        error_count=error, pending_count=pending, last_scan_error=None,
+    )
+
+
+@app.route("/api/video_sources", methods=["GET"])
+def video_sources_list():
+    """Danh sach nguon + thong ke DA CACHE (khong tu quet lai - bam 'Cập nhật lại nguồn'/
+    'Cập nhật lại DB' de lam moi, xem _scan_video_source())."""
+    return jsonify({"sources": shopee_db.list_video_sources(DB_PATH)})
+
+
+@app.route("/api/video_sources", methods=["POST"])
+def video_sources_add():
+    """Dang ky 1 nguon moi: kiem tra thu muc ton tai + co DUNG 1 file *_results.xlsx truoc khi
+    luu (bao loi ro ngay, khong luu nguon hong), roi quet ngay lan dau de co thong ke."""
+    body = request.get_json(force=True, silent=True) or {}
+    folder = str(body.get("folder") or "").strip()
+    market = str(body.get("market") or "").strip().lower()
+    if not folder:
+        return _bad_request("thieu 'folder'")
+    if market not in shopee_video_post.MARKET_CONFIG:
+        supported = ", ".join(sorted(shopee_video_post.MARKET_CONFIG))
+        return _bad_request(f"market '{market}' chua ho tro dang video (chi: {supported}) - xem shopee_video_post.MARKET_CONFIG")
+    if not os.path.isdir(folder):
+        return _bad_request(f"Khong tim thay thu muc: {folder}")
+    try:
+        results_file = gsheet_video_scanner.find_results_file(Path(folder))
+    except ValueError as e:
+        return _bad_request(str(e))
+    if results_file is None:
+        return _bad_request(f"Thu muc '{folder}' thieu file *_results.xlsx (xem quy uoc cot A/B/P trong gsheet_video_scanner.py)")
+    try:
+        source_id = shopee_db.add_video_source(DB_PATH, folder, market)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 409
+    row = shopee_db.get_video_source(DB_PATH, source_id)
+    row = _scan_video_source(row)
+    return jsonify({"ok": True, "source": row})
+
+
+@app.route("/api/video_sources/<int:source_id>", methods=["DELETE"])
+def video_sources_delete(source_id):
+    """Go dang ky nguon - KHONG dong toi lich su video_post_log (xem shopee_db.delete_video_source())."""
+    ok = shopee_db.delete_video_source(DB_PATH, source_id)
+    if not ok:
+        return _bad_request(f"khong tim thay nguon id={source_id}")
+    return jsonify({"ok": True})
+
+
+@app.route("/api/video_sources/<int:source_id>/rescan", methods=["POST"])
+def video_sources_rescan(source_id):
+    """Nut 'Cập nhật lại nguồn' (1 dong): quet lai DUNG thu muc nay."""
+    row = shopee_db.get_video_source(DB_PATH, source_id)
+    if not row:
+        return _bad_request(f"khong tim thay nguon id={source_id}")
+    return jsonify({"ok": True, "source": _scan_video_source(row)})
+
+
+@app.route("/api/video_sources/rescan_all", methods=["POST"])
+def video_sources_rescan_all():
+    """Nut 'Cập nhật lại DB' (toolbar chung): quet lai TAT CA nguon dang dang ky, 1 luot."""
+    sources = shopee_db.list_video_sources(DB_PATH)
+    results = [_scan_video_source(row) for row in sources]
+    errors = [r for r in results if r and r.get("last_scan_error")]
+    return jsonify({"ok": True, "scanned": len(results), "errors": len(errors), "sources": results})
+
+
+def _delete_video_files_and_log(source_row, success):
+    """Dung chung cho nut 'Xóa video đã đăng' (success=True) / 'Xóa video lỗi' (success=False):
+    xoa DONG THOI file .mp4 that tren dia (neu con) VA dong log video_post_log tuong ung - dung
+    y nguoi dung 2026-09-10 ("xoa video da dang/loi" = don dep that su, khong chi xoa log).
+    sp_id lay THANG tu DB (khong phai tu request nguoi dung) nen an toan ghep duong dan file -
+    khong co rui ro path traversal."""
+    folder, market = source_row["folder"], source_row["market"]
+    sp_ids = shopee_db.delete_video_post_log_rows(DB_PATH, market, folder, success)
+    deleted_files = 0
+    missing_files = 0
+    for sp_id in sp_ids:
+        path = Path(folder) / f"{sp_id}.mp4"
+        try:
+            path.unlink()
+            deleted_files += 1
+        except FileNotFoundError:
+            missing_files += 1
+        except OSError:
+            missing_files += 1
+    return len(sp_ids), deleted_files, missing_files
+
+
+@app.route("/api/video_sources/<int:source_id>/delete_posted", methods=["POST"])
+def video_sources_delete_posted(source_id):
+    """Nut 'Xóa video đã đăng': xoa file .mp4 + dong log cua MOI sp_id da dang THANH CONG
+    (success=1) thuoc nguon nay - giai phong dung luong dia, khong the hoan tac."""
+    row = shopee_db.get_video_source(DB_PATH, source_id)
+    if not row:
+        return _bad_request(f"khong tim thay nguon id={source_id}")
+    log_rows, files, missing = _delete_video_files_and_log(row, success=True)
+    updated = _scan_video_source(shopee_db.get_video_source(DB_PATH, source_id))
+    return jsonify({"ok": True, "log_rows_deleted": log_rows, "files_deleted": files, "files_missing": missing, "source": updated})
+
+
+@app.route("/api/video_sources/<int:source_id>/delete_errors", methods=["POST"])
+def video_sources_delete_errors(source_id):
+    """Nut 'Xóa video lỗi': xoa file .mp4 + dong log cua MOI sp_id da dang THAT BAI (success=0)
+    thuoc nguon nay - khong the hoan tac."""
+    row = shopee_db.get_video_source(DB_PATH, source_id)
+    if not row:
+        return _bad_request(f"khong tim thay nguon id={source_id}")
+    log_rows, files, missing = _delete_video_files_and_log(row, success=False)
+    updated = _scan_video_source(shopee_db.get_video_source(DB_PATH, source_id))
+    return jsonify({"ok": True, "log_rows_deleted": log_rows, "files_deleted": files, "files_missing": missing, "source": updated})
+
+
+@app.route("/api/video_sources/reset_db", methods=["POST"])
+def video_sources_reset_db():
+    """Nut 'Xóa DB' (video): xoa TOAN BO bang video_post_log (moi nguon/market) - KHONG dong
+    toi danh sach nguon dang ky (video_sources), KHONG xoa file .mp4 nao - chi mat lich su
+    dang. Khong the hoan tac."""
+    deleted = shopee_db.clear_all_video_post_log(DB_PATH)
+    sources = shopee_db.list_video_sources(DB_PATH)
+    results = [_scan_video_source(row) for row in sources]
+    return jsonify({"ok": True, "log_rows_deleted": deleted, "sources": results})
+
+
+# ============================================================================================
+# Tab "Đăng video" - dieu phoi tung luot dang (1 nguon x N tai khoan xoay vong), xem
+# CHILL68_VIDEO_UPLOAD_RE.md + shopee_video_post.py. Kien truc: MOI request server CHI dang
+# DUNG 1 video roi tra ve ngay (KHONG chay ngam trong thread) - dung y giong het pattern co
+# san cua tab "Tạo Video" (VideoAI, xem push_videos()/runVideoPush() trong index.html): 1 video
+# mat ~30-90s (upload that + doi xu ly + retry anti-bot) nen KHONG the nhoi vao 1 batch lon
+# trong 1 request HTTP (se timeout) - JS o trinh duyet tu lap lai goi endpoint nay toi khi het
+# video hoac nguoi dung bam Dung, vua co progress/log realtime vua khong can ha tang
+# thread/queue rieng o server.
+# ============================================================================================
+
+_MATCHED_POOL_CACHE = {}  # folder(str) -> (xlsx_mtime, pool_list) - xem _get_matched_pool_cached()
+
+# Video dang duoc 1 request post_next() KHAC xu ly (chua kip ghi video_post_log) - server
+# chay threaded=True (nhieu request cung luc THAT SU song song, xem app.run() trong main()),
+# nen 2 PHIEN DANG KHAC NHAU (vd nguoi dung mo 2 phien tren cung 1 nguon, hoac 2 tab trinh
+# duyet) co the cung goi post_next() gan nhu cung luc - neu khong danh dau, ca 2 se doc thay
+# CUNG 1 sp_id "chua duoc dang" (video_post_log chua kip co dong nao) roi CUNG dang trung no.
+# Chi giu KHOA trong luc CHON video (cuc nhanh) - KHONG giu khoa trong luc goi Shopee that (30-
+# 90s), de nhieu phien VAN chay that su song song, chi khong bao gio trung sp_id. Reset ve
+# rong khi server restart - chap nhan duoc (khong con request nao dang "giu" video luc do).
+_IN_FLIGHT_LOCK = threading.Lock()
+_IN_FLIGHT_SP_IDS = {}  # folder(str) -> set(sp_id dang duoc 1 request nao do xu ly)
+
+
+def _claim_next_pending(matched, market, folder):
+    """Chon + 'giu cho' (claim) video PENDING dau tien CHUA co request nao khac dang xu ly.
+    Tra ve ProductRow hoac None (het video / video con lai deu dang bi giu boi request khac -
+    RAT HIEM, chi xay ra neu nhieu phien chay dong thoi tren 1 nguon nho). Nho goi
+    _release_claim(folder, sp_id) trong finally sau khi dang xong (thanh cong hay that bai)."""
+    with _IN_FLIGHT_LOCK:
+        in_flight = _IN_FLIGHT_SP_IDS.setdefault(folder, set())
+        for r in matched:
+            if r.sp_id in in_flight:
+                continue
+            if shopee_db.already_posted(DB_PATH, r.sp_id, market, folder):
+                continue
+            in_flight.add(r.sp_id)
+            return r
+    return None
+
+
+def _release_claim(folder, sp_id):
+    with _IN_FLIGHT_LOCK:
+        _IN_FLIGHT_SP_IDS.get(folder, set()).discard(sp_id)
+
+
+def _get_matched_pool_cached(folder):
+    """Nhu gsheet_video_scanner.build_matched_pool() nhung CACHE theo mtime file xlsx - tranh
+    doc lai file .xlsx (co the vai nghin dong) o MOI lan goi post_next() lien tiep trong 1
+    phien dang. Cache bi xoa (xem _scan_video_source()) moi khi nguon duoc quet lai / video bi
+    xoa, nen luon phan anh dung trang thai moi nhat sau cac thao tac do."""
+    results_file = gsheet_video_scanner.find_results_file(Path(folder))
+    if results_file is None:
+        raise FileNotFoundError(f"Không tìm thấy file *_results.xlsx trong {folder}")
+    mtime = results_file.stat().st_mtime
+    cached = _MATCHED_POOL_CACHE.get(folder)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    pool = gsheet_video_scanner.build_matched_pool(folder)
+    _MATCHED_POOL_CACHE[folder] = (mtime, pool)
+    return pool
+
+
+def _load_video_signing_config():
+    """Doc 2 API key that (license Chill 68) tu .env o goc repo - CUNG quy uoc voi
+    telegram_notifier.load_notifier_from_env() (python-dotenv), xem .env.example. Doc lai MOI
+    LAN goi (khong cache) - .env co the duoc sua tay giua luc server dang chay, cache se khien
+    phai restart server moi ap dung key moi."""
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(REPO_ROOT, ".env"))
+    server2_api_key = os.environ.get("SHOPEE_VIDEO_SERVER2_API_KEY", "").strip()
+    token_api_key = os.environ.get("SHOPEE_VIDEO_TOKEN_API_KEY", "").strip()
+    if not server2_api_key or not token_api_key:
+        raise RuntimeError(
+            "Thiếu SHOPEE_VIDEO_SERVER2_API_KEY / SHOPEE_VIDEO_TOKEN_API_KEY trong .env "
+            "(copy từ .env.example, xem CHILL68_VIDEO_UPLOAD_RE.md mục 4)."
+        )
+    return shopee_video_post.SigningConfig(
+        server2_url="https://creditmls2026video.toolshopee.vn/api/sign",
+        server2_api_key=server2_api_key,
+        token_api_key=token_api_key,
+    )
+
+
+def _normalize_proxy_for_post(raw):
+    """Cot 'proxy' cua mail_accounts co the o 2 dinh dang: nguoi dung tu go tay theo quy uoc
+    cu 'ip:port:user:pass' (xem shopee_video_post.parse_proxy()), HOAC dong bo tu GPM/GEM
+    (raw_proxy that, vd 'socks5://127.0.0.1:5000' hay 'http://user:pass@host:port' - da la URL
+    day du san). Nhan dien qua '://' de goi dung ham, tranh parse_proxy() hieu nham URL that
+    la dinh dang colon-list roi ghep sai."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    if "://" in raw:
+        return raw
+    return shopee_video_post.parse_proxy(raw)
+
+
+def _video_share_link(market, post_id):
+    """URL xem/chia se video that CUA SHOPEE (dang 'https://{sv}/share-video/{post_id}') - lay
+    NGUYEN VAN tu source code that da capture cua Chill 68 (bien 'videoLink' trong
+    createPostOnShopee_Server1/2/3, xem CHILL68_VIDEO_UPLOAD_RE.md), KHONG url-encode post_id
+    (post_id dang base64 co the chua '/'/'=' - code goc CUNG khong encode, giu dung y het)."""
+    if not post_id:
+        return None
+    market_cfg = shopee_video_post.MARKET_CONFIG.get(market)
+    if not market_cfg:
+        return None
+    return f"https://{market_cfg['sv']}/share-video/{post_id}"
+
+
+@app.route("/api/video_sources/<int:source_id>/post_next", methods=["POST"])
+def video_sources_post_next(source_id):
+    """Dang DUNG 1 video ke tiep (video PENDING dau tien theo thu tu trong xlsx CHUA co request
+    nao khac dang xu ly - xem _claim_next_pending()) cua 1 nguon, dung tai khoan DAU TIEN trong
+    'account_ids' (theo thu tu client gui - client tu xoay vong mang nay giua cac lan goi de
+    phan tai deu qua nhieu tai khoan) con du dieu kien: co Cookie VA (chua dat rate_limit_video
+    HOM NAY, hoac khong gioi han). An toan khi NHIEU PHIEN goi dong thoi (ke ca cung 1 nguon -
+    xem _IN_FLIGHT_SP_IDS), moi phien (tab/nhom tai khoan/thi truong khac nhau) chay doc lap,
+    khong can dung phien nay de chay phien khac. Tra ve 1 trong 4 dang:
+    - {done: true}: nguon nay het video pending, khong con gi de dang.
+    - {done: false, retry: true}: video pending con lai DANG bi phien KHAC xu ly (hiem, chi
+      xay ra khi nhieu phien dong thoi tren 1 nguon nho) - client cho ngan roi thu lai, KHONG
+      phai dung han.
+    - {done: false, blocked: true}: con video pending nhung KHONG tai khoan nao du dieu kien
+      (het cookie/het rate limit) - client nen dung vong lap, bao nguoi dung.
+    - {done: false, sp_id, success, ...}: da thu dang 1 video, xem ket qua."""
+    row = shopee_db.get_video_source(DB_PATH, source_id)
+    if not row:
+        return _bad_request(f"khong tim thay nguon id={source_id}")
+    folder, market = row["folder"], row["market"]
+
+    body = request.get_json(force=True, silent=True) or {}
+    account_ids = body.get("account_ids")
+    if not isinstance(account_ids, list) or not account_ids:
+        return _bad_request("thieu 'account_ids' (danh sach id tai khoan dung de xoay vong)")
+
+    try:
+        matched = _get_matched_pool_cached(folder)
+    except (FileNotFoundError, ValueError) as e:
+        return _bad_request(str(e))
+
+    target_row = _claim_next_pending(matched, market, folder)
+    if target_row is None:
+        still_pending = any(not shopee_db.already_posted(DB_PATH, r.sp_id, market, folder) for r in matched)
+        if not still_pending:
+            return jsonify({"ok": True, "done": True, "message": "Nguồn này đã hết video pending."})
+        return jsonify({
+            "ok": True, "done": False, "retry": True,
+            "message": "Video pending còn lại đang được phiên khác xử lý - thử lại ngay.",
+        })
+
+    # TU DAY tro di GIU claim tren target_row.sp_id (da danh dau boi _claim_next_pending()) -
+    # BAT BUOC release trong finally o MOI nhanh return, khong thi sp_id nay "ket" - khong
+    # phien nao khac co the dang no nua (kem den khi server restart, xem _IN_FLIGHT_SP_IDS).
+    try:
+        chosen_account = None
+        for raw_id in account_ids:
+            try:
+                aid = int(str(raw_id).strip())
+            except (TypeError, ValueError):
+                continue
+            acc = shopee_db.get_mail_account(DB_PATH, aid)
+            if not acc or not (acc.get("cookie") or "").strip():
+                continue
+            limit = acc.get("rate_limit_video")
+            if limit is not None and shopee_db.count_account_success_today(DB_PATH, aid) >= limit:
+                continue
+            chosen_account = acc
+            break
+        if chosen_account is None:
+            return jsonify({
+                "ok": True, "done": False, "blocked": True,
+                "message": "Không có tài khoản nào đủ điều kiện (thiếu Cookie hoặc đã đạt Rate limit video/ngày).",
+            })
+
+        try:
+            signing = _load_video_signing_config()
+        except RuntimeError as e:
+            return _bad_request(str(e))
+
+        device_override = {
+            "device_model": chosen_account.get("device_model") or "",
+            "os_version": chosen_account.get("device_os_version") or "",
+            "rn_version": chosen_account.get("device_rn_version") or "",
+        }
+        proxy = _normalize_proxy_for_post(chosen_account.get("proxy"))
+        video_path = str(Path(folder) / f"{target_row.sp_id}.mp4")
+
+        result = shopee_video_post.post_video_to_shopee(
+            video_path=video_path, cookie_str=chosen_account["cookie"], caption=target_row.product_name,
+            merge_links=target_row.merge_links, signing=signing, market=market, proxy=proxy,
+            device_override=device_override,
+        )
+        shopee_db.log_video_post(
+            DB_PATH, sp_id=target_row.sp_id, market=market, folder=folder,
+            product_name=target_row.product_name, merge_links=target_row.merge_links,
+            success=result.success, post_id=result.post_id, vid=result.vid, error=result.error,
+            account_id=chosen_account["id"],
+        )
+        # Cap nhat TANG DAN cache thong ke (video_sources.success/error/pending_count) thay vi
+        # quet lai TOAN BO matched pool + N lan goi already_posted() (O(n) SQL query/lan goi -
+        # qua ton phi neu nguon co vai nghin video va client goi lien tuc post_next()). 1 video
+        # LUON roi khoi "pending" sau lan dang nay (thanh cong -> success, that bai -> error) -
+        # day la so DUNG chinh xac (khong phai uoc luong).
+        updated_source = shopee_db.update_video_source_stats(
+            DB_PATH, source_id,
+            success_count=(row.get("success_count") or 0) + (1 if result.success else 0),
+            error_count=(row.get("error_count") or 0) + (0 if result.success else 1),
+            pending_count=max(0, (row.get("pending_count") or 0) - 1),
+        )
+        pending_remaining = updated_source["pending_count"]
+        return jsonify({
+            "ok": True, "done": False, "sp_id": target_row.sp_id, "success": result.success,
+            "post_id": result.post_id, "error": result.error,
+            "video_link": _video_share_link(market, result.post_id) if result.success else None,
+            "account_id": chosen_account["id"], "account_label": chosen_account.get("profile") or chosen_account.get("email") or chosen_account.get("shopee_id") or f"#{chosen_account['id']}",
+            "pending_remaining": pending_remaining,
+        })
+    finally:
+        _release_claim(folder, target_row.sp_id)
+
+
+@app.route("/api/video_sources/<int:source_id>/log", methods=["GET"])
+def video_sources_log(source_id):
+    """Lich su dang cua 1 nguon (video_post_log loc theo dung market+folder cua nguon) - dung
+    cho bang 'Lịch sử đăng' o tab 'Đăng video'. Kem 'account_label' (uu tien ten Profile GPM,
+    xem yeu cau nguoi dung 2026-09-10 - de biet dung PROFILE nao dang, khong phai chi email)
+    tra tu mail_accounts theo account_id - dong log cu/tao qua CLI khong co account_id se
+    hien 'account_label: null' (khong loi)."""
+    row = shopee_db.get_video_source(DB_PATH, source_id)
+    if not row:
+        return _bad_request(f"khong tim thay nguon id={source_id}")
+    limit = request.args.get("limit", 100, type=int)
+    logs = shopee_db.list_video_post_log(DB_PATH, market=row["market"], folder=row["folder"], limit=limit)
+    account_ids = {r["account_id"] for r in logs if r.get("account_id")}
+    accounts = {a["id"]: a for a in shopee_db.list_mail_accounts_by_ids(DB_PATH, list(account_ids))} if account_ids else {}
+    for r in logs:
+        acc = accounts.get(r.get("account_id"))
+        r["account_label"] = (acc.get("profile") or acc.get("email") or acc.get("shopee_id")) if acc else None
+        r["video_link"] = _video_share_link(row["market"], r["post_id"]) if r.get("success") else None
+    return jsonify({"logs": logs})
 
 
 @app.route("/api/mail_accounts/export.xlsx", methods=["GET"])
@@ -1021,12 +1507,19 @@ def export_mail_accounts_xlsx():
     wb = Workbook()
     ws = wb.active
     ws.title = "Tai khoan Shopee"
-    ws.append(["Full info", "Email", "PassEmail", "Shopee_id", "Device", "Profile", "Group GPM", "ID GPM", "Slot", "Market", "Shopee_code", "Thoi gian tao"])
+    ws.append([
+        "Full info", "Email", "PassEmail", "Shopee_id", "Device", "Profile", "Group GPM", "ID GPM",
+        "Slot", "Market", "Shopee_code", "Proxy", "Device Model", "Device OS Version",
+        "Device RN Version", "Rate Limit Video", "Thoi gian tao",
+    ])
     for a in accounts:
         ws.append([
             a["full_info"], a["email"], a["password"], a["shopee_id"],
             a["device"], a["profile"], a.get("group_gpm") or "", a.get("id_gpm") or "",
-            a["slot"], a["market"], a["shopee_code"], a["created_at"],
+            a["slot"], a["market"], a["shopee_code"],
+            a.get("proxy") or "", a.get("device_model") or "", a.get("device_os_version") or "",
+            a.get("device_rn_version") or "", a.get("rate_limit_video"),
+            a["created_at"],
         ])
     buf = io.BytesIO()
     wb.save(buf)
@@ -1049,6 +1542,11 @@ _IMPORT_MAIL_ACCOUNTS_COLUMN_MAP = {
     "slot": "slot",
     "market": "market",
     "shopee_code": "shopee_code",
+    "proxy": "proxy",
+    "device model": "device_model",
+    "device os version": "device_os_version",
+    "device rn version": "device_rn_version",
+    "rate limit video": "rate_limit_video",
 }
 
 
@@ -1108,6 +1606,10 @@ def mail_accounts_update(account_id):
         id_gpm=body.get("id_gpm"),
         slot=body.get("slot"), market=body.get("market"),
         engine=body.get("engine"), cookie=body.get("cookie"),
+        proxy=body.get("proxy"), device_model=body.get("device_model"),
+        device_os_version=body.get("device_os_version"),
+        device_rn_version=body.get("device_rn_version"),
+        rate_limit_video=body.get("rate_limit_video"),
     )
     if row is None:
         return _bad_request(f"khong tim thay mail id={account_id}")
@@ -1772,11 +2274,12 @@ def mail_accounts_get_cookie(account_id):
 @app.route("/api/mail_accounts/gpm/sync", methods=["POST"])
 def mail_accounts_gpm_sync():
     """Dong bo danh sach mail_accounts theo engine CUA TUNG DONG (GPM va GEM lam NGUON):
-    - Dong nao co ID GPM/GEM: cap nhat lai cot Profile (ten profile that) + GROUP GPM theo
-      engine do, KE CA khi nguoi dung da doi ten/doi nhom ngay ben GPM/GemLogin. Profile
-      khong thuoc nhom nao hien nhan khong-nhom theo engine (GPM: "Default group", GEM: "All").
+    - Dong nao co ID GPM/GEM: cap nhat lai cot Profile (ten profile that) + GROUP GPM + Proxy
+      (field 'raw_proxy' cua profile) theo engine do, KE CA khi nguoi dung da doi ten/doi
+      nhom/doi proxy ngay ben GPM/GemLogin. Profile khong thuoc nhom nao hien nhan
+      khong-nhom theo engine (GPM: "Default group", GEM: "All").
     - ID khong con ton tai trong GPM/GEM (profile da bi xoa) -> TU XOA ID (dong ve trang thai
-      chua tao, van GIU ten Profile/GROUP GPM da nhap de tao lai neu can).
+      chua tao, van GIU ten Profile/GROUP GPM/Proxy da nhap de tao lai neu can).
     Load nhom + profile cua TUNG engine 1 lan. Dong chua co ID khong dong cham toi."""
     accounts = shopee_db.list_mail_accounts(DB_PATH, limit=1000000)
     by_engine = {_ad.ENGINE_GPM: [], _ad.ENGINE_GEM: []}
@@ -1808,8 +2311,10 @@ def mail_accounts_gpm_sync():
             gid = str(prof.get("group_id") or "").strip()
             group_name = group_name_by_id.get(gid, "") if gid else _ad.ungrouped_label(_ad.ENGINE_GPM)
             real_profile = str(prof.get("name") or "").strip()
-            if (a.get("profile") or "") != real_profile or (a.get("group_gpm") or "") != group_name:
-                shopee_db.update_mail_account_fields(DB_PATH, a["id"], profile=real_profile, group_gpm=group_name)
+            real_proxy = str(prof.get("raw_proxy") or "").strip()
+            if ((a.get("profile") or "") != real_profile or (a.get("group_gpm") or "") != group_name
+                    or (a.get("proxy") or "") != real_proxy):
+                shopee_db.update_mail_account_fields(DB_PATH, a["id"], profile=real_profile, group_gpm=group_name, proxy=real_proxy)
                 updated += 1
         return checked, updated, cleared
 
@@ -1834,8 +2339,10 @@ def mail_accounts_gpm_sync():
             gid = prof.get("group_id") or ""
             group_name = group_name_by_id.get(gid, "") if gid else _ad.ungrouped_label(_ad.ENGINE_GEM)
             real_profile = prof.get("name") or ""
-            if (a.get("profile") or "") != real_profile or (a.get("group_gpm") or "") != group_name:
-                shopee_db.update_mail_account_fields(DB_PATH, a["id"], profile=real_profile, group_gpm=group_name)
+            real_proxy = prof.get("raw_proxy") or ""
+            if ((a.get("profile") or "") != real_profile or (a.get("group_gpm") or "") != group_name
+                    or (a.get("proxy") or "") != real_proxy):
+                shopee_db.update_mail_account_fields(DB_PATH, a["id"], profile=real_profile, group_gpm=group_name, proxy=real_proxy)
                 updated += 1
         return checked, updated, cleared
 

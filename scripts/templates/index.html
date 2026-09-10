@@ -445,6 +445,14 @@
       <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 6l10 7 10-7"/></svg></span>
       <span class="tab-label">Quản lý account Shopee</span>
     </button>
+    <button class="tab-btn" id="tabbtn-videosrc" onclick="switchTab('videosrc')">
+      <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 8.5V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4l2 2h6"/><path d="M12 12l3 2-3 2v-4z"/></svg></span>
+      <span class="tab-label">Quản lý nguồn video</span>
+    </button>
+    <button class="tab-btn" id="tabbtn-postvideo" onclick="switchTab('postvideo')">
+      <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg></span>
+      <span class="tab-label">Đăng video</span>
+    </button>
     <button class="tab-btn" id="tabbtn-sheets" onclick="switchTab('sheets')">
       <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="9" x2="9" y2="21"/></svg></span>
       <span class="tab-label">Push Sheet</span>
@@ -801,12 +809,16 @@
         <option value="2">Slot 2</option>
         <option value="3">Slot 3</option>
       </select>
+      <select id="mailacc-filter-group-gpm" onchange="loadMailAccounts()" style="max-width:200px;" title="Lọc theo nhóm GPM/GEM (cột GROUP GPM) - danh sách lấy từ các nhóm ĐANG có tài khoản trong bảng này">
+        <option value="">-- Nhóm GPM: Tất cả --</option>
+      </select>
       <input type="text" id="mailacc-filter-search" placeholder="Tìm theo email / shopee_id / device..." onkeydown="if(event.key==='Enter') loadMailAccounts()">
       <button class="secondary" onclick="loadMailAccounts()">Lọc danh sách</button>
       <button class="secondary" onclick="exportMailAccountsXlsx()" title="Xuất Excel các dòng đang TÍCH CHỌN (kèm cột Group GPM / ID GPM để import lại)">Xuất Excel (đã chọn)</button>
       <button class="secondary" onclick="createGpmProfilesSelected(this)" title="Tạo profile theo engine từng dòng (GPM/GEM) - dòng đã có ID GPM/GEM hoặc trùng tên trong cùng nhóm sẽ bỏ qua">Tạo profile (đã chọn)</button>
       <button class="secondary" onclick="openGpmProfilesSelected(this)" title="Mở trang chủ Shopee của các dòng đang tích chọn theo engine từng dòng - dòng chưa có ID GPM/GEM sẽ bỏ qua">Mở profile (đã chọn)</button>
-      <button class="secondary" onclick="syncMailAccountsGpm(this)" title="Lấy tên profile / nhóm mới nhất từ GPM & GemLogin ghi đè vào bảng (theo engine từng dòng); ID không còn tồn tại sẽ bị xóa">⟳ Đồng bộ GPM/GEM</button>
+      <button class="secondary" onclick="assignDeviceFingerprintSelected(this)" title="Gán NGẪU NHIÊN 1 mẫu Device Fingerprint (Model/OS version - dữ liệu thiết bị Android thật) cho từng dòng đang tích chọn, lấy từ pool scripts/device_fingerprints.json">🎲 Tạo device fingerprint (đã chọn)</button>
+      <button class="secondary" onclick="syncMailAccountsGpm(this)" title="Lấy tên profile / nhóm / proxy mới nhất từ GPM & GemLogin ghi đè vào bảng (theo engine từng dòng); ID không còn tồn tại sẽ bị xóa">⟳ Đồng bộ GPM/GEM</button>
       <input type="number" id="mailacc-getid-threads" min="1" max="6" value="2" style="max-width:62px;" title="Số profile chạy song song khi Get Shopee ID / Get Cookie">
       <button class="secondary" onclick="getShopeeIdsSelected(this)" title="Với từng dòng đang tích: mở trang hồ sơ Shopee theo market, lấy Username (Shopee ID) ghi vào cột Shopee ID; chưa login/captcha thì mở sẵn cửa sổ để xử lý">Get Shopee ID</button>
       <button class="secondary" onclick="getCookiesSelected(this)" title="Với từng dòng đang tích: mở trang chủ Shopee theo market, lấy toàn bộ cookie đăng nhập ghi vào cột Cookie; chưa login/captcha thì mở sẵn cửa sổ để xử lý">Get Cookie</button>
@@ -832,11 +844,81 @@
           <th style="width:36px;"><input type="checkbox" id="mailacc-sel-all" onclick="mailAccToggleAll(this)" title="Chọn / bỏ chọn tất cả dòng đang hiển thị"></th>
           <th style="width:64px;">Engine</th>
           <th>Thông tin đầy đủ</th><th>Email</th><th>Mật khẩu Mail</th><th>Shopee ID</th><th>Cookie</th>
-          <th>Thiết bị</th><th>Profile</th><th>GROUP GPM</th><th>ID GPM</th><th>Slot</th><th>Thị trường</th><th>Mã Shopee</th><th>Thao tác</th><th>Thời gian tạo</th>
+          <th>Thiết bị</th><th>Profile</th><th>GROUP GPM</th><th>ID GPM</th><th>Proxy</th><th>Device Fingerprint (Android)</th><th>Rate limit video/ngày</th><th>Slot</th><th>Thị trường</th><th>Mã Shopee</th><th>Thao tác</th><th>Thời gian tạo</th>
         </tr>
       </thead>
       <tbody id="mailacc-tbody"></tbody>
     </table></div>
+  </section>
+
+</div>
+
+<!-- Tab: Quản lý nguồn video (dăng video Shopee qua WSCloud - shopee_video_post.py, KHÔNG
+     liên quan tab "Tạo Video" ở trên (VideoAI tự động tạo video từ sản phẩm) -->
+<div id="tab-videosrc" class="tab-panel">
+
+  <section>
+    <h2>Thêm nguồn video</h2>
+    <div class="muted" style="margin-bottom:10px;">
+      1 nguồn = 1 thư mục chứa video <code>&lt;sp_id&gt;.mp4</code> + đúng 1 file <code>*_results.xlsx</code>
+      (cột A = SP ID, B = tên sản phẩm, P = link tiếp thị - xem <code>gsheet_video_scanner.py</code>).
+      Thư mục phải nằm trên chính máy chạy server này.
+    </div>
+    <div class="row">
+      <input type="text" id="videosrc-folder" placeholder="Đường dẫn thư mục (vd D:\Shopee_PH\upload\TH)" style="min-width:380px;flex:1;">
+      <select id="videosrc-market" style="max-width:140px;">
+        <option value="th">TH (Thailand)</option>
+        <option value="ph">PH (Philippines)</option>
+        <option value="my">MY (Malaysia)</option>
+      </select>
+      <button onclick="addVideoSource(this)">Thêm nguồn</button>
+    </div>
+    <div class="muted" id="videosrc-add-result" style="margin-top:8px;"></div>
+  </section>
+
+  <section>
+    <div class="row" style="align-items:center;justify-content:space-between;">
+      <h2 style="margin:0;">Danh sách nguồn</h2>
+      <div class="row" style="gap:8px;">
+        <button class="secondary" onclick="loadVideoSources()">Làm mới</button>
+        <button class="secondary" onclick="rescanAllVideoSources(this)" title="Quét lại TẤT CẢ nguồn cùng lúc (video/xlsx mới thêm, kết quả đăng mới nhất)">⟳ Cập nhật lại DB</button>
+        <button class="danger" onclick="resetVideoSourcesDb(this)" title="Xóa TOÀN BỘ lịch sử đăng (mọi nguồn/market) - KHÔNG xóa file video, KHÔNG xóa danh sách nguồn">Xóa DB</button>
+      </div>
+    </div>
+    <div class="muted" style="margin-bottom:10px;">
+      "Đã đăng"/"Lỗi"/"Pending" tính theo lần đăng GẦN NHẤT của từng video (xem
+      <code>video_post_log</code>) - số liệu là CACHE, bấm "⟳" ở từng dòng hoặc "Cập nhật lại DB" để quét lại mới nhất.
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th>Thư mục</th><th>Thị trường</th><th>Tổng số</th><th>Đã đăng</th><th>Lỗi</th><th>Pending</th>
+        <th>Lần quét cuối</th><th>Thao tác</th>
+      </tr></thead>
+      <tbody id="videosrc-tbody"><tr><td colspan="8" class="muted">Đang tải...</td></tr></tbody>
+    </table></div>
+  </section>
+
+</div>
+
+<!-- Tab: Đăng video - dieu phoi 1 nguon (tab "Quản lý nguồn video") x N tai khoan xoay vong
+     (tab "Quản lý account Shopee") - xem /api/video_sources/<id>/post_next -->
+<div id="tab-postvideo" class="tab-panel">
+
+  <section>
+    <div class="row" style="align-items:center;justify-content:space-between;">
+      <h2 style="margin:0;">Đăng video</h2>
+      <button onclick="addPostVideoSession()">+ Tạo phiên đăng mới</button>
+    </div>
+    <div class="muted" style="margin-bottom:10px;">
+      Mỗi <b>phiên</b> độc lập hoàn toàn: tự chọn nguồn + nhóm tài khoản/thị trường riêng, chạy song song
+      không cần dừng phiên khác (server đã đảm bảo 2 phiên không bao giờ đăng trùng 1 video, kể cả khi
+      cùng chọn 1 nguồn). Mỗi lượt lấy video <b>pending</b> đầu tiên (theo thứ tự trong xlsx), xoay vòng qua
+      các tài khoản đã tích chọn trong phiên đó - tự bỏ qua tài khoản thiếu Cookie hoặc đã đạt "Rate limit
+      video/ngày" (xem tab "Quản lý account Shopee"). Mỗi request chỉ đăng ĐÚNG 1 video rồi trả kết quả ngay
+      (tránh timeout) - trình duyệt tự lặp lại tới khi hết video/đủ số lượng/bạn bấm Dừng, nên PHẢI giữ tab
+      trình duyệt mở trong lúc chạy.
+    </div>
+    <div id="postvideo-sessions-container"></div>
   </section>
 
 </div>
@@ -1150,8 +1232,11 @@ function switchTab(name) {
     loadMailBalance();
     loadMailAccounts();
     loadAllEngineGroups(); // load ten nhom cua ca GPM va GemLogin (cho o goi y GROUP GPM/GEM)
+    loadMailAccountGroups(); // load danh sach nhom GPM DANG CO trong DB (cho dropdown loc)
     syncMailAccountsGpm(null, true); // tu dong dong bo GPM -> bang moi lan mo tab (khong hien popup)
   }
+  if (name === 'videosrc') loadVideoSources();
+  if (name === 'postvideo') loadPostVideoSources();
   if (name === 'sheets') { loadSheetsConfig(); loadSheetsAccounts(); }
   if (name === 'gpm') { loadGpmGroupsAndProfiles(); }
   if (name === 'kw') { kwLoadCategories(true); kwReload(); loadKwAuto(); }
@@ -2107,6 +2192,9 @@ const MAILACC_COLUMNS = [
   { field: 'profile', label: 'Profile' },
   { field: 'group_gpm', label: 'GROUP GPM' },
   { field: 'id_gpm', label: 'ID GPM' },
+  { field: 'proxy', label: 'Proxy' },
+  { field: 'device_model', label: 'Device Fingerprint (Android)' },
+  { field: 'rate_limit_video', label: 'Rate limit video/ngày' },
   { field: 'slot', label: 'Slot' },
   { field: 'market', label: 'Thị trường' },
   { field: 'shopee_code', label: 'Mã Shopee' },
@@ -2128,6 +2216,9 @@ const MAILACC_COL_SETTINGS = [
   { field: 'profile', label: 'Profile' },
   { field: 'group_gpm', label: 'GROUP GPM' },
   { field: 'id_gpm', label: 'ID GPM' },
+  { field: 'proxy', label: 'Proxy' },
+  { field: 'device_model', label: 'Device Fingerprint (Android)' },
+  { field: 'rate_limit_video', label: 'Rate limit video/ngày' },
   { field: 'slot', label: 'Slot' },
   { field: 'market', label: 'Thị trường' },
   { field: 'shopee_code', label: 'Mã Shopee' },
@@ -2359,14 +2450,32 @@ async function loadMailAccounts() {
   const params = new URLSearchParams();
   const market = document.getElementById('mailacc-filter-market').value;
   const slot = document.getElementById('mailacc-filter-slot').value;
+  const groupGpm = document.getElementById('mailacc-filter-group-gpm').value;
   const search = document.getElementById('mailacc-filter-search').value.trim();
   if (market) params.set('market', market);
   if (slot) params.set('slot', slot);
+  if (groupGpm) params.set('group_gpm', groupGpm);
   if (search) params.set('search', search);
   params.set('limit', '300');
   const { accounts } = await api('GET', '/api/mail_accounts/list?' + params.toString());
   lastMailAccountsList = accounts;
   renderMailAccounts();
+}
+
+// Nap danh sach nhom cho dropdown loc "Nhom GPM" - goi 1 lan khi vao tab (KHONG bi anh
+// huong boi filter market/slot dang chon, xem shopee_db.list_mail_account_groups()). Giu lai
+// gia tri dang chon (neu con trong danh sach moi) de khong bi mat filter khi nguoi dung vua
+// tao/sua group_gpm roi bam lam moi.
+async function loadMailAccountGroups() {
+  const sel = document.getElementById('mailacc-filter-group-gpm');
+  if (!sel) return;
+  const current = sel.value;
+  try {
+    const { groups } = await api('GET', '/api/mail_accounts/groups');
+    sel.innerHTML = '<option value="">-- Nhóm GPM: Tất cả --</option>' +
+      (groups || []).map(g => `<option value="${g.replace(/"/g, '&quot;')}">${g}</option>`).join('');
+    if (current && (groups || []).includes(current)) sel.value = current;
+  } catch (e) { /* im lang - dropdown chi con option "Tat ca" */ }
 }
 
 function renderMailAccounts() {
@@ -2408,6 +2517,13 @@ function renderMailAccounts() {
       <td><input type="text" data-field="profile" value="${(a.profile || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'profile', this.value)" placeholder="Profile" style="min-width:160px; width:100%;"></td>
       <td><input type="text" data-field="group_gpm" list="${(a.engine || 'gpm') === 'gem' ? 'gem-group-names' : 'gpm-group-names'}" value="${(a.group_gpm || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'group_gpm', this.value)" placeholder="Group GPM/GEM" title="Tên nhóm muốn tạo profile (gợi ý theo engine của dòng)" style="min-width:150px; width:100%;"></td>
       <td><input type="text" value="${(a.id_gpm || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'id_gpm', this.value)" placeholder="ID GPM/GEM" title="ID profile GPM/GEM (tự điền sau khi bấm Tạo profile, hoặc dán tay)" style="min-width:150px; width:100%; font-family:monospace; font-size:12px;"></td>
+      <td><input type="text" value="${(a.proxy || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'proxy', this.value)" placeholder="ip:port:user:pass" title="Proxy riêng của tài khoản này - nhập tay, hoặc bấm '⟳ Đồng bộ GPM/GEM' để tự lấy từ proxy đang gắn cho profile (field raw_proxy)" style="min-width:170px; width:100%; font-family:monospace; font-size:12px;"></td>
+      <td style="white-space:nowrap;">
+        <input type="text" value="${(a.device_model || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'device_model', this.value)" placeholder="Model (vd SM-G991B)" title="Model điện thoại Android giả lập - dùng cho pipeline đăng video sau này" style="width:120px; margin-bottom:3px;"><br>
+        <input type="text" value="${(a.device_os_version || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'device_os_version', this.value)" placeholder="OS version (vd 34)" style="width:120px; margin-bottom:3px;"><br>
+        <input type="text" value="${(a.device_rn_version || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'device_rn_version', this.value)" placeholder="RN version (vd 6.97.5)" style="width:120px;">
+      </td>
+      <td><input type="number" min="0" value="${a.rate_limit_video != null ? a.rate_limit_video : ''}" onchange="updateMailAccountField(${a.id}, 'rate_limit_video', this.value)" placeholder="Không giới hạn" title="Số video tối đa/ngày cho tài khoản này - CHỈ lưu để tham chiếu, CHƯA được pipeline đăng video tự động áp dụng" style="width:90px; text-align:center;"></td>
       <td><input type="text" value="${(a.slot || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'slot', this.value)" placeholder="Slot" style="min-width:65px; width:65px; text-align:center;"></td>
       <td>
         <select onchange="updateMailAccountField(${a.id}, 'market', this.value)">
@@ -2442,6 +2558,7 @@ function copyMailField(idx, field) {
 async function updateMailAccountField(id, field, value) {
   try {
     await api('POST', `/api/mail_accounts/${id}`, { [field]: value });
+    if (field === 'group_gpm') loadMailAccountGroups(); // ten nhom moi go tay -> lam moi dropdown loc
   } catch (e) {
     await customAlert('Lỗi lưu dữ liệu: ' + e.message, { danger: true });
   }
@@ -2768,6 +2885,578 @@ async function openGpmProfilesSelected(btn) {
   });
 }
 
+// ---- Tạo device fingerprint (hàng loạt): gán NGẪU NHIÊN 1 mẫu (Model/OS version thật, xem
+// scripts/device_fingerprints.json) cho từng dòng đang tích chọn. rn_version LUÔN gán 1 giá
+// trị cố định (không random - xem ghi chú trong file JSON), device_id KHÔNG bị đụng tới. ----
+async function assignDeviceFingerprintSelected(btn) {
+  const ids = mailAccSelectedIds();
+  if (!ids.length) {
+    await customAlert('Chưa chọn dòng nào — hãy tích chọn các dòng cần tạo device fingerprint trước.', { danger: true });
+    return;
+  }
+  if (!(await customConfirm(
+    `Tạo device fingerprint cho ${ids.length} dòng đang tích chọn?\n\n` +
+    `- Mỗi dòng được gán NGẪU NHIÊN 1 mẫu (Model + OS version) từ pool thiết bị Android thật.\n` +
+    `- Ghi đè lên Device Fingerprint hiện có của dòng đó (nếu đã có).`
+  ))) return;
+  await withBusy(btn, async () => {
+    try {
+      const res = await api('POST', '/api/mail_accounts/device_fingerprint/assign_bulk', { ids }, 60000);
+      await loadMailAccounts();
+      const fails = (res.results || []).filter(r => !r.ok);
+      if (fails.length) {
+        await mailAccSummarizeBulk('Tạo device fingerprint', res.assigned || 0, (res.results || []).length, res.results);
+      }
+    } catch (e) {
+      await customAlert('Lỗi tạo device fingerprint hàng loạt: ' + e.message, { danger: true });
+    }
+  });
+}
+
+// ============================================================================================
+// Tab "Quản lý nguồn video" - dang ky thu muc video (<sp_id>.mp4 + *_results.xlsx) lam
+// "nguon", theo doi thong ke da dang/loi/pending (xem /api/video_sources/* trong
+// affiliate_scrape_server.py). KHAC HOAN TOAN tab "Tạo Video" (VideoAI tu dong TAO video) -
+// khong dung chung state/route voi tab do.
+// ============================================================================================
+
+let lastVideoSourcesList = [];
+
+function fmtVideoSourceCount(n) {
+  return n === null || n === undefined ? '-' : n;
+}
+
+async function loadVideoSources() {
+  const tbody = document.getElementById('videosrc-tbody');
+  try {
+    const { sources } = await api('GET', '/api/video_sources');
+    lastVideoSourcesList = sources || [];
+    renderVideoSourcesTable();
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="8" class="muted">Lỗi tải danh sách: ${e.message}</td></tr>`;
+  }
+}
+
+function renderVideoSourcesTable() {
+  const tbody = document.getElementById('videosrc-tbody');
+  const sources = lastVideoSourcesList;
+  tbody.innerHTML = sources.map(s => `
+    <tr>
+      <td><span class="ellipsis" style="max-width:320px;" title="${s.folder.replace(/"/g, '&quot;')}">${s.folder}</span></td>
+      <td>${(s.market || '').toUpperCase()}</td>
+      <td>${fmtVideoSourceCount(s.total_count)}</td>
+      <td style="color:var(--success-text);">${fmtVideoSourceCount(s.success_count)}</td>
+      <td style="color:var(--danger-text);">${fmtVideoSourceCount(s.error_count)}</td>
+      <td>${fmtVideoSourceCount(s.pending_count)}</td>
+      <td class="muted" style="white-space:nowrap;">
+        ${s.last_scanned_at ? fmtLogTime(s.last_scanned_at) : 'Chưa quét'}
+        ${s.last_scan_error ? `<br><span style="color:var(--danger-text);" title="${s.last_scan_error.replace(/"/g, '&quot;')}">⚠ Lỗi quét</span>` : ''}
+      </td>
+      <td style="white-space:nowrap;">
+        <button class="secondary" onclick="rescanVideoSource(${s.id}, this)" title="Quét lại đúng thư mục này">⟳</button>
+        <button class="secondary" onclick="deleteVideoSourcePosted(${s.id}, this)" title="Xóa file .mp4 THẬT + log của video ĐÃ ĐĂNG THÀNH CÔNG - không thể hoàn tác">Xóa đã đăng</button>
+        <button class="secondary" onclick="deleteVideoSourceErrors(${s.id}, this)" title="Xóa file .mp4 THẬT + log của video ĐĂNG LỖI - không thể hoàn tác">Xóa lỗi</button>
+        <button class="danger" onclick="removeVideoSource(${s.id}, this)" title="Gỡ đăng ký nguồn (giữ nguyên lịch sử đăng, KHÔNG xóa file)">Xóa nguồn</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="8" class="muted">Chưa có nguồn nào - thêm ở form phía trên.</td></tr>';
+}
+
+async function addVideoSource(btn) {
+  const folderEl = document.getElementById('videosrc-folder');
+  const folder = folderEl.value.trim();
+  const market = document.getElementById('videosrc-market').value;
+  const resultEl = document.getElementById('videosrc-add-result');
+  if (!folder) {
+    await customAlert('Chưa nhập đường dẫn thư mục.', { danger: true });
+    return;
+  }
+  await withBusy(btn, async () => {
+    resultEl.textContent = '';
+    try {
+      const res = await api('POST', '/api/video_sources', { folder, market }, 30000);
+      resultEl.textContent = `Đã thêm nguồn - quét được ${res.source.total_count} video (${res.source.success_count} đã đăng, ${res.source.error_count} lỗi, ${res.source.pending_count} pending).`;
+      resultEl.style.color = 'var(--success-text)';
+      folderEl.value = '';
+      await loadVideoSources();
+    } catch (e) {
+      resultEl.textContent = 'Lỗi: ' + e.message;
+      resultEl.style.color = 'var(--danger-text)';
+    }
+  });
+}
+
+async function rescanVideoSource(id, btn) {
+  await withBusy(btn, async () => {
+    try {
+      await api('POST', `/api/video_sources/${id}/rescan`, undefined, 30000);
+      await loadVideoSources();
+    } catch (e) {
+      await customAlert('Lỗi quét lại nguồn: ' + e.message, { danger: true });
+    }
+  });
+}
+
+async function rescanAllVideoSources(btn) {
+  await withBusy(btn, async () => {
+    try {
+      const res = await api('POST', '/api/video_sources/rescan_all', undefined, 120000);
+      await loadVideoSources();
+      if (res.errors) {
+        await customAlert(`Đã quét ${res.scanned} nguồn - ${res.errors} nguồn bị lỗi khi quét (xem cột "Lần quét cuối" từng dòng để biết chi tiết).`, { danger: true });
+      }
+    } catch (e) {
+      await customAlert('Lỗi cập nhật lại DB: ' + e.message, { danger: true });
+    }
+  });
+}
+
+function _findVideoSource(id) {
+  return lastVideoSourcesList.find(s => s.id === id);
+}
+
+async function deleteVideoSourcePosted(id, btn) {
+  const s = _findVideoSource(id);
+  if (!s) return;
+  if (!(await customConfirm(
+    `Xóa TOÀN BỘ video ĐÃ ĐĂNG THÀNH CÔNG của nguồn:\n${s.folder}\n\n` +
+    `- Xóa cả FILE .mp4 THẬT trên đĩa lẫn lịch sử đăng của ${fmtVideoSourceCount(s.success_count)} video.\n` +
+    `- KHÔNG THỂ HOÀN TÁC.`,
+    { danger: true }
+  ))) return;
+  await withBusy(btn, async () => {
+    try {
+      const res = await api('POST', `/api/video_sources/${id}/delete_posted`, undefined, 60000);
+      await loadVideoSources();
+      await customAlert(`Đã xóa ${res.files_deleted} file (${res.files_missing} file đã không còn trên đĩa) + ${res.log_rows_deleted} dòng log.`);
+    } catch (e) {
+      await customAlert('Lỗi xóa video đã đăng: ' + e.message, { danger: true });
+    }
+  });
+}
+
+async function deleteVideoSourceErrors(id, btn) {
+  const s = _findVideoSource(id);
+  if (!s) return;
+  if (!(await customConfirm(
+    `Xóa TOÀN BỘ video ĐĂNG LỖI của nguồn:\n${s.folder}\n\n` +
+    `- Xóa cả FILE .mp4 THẬT trên đĩa lẫn lịch sử đăng của ${fmtVideoSourceCount(s.error_count)} video.\n` +
+    `- KHÔNG THỂ HOÀN TÁC.`,
+    { danger: true }
+  ))) return;
+  await withBusy(btn, async () => {
+    try {
+      const res = await api('POST', `/api/video_sources/${id}/delete_errors`, undefined, 60000);
+      await loadVideoSources();
+      await customAlert(`Đã xóa ${res.files_deleted} file (${res.files_missing} file đã không còn trên đĩa) + ${res.log_rows_deleted} dòng log.`);
+    } catch (e) {
+      await customAlert('Lỗi xóa video lỗi: ' + e.message, { danger: true });
+    }
+  });
+}
+
+async function removeVideoSource(id, btn) {
+  const s = _findVideoSource(id);
+  if (!s) return;
+  if (!(await customConfirm(
+    `Gỡ đăng ký nguồn:\n${s.folder}\n\n` +
+    `Chỉ gỡ khỏi danh sách quản lý - KHÔNG xóa file, KHÔNG xóa lịch sử đăng (thêm lại đúng đường dẫn này sau vẫn tra cứu được).`
+  ))) return;
+  await withBusy(btn, async () => {
+    try {
+      await api('DELETE', `/api/video_sources/${id}`);
+      await loadVideoSources();
+    } catch (e) {
+      await customAlert('Lỗi xóa nguồn: ' + e.message, { danger: true });
+    }
+  });
+}
+
+async function resetVideoSourcesDb(btn) {
+  if (!(await customConfirm(
+    `Xóa TOÀN BỘ lịch sử đăng video (video_post_log) của MỌI nguồn/market?\n\n` +
+    `- KHÔNG xóa file .mp4 nào, KHÔNG xóa danh sách nguồn đã đăng ký.\n` +
+    `- Sau khi xóa, TOÀN BỘ video trong mọi nguồn sẽ được coi là "pending" (chưa đăng) và có thể bị đăng LẠI nếu chạy lại pipeline.\n` +
+    `- KHÔNG THỂ HOÀN TÁC.`,
+    { danger: true }
+  ))) return;
+  await withBusy(btn, async () => {
+    try {
+      const res = await api('POST', '/api/video_sources/reset_db', undefined, 60000);
+      await loadVideoSources();
+      await customAlert(`Đã xóa ${res.log_rows_deleted} dòng log trên toàn bộ ${res.sources.length} nguồn.`);
+    } catch (e) {
+      await customAlert('Lỗi xóa DB: ' + e.message, { danger: true });
+    }
+  });
+}
+
+// ============================================================================================
+// Tab "Đăng video" - dieu phoi NHIEU PHIEN doc lap, moi phien = 1 nguon (tab "Quản lý nguồn
+// video") x N tai khoan xoay vong (tab "Quản lý account Shopee") - xem yeu cau nguoi dung
+// 2026-09-10: "khong muon phai dung tien trinh dang chay de doi nhom tai khoan/thi truong
+// khac". Kien truc: MOI PHIEN co state RIENG (postVideoSessions, key = sessionId) va vong lap
+// JS RIENG - nhieu phien chay dong thoi hoan toan doc lap (ke ca cung chon 1 nguon: server da
+// dam bao khong bao gio trung sp_id giua cac phien, xem _claim_next_pending() trong
+// affiliate_scrape_server.py). Danh sach nguon (lastPostVideoSources) la du lieu DUNG CHUNG
+// (fetch 1 lan, dung cho dropdown cua MOI phien). PHAI giu tab trinh duyet mo trong luc chay
+// (khong co job chay ngam o server).
+// ============================================================================================
+
+let lastPostVideoSources = [];
+let postVideoSessions = new Map(); // sessionId -> { id, accounts, running, stopRequested }
+let postVideoNextSessionId = 1;
+
+function sleepMs(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function postVideoLog(sid, msg) {
+  const box = document.getElementById('postvideo-log-' + sid);
+  if (!box) return;
+  box.textContent = `[${new Date().toLocaleTimeString('vi-VN')}] ${msg}\n` + box.textContent;
+}
+
+function postVideoSessionCardHtml(sid) {
+  return `
+    <section id="postvideo-session-${sid}" class="postvideo-session-card" style="border:1px solid var(--border-color,#3334); border-radius:8px; padding:14px; margin-bottom:16px;">
+      <div class="row" style="align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <h3 style="margin:0;">Phiên đăng #${sid}</h3>
+        <button class="secondary" id="postvideo-remove-btn-${sid}" onclick="removePostVideoSession(${sid})" title="Xóa phiên này (chỉ khi không đang chạy)">✕ Xóa phiên</button>
+      </div>
+      <div class="row" style="margin-bottom:10px;">
+        <label style="white-space:nowrap;font-weight:500;">Nguồn:</label>
+        <select id="postvideo-source-sel-${sid}" style="min-width:340px;" onchange="onPostVideoSourceChange(${sid})"></select>
+        <span class="muted" id="postvideo-source-info-${sid}"></span>
+      </div>
+      <div class="row" style="margin-bottom:10px;">
+        <label style="white-space:nowrap;font-weight:500;">Lọc tài khoản:</label>
+        <span class="muted" id="postvideo-market-label-${sid}">(chọn nguồn trước)</span>
+        <select id="postvideo-filter-group-${sid}" style="max-width:200px;">
+          <option value="">-- Nhóm GPM: Tất cả --</option>
+        </select>
+        <button class="secondary" onclick="loadPostVideoAccounts(${sid})">Nạp tài khoản theo lọc</button>
+        <span class="muted" id="postvideo-accounts-info-${sid}"></span>
+      </div>
+      <div class="table-wrap" style="max-height:220px;overflow-y:auto;"><table>
+        <thead><tr>
+          <th style="width:36px;"><input type="checkbox" id="postvideo-sel-all-${sid}" onclick="postVideoToggleAll(${sid}, this)" title="Chọn/bỏ chọn tất cả tài khoản đang nạp"></th>
+          <th>Tài khoản</th><th>Cookie</th><th>Proxy</th><th>Rate limit/ngày</th><th>Đã đăng hôm nay</th>
+        </tr></thead>
+        <tbody id="postvideo-accounts-tbody-${sid}"><tr><td colspan="6" class="muted">Chưa nạp tài khoản - chọn nguồn rồi bấm "Nạp tài khoản theo lọc".</td></tr></tbody>
+      </table></div>
+      <div class="row" style="margin-top:10px;">
+        <label style="white-space:nowrap;font-weight:500;">Số lượng muốn đăng:</label>
+        <input type="number" id="postvideo-target-${sid}" min="1" value="50" style="max-width:90px;" title="Dừng lại sau khi đăng đủ số lượng này (hoặc sớm hơn nếu hết video pending / hết Rate limit các tài khoản đã chọn)">
+        <label style="white-space:nowrap;font-weight:500;">Số luồng song song:</label>
+        <input type="number" id="postvideo-threads-${sid}" min="1" max="1000" value="3" style="max-width:80px;" title="Mỗi luồng = 1 nhóm tài khoản đăng video độc lập cùng lúc - giới hạn thực tế phụ thuộc BĂNG THÔNG UPLOAD + RAM của máy này (mỗi luồng đang upload 1 video thật cùng lúc), KHÔNG có trần cứng đặt sẵn - hãy tự tăng dần và theo dõi log lỗi (timeout/mất kết nối) để tìm mức phù hợp với máy bạn. Vượt số tài khoản đã chọn cũng vô ích (luồng dư sẽ rảnh rỗi). Lưu ý: server ký bên ngoài (license Chill 68) từng ghi nhận giới hạn ~20 luồng đồng thời cho market PH (field 'phConcurrency', xem CHILL68_VIDEO_UPLOAD_RE.md) - vượt mốc này CÓ THỂ gặp lỗi ký/timeout dù máy vẫn còn khả năng. Nhiều luồng hơn cũng đồng nghĩa nhiều request cùng lúc từ CÙNG 1 IP máy - nên dùng kèm Proxy riêng cho từng tài khoản khi chạy nhiều luồng.">
+        <label style="white-space:nowrap;font-weight:500;">Nghỉ giữa video (giây):</label>
+        <input type="number" id="postvideo-min-delay-${sid}" min="0" value="8" style="max-width:70px;">
+        <span>–</span>
+        <input type="number" id="postvideo-max-delay-${sid}" min="0" value="20" style="max-width:70px;">
+        <button id="postvideo-start-btn-${sid}" onclick="startPostVideoRun(${sid})">▶ Bắt đầu đăng</button>
+        <button id="postvideo-stop-btn-${sid}" class="secondary" onclick="stopPostVideoRun(${sid})" disabled>■ Dừng</button>
+      </div>
+      <div class="muted" id="postvideo-capacity-info-${sid}" style="margin-top:6px;"></div>
+      <pre id="postvideo-log-${sid}" class="console-log" style="max-height:220px;"></pre>
+      <div class="row" style="align-items:center;justify-content:space-between;margin-top:10px;">
+        <h4 style="margin:0;">Lịch sử đăng (nguồn đang chọn)</h4>
+        <button class="secondary" onclick="loadPostVideoHistory(${sid})">Làm mới</button>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Cập nhật</th><th>SP ID</th><th>Sản phẩm</th><th>Tài khoản</th><th>Kết quả</th><th>Post ID / Lỗi</th></tr></thead>
+        <tbody id="postvideo-history-tbody-${sid}"><tr><td colspan="6" class="muted">Chọn nguồn để xem lịch sử.</td></tr></tbody>
+      </table></div>
+    </section>`;
+}
+
+function addPostVideoSession() {
+  const sid = postVideoNextSessionId++;
+  postVideoSessions.set(sid, { id: sid, accounts: [], running: false, stopRequested: false });
+  document.getElementById('postvideo-sessions-container').insertAdjacentHTML('beforeend', postVideoSessionCardHtml(sid));
+  populatePostVideoSourceSelect(sid);
+  loadMailAccountGroupsInto('postvideo-filter-group-' + sid);
+  return sid;
+}
+
+async function removePostVideoSession(sid) {
+  const session = postVideoSessions.get(sid);
+  if (session && session.running) {
+    await customAlert('Phiên đang chạy - bấm Dừng trước khi xóa.', { danger: true });
+    return;
+  }
+  postVideoSessions.delete(sid);
+  const el = document.getElementById('postvideo-session-' + sid);
+  if (el) el.remove();
+}
+
+// Nap danh sach nguon (DUNG CHUNG cho moi phien) roi cap nhat lai TUNG dropdown nguon cua
+// TUNG phien dang mo (giu nguyen lua chon hien tai cua tung phien neu con hop le).
+async function loadPostVideoSources() {
+  try {
+    const { sources } = await api('GET', '/api/video_sources');
+    lastPostVideoSources = sources || [];
+  } catch (e) {
+    lastPostVideoSources = [];
+  }
+  for (const sid of postVideoSessions.keys()) populatePostVideoSourceSelect(sid);
+  if (postVideoSessions.size === 0) addPostVideoSession();
+}
+
+function populatePostVideoSourceSelect(sid) {
+  const sel = document.getElementById('postvideo-source-sel-' + sid);
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = lastPostVideoSources.map(s =>
+    `<option value="${s.id}">${s.folder} (${(s.market || '').toUpperCase()}) - ${s.pending_count != null ? s.pending_count : '?'} pending</option>`
+  ).join('') || '<option value="">-- Chưa có nguồn nào, thêm ở tab "Quản lý nguồn video" --</option>';
+  if (current && lastPostVideoSources.some(s => String(s.id) === current)) sel.value = current;
+  onPostVideoSourceChange(sid);
+}
+
+// Dung chung voi dropdown "Nhóm GPM" cua tab mailacc (list_mail_account_groups()) nhung do
+// vao 1 <select> KHAC (id truyen vao) - tranh dung chung 1 <select> giua nhieu phien/tab.
+async function loadMailAccountGroupsInto(selectId) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  try {
+    const { groups } = await api('GET', '/api/mail_accounts/groups');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">-- Nhóm GPM: Tất cả --</option>' +
+      (groups || []).map(g => `<option value="${g.replace(/"/g, '&quot;')}">${g}</option>`).join('');
+    if (current) sel.value = current;
+  } catch (e) { /* im lang */ }
+}
+
+function currentPostVideoSource(sid) {
+  const el = document.getElementById('postvideo-source-sel-' + sid);
+  if (!el) return null;
+  return lastPostVideoSources.find(s => String(s.id) === String(el.value)) || null;
+}
+
+function onPostVideoSourceChange(sid) {
+  const s = currentPostVideoSource(sid);
+  document.getElementById('postvideo-source-info-' + sid).textContent = s
+    ? `Tổng ${s.total_count ?? '?'} | Đã đăng ${s.success_count ?? '?'} | Lỗi ${s.error_count ?? '?'} | Pending ${s.pending_count ?? '?'}`
+    : '';
+  document.getElementById('postvideo-market-label-' + sid).textContent = s ? `Market: ${s.market.toUpperCase()}` : '(chọn nguồn trước)';
+  document.getElementById('postvideo-accounts-tbody-' + sid).innerHTML = '<tr><td colspan="6" class="muted">Chưa nạp tài khoản - bấm "Nạp tài khoản theo lọc".</td></tr>';
+  const session = postVideoSessions.get(sid);
+  if (session) session.accounts = [];
+  document.getElementById('postvideo-capacity-info-' + sid).textContent = '';
+  loadPostVideoHistory(sid);
+}
+
+async function loadPostVideoAccounts(sid) {
+  const s = currentPostVideoSource(sid);
+  const infoEl = document.getElementById('postvideo-accounts-info-' + sid);
+  if (!s) {
+    await customAlert('Chưa chọn nguồn.', { danger: true });
+    return;
+  }
+  const groupGpm = document.getElementById('postvideo-filter-group-' + sid).value;
+  // mail_accounts.market luu CHU HOA ('TH'/'PH'/'MY', xem MAIL_MARKET_OPTIONS) nhung
+  // video_sources.market luu CHU THUONG (khop key cua shopee_video_post.MARKET_CONFIG,
+  // vd 'th') - PHAI uppercase truoc khi loc, khong thi where market=? so lech hoa/thuong ->
+  // luon ra rong (bug thuc te 2026-09-10: "Không có tài khoản nào khớp bộ lọc").
+  const params = new URLSearchParams({ market: s.market.toUpperCase(), limit: '500', with_today_count: '1' });
+  if (groupGpm) params.set('group_gpm', groupGpm);
+  infoEl.textContent = 'Đang nạp...';
+  const session = postVideoSessions.get(sid);
+  try {
+    const { accounts } = await api('GET', '/api/mail_accounts/list?' + params.toString());
+    if (session) session.accounts = accounts || [];
+    renderPostVideoAccountsTable(sid);
+    const withCookie = (accounts || []).filter(a => (a.cookie || '').trim()).length;
+    infoEl.textContent = `Đã nạp ${(accounts || []).length} tài khoản (${withCookie} có Cookie).`;
+  } catch (e) {
+    infoEl.textContent = 'Lỗi: ' + e.message;
+  }
+}
+
+function renderPostVideoAccountsTable(sid) {
+  const session = postVideoSessions.get(sid);
+  const tbody = document.getElementById('postvideo-accounts-tbody-' + sid);
+  const accounts = (session && session.accounts) || [];
+  tbody.innerHTML = accounts.map(a => {
+    const hasCookie = !!(a.cookie || '').trim();
+    const limit = a.rate_limit_video;
+    const today = a.posted_today || 0;
+    const atLimit = limit != null && today >= limit;
+    const disabled = !hasCookie || atLimit;
+    return `
+      <tr style="${disabled ? 'opacity:.5;' : ''}">
+        <td class="sel-cell"><input type="checkbox" class="postvideo-acc-sel-${sid}" data-id="${a.id}" onchange="updatePostVideoCapacityInfo(${sid})" ${hasCookie && !atLimit ? 'checked' : ''} ${disabled ? 'disabled' : ''}></td>
+        <td>${a.profile || a.email || a.shopee_id || ('#' + a.id)}</td>
+        <td>${hasCookie ? '<span style="color:var(--success-text);">✓</span>' : '<span style="color:var(--danger-text);">✗ Thiếu</span>'}</td>
+        <td>${(a.proxy || '').trim() ? '✓' : '-'}</td>
+        <td style="text-align:center;">${limit != null ? limit : '∞'}</td>
+        <td style="text-align:center;${atLimit ? 'color:var(--danger-text);font-weight:600;' : ''}">${today}${atLimit ? ' (đủ)' : ''}</td>
+      </tr>`;
+  }).join('') || '<tr><td colspan="6" class="muted">Không có tài khoản nào khớp bộ lọc.</td></tr>';
+  updatePostVideoCapacityInfo(sid);
+}
+
+function postVideoToggleAll(sid, cb) {
+  document.querySelectorAll(`.postvideo-acc-sel-${sid}:not(:disabled)`).forEach(el => { el.checked = cb.checked; });
+  updatePostVideoCapacityInfo(sid);
+}
+
+function postVideoSelectedAccountIds(sid) {
+  return Array.from(document.querySelectorAll(`.postvideo-acc-sel-${sid}:checked`)).map(el => parseInt(el.dataset.id, 10));
+}
+
+// Dung luong con lai HOM NAY cua TUNG tai khoan dang tich chon (trong PHIEN sid) - Map
+// accountId -> so con dang duoc (Infinity = khong gioi han). "Số lượng muốn đăng" la muc
+// tieu MOI TAI KHOAN (xem yeu cau nguoi dung 2026-09-10: nhap 1 + chon 2 tai khoan = MOI tai
+// khoan dang 1, KHONG PHAI tong 1 video chia deu) - ham nay chi de HIEN THI canh bao tai
+// khoan nao se tu dung som vi het Rate limit, KHONG dung de cap target chung nua.
+function postVideoAccountCapacities(sid) {
+  const session = postVideoSessions.get(sid);
+  const accounts = (session && session.accounts) || [];
+  const ids = new Set(postVideoSelectedAccountIds(sid));
+  const map = new Map();
+  for (const a of accounts) {
+    if (!ids.has(a.id)) continue;
+    map.set(a.id, a.rate_limit_video == null ? Infinity : Math.max(0, a.rate_limit_video - (a.posted_today || 0)));
+  }
+  return map;
+}
+
+function updatePostVideoCapacityInfo(sid) {
+  const el = document.getElementById('postvideo-capacity-info-' + sid);
+  if (!el) return;
+  const caps = postVideoAccountCapacities(sid);
+  if (!caps.size) { el.textContent = ''; return; }
+  const finiteVals = Array.from(caps.values()).filter(v => v !== Infinity);
+  el.textContent = finiteVals.length === 0
+    ? `${caps.size} tài khoản đã chọn - không giới hạn (không tài khoản nào đặt Rate limit). Mỗi tài khoản đăng ĐỘC LẬP theo "Số lượng muốn đăng".`
+    : `${caps.size} tài khoản đã chọn - tài khoản còn ít dung lượng nhất hôm nay: ${Math.min(...finiteVals)} video. Mỗi tài khoản đăng ĐỘC LẬP tới khi đạt "Số lượng muốn đăng" hoặc hết dung lượng riêng.`;
+}
+
+// Chia accountIds thanh N "bucket" KHONG GIAO NHAU (round-robin theo vi tri) - moi bucket
+// giao cho 1 worker rieng, chay Promise.all() song song. Chia bucket (thay vi N worker dung
+// CHUNG 1 hang doi xoay vong) de KHONG BAO GIO 2 worker cung nham 1 tai khoan cung luc -
+// khong can lock/dong bo gi them ben JS, tranh rieng cho tung worker tu quan ly. Bucket rong
+// (thua worker hon so tai khoan) bi loai - thua luong so tai khoan la vo ich, xem UI tooltip.
+function partitionAccountsForWorkers(accountIds, numThreads) {
+  const n = Math.max(1, Math.min(numThreads, accountIds.length));
+  const buckets = Array.from({ length: n }, () => []);
+  accountIds.forEach((id, i) => buckets[i % n].push(id));
+  return buckets.filter(b => b.length > 0);
+}
+
+// 1 "luong" (worker) - dang TUAN TU qua dung SO TAI KHOAN duoc giao (workerAccountIds),
+// hoan toan doc lap voi cac worker khac cua CUNG phien (khong dung chung rotation/index) -
+// nhieu worker CO THE cung goi post_next() tren CUNG 1 nguon gan nhu dong thoi, server da
+// dam bao khong trung sp_id (xem _claim_next_pending() trong affiliate_scrape_server.py).
+async function postVideoWorkerLoop(sid, sourceId, workerAccountIds, perAccountTarget, minDelay, maxDelay, postedByAccount, stats, session) {
+  let rotationIdx = 0;
+  while (!session.stopRequested) {
+    const activeIds = workerAccountIds.filter(id => postedByAccount.get(id) < perAccountTarget);
+    if (!activeIds.length) break; // tai khoan cua RIENG worker nay da du muc tieu
+    const rotated = activeIds.slice(rotationIdx % activeIds.length).concat(activeIds.slice(0, rotationIdx % activeIds.length));
+    rotationIdx++;
+    let res;
+    try {
+      res = await api('POST', `/api/video_sources/${sourceId}/post_next`, { account_ids: rotated }, 120000);
+    } catch (e) {
+      postVideoLog(sid, `✗ LỖI GỌI SERVER: ${e.message} - 1 luồng dừng.`);
+      break;
+    }
+    if (res.done) { postVideoLog(sid, `✓ Luồng dừng - nguồn đã hết video pending.`); break; }
+    if (res.blocked) { postVideoLog(sid, `⚠ Luồng dừng: ${res.message}`); break; }
+    if (res.retry) { await sleepMs(400); continue; } // video dang bi worker/phien KHAC giu - cho ngan roi thu lai, khong tinh vao "posted"
+    stats.posted++;
+    if (res.success) stats.ok++; else stats.fail++;
+    if (res.account_id != null && postedByAccount.has(res.account_id)) postedByAccount.set(res.account_id, postedByAccount.get(res.account_id) + 1);
+    const acctDone = res.account_id != null ? (postedByAccount.get(res.account_id) ?? '?') : '?';
+    postVideoLog(sid, `${res.success ? '✓' : '✗'} ${res.sp_id} (${res.account_label}: ${acctDone}/${perAccountTarget}) - ${res.success ? (res.video_link || 'post_id=' + res.post_id) : 'LỖI: ' + res.error} | còn ${res.pending_remaining} pending`);
+    if (stats.posted % 5 === 0) { loadPostVideoSources(); loadPostVideoHistory(sid); } // cap nhat dinh ky, khong phai moi video (tranh spam request tu nhieu worker cung luc)
+    if (session.stopRequested) break;
+    const delayMs = 1000 * (minDelay + Math.random() * (maxDelay - minDelay));
+    if (delayMs > 0) await sleepMs(delayMs);
+  }
+}
+
+async function startPostVideoRun(sid) {
+  const session = postVideoSessions.get(sid);
+  if (!session || session.running) return;
+  const s = currentPostVideoSource(sid);
+  if (!s) { await customAlert('Chưa chọn nguồn.', { danger: true }); return; }
+  const accountIds = postVideoSelectedAccountIds(sid);
+  if (!accountIds.length) { await customAlert('Chưa tích chọn tài khoản nào (hoặc tất cả đều thiếu Cookie/đã đạt rate limit).', { danger: true }); return; }
+  const minDelay = Math.max(0, parseFloat(document.getElementById('postvideo-min-delay-' + sid).value) || 0);
+  const maxDelay = Math.max(minDelay, parseFloat(document.getElementById('postvideo-max-delay-' + sid).value) || minDelay);
+  // "Số lượng muốn đăng" = muc tieu CHO MOI TAI KHOAN (xem yeu cau nguoi dung 2026-09-10) -
+  // KHONG PHAI tong so video ca phien. Vi du chon 2 tai khoan + nhap 1 -> MOI tai khoan
+  // dang 1 video (tong toi da 2), khong phai 1 video roi dung ngay.
+  const perAccountTarget = Math.max(1, parseInt(document.getElementById('postvideo-target-' + sid).value, 10) || 1);
+  // KHONG dat tran cung theo 1 con so gia dinh - gioi han that su phu thuoc bang thong/RAM
+  // cua may nay, nguoi dung tu tang dan va quan sat log loi de tim muc phu hop (xem tooltip
+  // o input). Chi chan cac gia tri vo ly (<=0 hoac qua lon do go nham).
+  const numThreads = Math.max(1, Math.min(1000, parseInt(document.getElementById('postvideo-threads-' + sid).value, 10) || 1));
+
+  const buckets = partitionAccountsForWorkers(accountIds, numThreads);
+
+  session.running = true;
+  session.stopRequested = false;
+  document.getElementById('postvideo-start-btn-' + sid).disabled = true;
+  document.getElementById('postvideo-stop-btn-' + sid).disabled = false;
+  document.getElementById('postvideo-remove-btn-' + sid).disabled = true;
+  postVideoLog(sid, `Bắt đầu đăng - nguồn "${s.folder}" (${s.market.toUpperCase()}), ${accountIds.length} tài khoản chia ${buckets.length} luồng song song, MỖI tài khoản đăng tối đa ${perAccountTarget} video.`);
+
+  // postedByAccount: dem so lan da THU dang (thanh cong lan that bai deu tinh) CUA TUNG tai
+  // khoan - CHIA SE giua cac worker de biet tai khoan nao da du muc tieu, nhung MOI id CHI
+  // thuoc 1 bucket/worker duy nhat (xem partitionAccountsForWorkers()) nen khong worker nao
+  // ghi de len ket qua cua worker khac.
+  const postedByAccount = new Map(accountIds.map(id => [id, 0]));
+  const stats = { posted: 0, ok: 0, fail: 0 };
+  try {
+    await Promise.all(buckets.map(bucket =>
+      postVideoWorkerLoop(sid, s.id, bucket, perAccountTarget, minDelay, maxDelay, postedByAccount, stats, session)
+    ));
+  } finally {
+    session.running = false;
+    document.getElementById('postvideo-start-btn-' + sid).disabled = false;
+    document.getElementById('postvideo-stop-btn-' + sid).disabled = true;
+    document.getElementById('postvideo-remove-btn-' + sid).disabled = false;
+    postVideoLog(sid, `Đã dừng. Tổng kết phiên: ${stats.posted} video (${stats.ok} thành công, ${stats.fail} lỗi) trên ${accountIds.length} tài khoản, ${buckets.length} luồng.`);
+    loadPostVideoSources();
+    loadPostVideoHistory(sid);
+  }
+}
+
+function stopPostVideoRun(sid) {
+  const session = postVideoSessions.get(sid);
+  if (!session) return;
+  session.stopRequested = true;
+  postVideoLog(sid, 'Đã yêu cầu dừng - sẽ dừng sau video đang xử lý.');
+}
+
+async function loadPostVideoHistory(sid) {
+  const s = currentPostVideoSource(sid);
+  const tbody = document.getElementById('postvideo-history-tbody-' + sid);
+  if (!s) { tbody.innerHTML = '<tr><td colspan="6" class="muted">Chọn nguồn để xem lịch sử.</td></tr>'; return; }
+  try {
+    const { logs } = await api('GET', `/api/video_sources/${s.id}/log?limit=100`);
+    tbody.innerHTML = (logs || []).map(r => `
+      <tr>
+        <td class="muted" style="white-space:nowrap;">${fmtLogTime(r.updated_at)}</td>
+        <td>${r.sp_id}</td>
+        <td><span class="ellipsis" style="max-width:200px;" title="${(r.product_name || '').replace(/"/g, '&quot;')}">${r.product_name || '-'}</span></td>
+        <td>${r.account_label || '<span class="muted">-</span>'}</td>
+        <td>${r.success ? '<span style="color:var(--success-text);">Thành công</span>' : '<span style="color:var(--danger-text);">Lỗi</span>'}</td>
+        <td>${r.success
+            ? (r.video_link ? `<a href="${r.video_link}" target="_blank" rel="noopener">${r.video_link}</a>` : (r.post_id || '-'))
+            : `<span class="ellipsis" style="max-width:260px;" title="${(r.error || '').replace(/"/g, '&quot;')}">${r.error || '-'}</span>`}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="6" class="muted">Chưa có lịch sử đăng cho nguồn này.</td></tr>';
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="6" class="muted">Lỗi tải lịch sử: ${e.message}</td></tr>`;
+  }
+}
+
 // ---- Get Shopee ID (hang loat): doc Username tu trang user/account/profile cua tung dong ----
 async function getShopeeIdsSelected(btn) {
   const ids = mailAccSelectedIds();
@@ -2922,6 +3611,7 @@ async function syncMailAccountsGpm(btn, silent) {
     const r = await api('POST', '/api/mail_accounts/gpm/sync', undefined, 60000);
     await loadMailAccounts();
     loadAllEngineGroups();
+    loadMailAccountGroups();
     if (!silent) {
       const parts = [`Đã kiểm tra ${r.checked} dòng có ID GPM/GEM.`];
       if (r.updated) parts.push(`Đã cập nhật tên Profile / GROUP GPM theo GPM/GEM: ${r.updated} dòng.`);

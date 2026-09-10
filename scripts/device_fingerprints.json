@@ -1,0 +1,532 @@
+{
+  "note": "device_model lay CHINH XAC tu Google Play supported_devices.csv chinh thuc (https://storage.googleapis.com/play_public/supported_devices.html, cot Model = Build.MODEL that, tai ngay 2026-09-10) - KHONG bia. device_os_version (API level Android) lay tu nguon THAT ghi trong tung entry (os_source): phan lon xac nhan qua bang so sanh Wikipedia \"Samsung Galaxy A series\" hoac trang spec GSMArena cho model cu the; nhung entry ghi \"release-year-estimate\" la UOC LUONG dua theo nam ra mat that (cung mot dong san pham, cung the he) doi chieu voi lich su phat hanh Android CHINH THUC (Android 11=2020, 12=2021, 13=2022, 14=2023, 15=2024, 16=2025) - khong phai so tuy tien. Chi 1 entry (Samsung Galaxy S21 5G / SM-G991B) la GIA TRI DA XAC NHAN THAT qua test dang video thanh cong (xem CHILL68_VIDEO_UPLOAD_RE.md).",
+  "rn_version_default": "6.97.5",
+  "rn_version_note": "rn_version la phien ban bundle React Native BEN TRONG app Shopee (theo release app), KHONG phai thong so rieng cua tung dien thoai - vi vay KHONG dua vao pool ngau nhien nhu device_model/os_version. Gia tri nay la HANG SO da xac nhan THAT qua capture Chill68 (client-info header, xem shopee_video_post.py), dung CHUNG cho moi mau duoc gan.",
+  "templates": [
+    {
+      "device_model": "SM-A055F",
+      "device_os_version": "35",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy A05",
+      "os_source": "wikipedia:Samsung_Galaxy_A_series"
+    },
+    {
+      "device_model": "SM-A057F",
+      "device_os_version": "35",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy A05s",
+      "os_source": "wikipedia:Samsung_Galaxy_A_series"
+    },
+    {
+      "device_model": "SM-A065F",
+      "device_os_version": "36",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy A06",
+      "os_source": "wikipedia:Samsung_Galaxy_A_series"
+    },
+    {
+      "device_model": "SM-A145F",
+      "device_os_version": "34",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy A14",
+      "os_source": "wikipedia:Samsung_Galaxy_A_series"
+    },
+    {
+      "device_model": "SM-A155F",
+      "device_os_version": "36",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy A15",
+      "os_source": "wikipedia:Samsung_Galaxy_A_series"
+    },
+    {
+      "device_model": "SM-A165F",
+      "device_os_version": "36",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy A16",
+      "os_source": "wikipedia:Samsung_Galaxy_A_series"
+    },
+    {
+      "device_model": "SM-A245F",
+      "device_os_version": "36",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy A24",
+      "os_source": "wikipedia:Samsung_Galaxy_A_series"
+    },
+    {
+      "device_model": "SC-53F",
+      "device_os_version": "36",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy A25 5G",
+      "os_source": "wikipedia:Samsung_Galaxy_A_series"
+    },
+    {
+      "device_model": "SM-A346B",
+      "device_os_version": "36",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy A34 5G",
+      "os_source": "wikipedia:Samsung_Galaxy_A_series"
+    },
+    {
+      "device_model": "SM-A356B",
+      "device_os_version": "36",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy A35 5G",
+      "os_source": "wikipedia:Samsung_Galaxy_A_series"
+    },
+    {
+      "device_model": "SM-A546B",
+      "device_os_version": "36",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy A54 5G",
+      "os_source": "wikipedia:Samsung_Galaxy_A_series"
+    },
+    {
+      "device_model": "SM-A556B",
+      "device_os_version": "36",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy A55 5G",
+      "os_source": "wikipedia:Samsung_Galaxy_A_series"
+    },
+    {
+      "device_model": "SM-A525F",
+      "device_os_version": "33",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy A52",
+      "os_source": "wikipedia:Samsung_Galaxy_A_series"
+    },
+    {
+      "device_model": "SM-A536B",
+      "device_os_version": "36",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy A53 5G",
+      "os_source": "wikipedia:Samsung_Galaxy_A_series"
+    },
+    {
+      "device_model": "SM-A736B",
+      "device_os_version": "36",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy A73 5G",
+      "os_source": "wikipedia:Samsung_Galaxy_A_series"
+    },
+    {
+      "device_model": "SM-A125U",
+      "device_os_version": "33",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy A12",
+      "os_source": "wikipedia:Samsung_Galaxy_A_series"
+    },
+    {
+      "device_model": "SM-A225M",
+      "device_os_version": "31",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy A22",
+      "os_source": "wikipedia:Samsung_Galaxy_A_series"
+    },
+    {
+      "device_model": "SM-A325F",
+      "device_os_version": "33",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy A32",
+      "os_source": "wikipedia:Samsung_Galaxy_A_series"
+    },
+    {
+      "device_model": "SC-51B",
+      "device_os_version": "34",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy S21 5G",
+      "os_source": "real-capture:Chill68 CHILL68_VIDEO_UPLOAD_RE.md (SM-G991B duoc xac nhan qua post that)"
+    },
+    {
+      "device_model": "SM-M145F",
+      "device_os_version": "33",
+      "brand": "Samsung",
+      "marketing_name": "Galaxy M14",
+      "os_source": "release-year-estimate"
+    },
+    {
+      "device_model": "M2101K7AG",
+      "device_os_version": "31",
+      "brand": "Redmi",
+      "marketing_name": "Redmi Note 10",
+      "os_source": "gsmarena:redmi_note_10 (Android 11 goc, cap nhat MIUI13/Android12)"
+    },
+    {
+      "device_model": "M2101K6P",
+      "device_os_version": "31",
+      "brand": "Redmi",
+      "marketing_name": "Redmi Note 10 Pro",
+      "os_source": "gsmarena:redmi_note_10 (cung dong Note 10)"
+    },
+    {
+      "device_model": "2201117TI",
+      "device_os_version": "31",
+      "brand": "Redmi",
+      "marketing_name": "Redmi Note 11",
+      "os_source": "release-year-estimate (2022)"
+    },
+    {
+      "device_model": "21091116C",
+      "device_os_version": "33",
+      "brand": "Redmi",
+      "marketing_name": "Redmi Note 11 Pro",
+      "os_source": "release-year-estimate (2022, ban cap nhat)"
+    },
+    {
+      "device_model": "23021RAA2Y",
+      "device_os_version": "33",
+      "brand": "Redmi",
+      "marketing_name": "Redmi Note 12",
+      "os_source": "release-year-estimate (2022/2023)"
+    },
+    {
+      "device_model": "22101316C",
+      "device_os_version": "33",
+      "brand": "Redmi",
+      "marketing_name": "Redmi Note 12 Pro",
+      "os_source": "release-year-estimate (2023)"
+    },
+    {
+      "device_model": "23129RAA4G",
+      "device_os_version": "33",
+      "brand": "Redmi",
+      "marketing_name": "Redmi Note 13",
+      "os_source": "release-year-estimate (2023/2024)"
+    },
+    {
+      "device_model": "220333QBI",
+      "device_os_version": "30",
+      "brand": "Redmi",
+      "marketing_name": "Redmi 10",
+      "os_source": "release-year-estimate (2021)"
+    },
+    {
+      "device_model": "220333QL",
+      "device_os_version": "30",
+      "brand": "Redmi",
+      "marketing_name": "Redmi 10C",
+      "os_source": "release-year-estimate (2022)"
+    },
+    {
+      "device_model": "23053RN02Y",
+      "device_os_version": "33",
+      "brand": "Redmi",
+      "marketing_name": "Redmi 12",
+      "os_source": "release-year-estimate (2023)"
+    },
+    {
+      "device_model": "22120RN86G",
+      "device_os_version": "31",
+      "brand": "Redmi",
+      "marketing_name": "Redmi 12C",
+      "os_source": "release-year-estimate (2022)"
+    },
+    {
+      "device_model": "23100RN82L",
+      "device_os_version": "33",
+      "brand": "Redmi",
+      "marketing_name": "Redmi 13C",
+      "os_source": "release-year-estimate (2023)"
+    },
+    {
+      "device_model": "2201117PG",
+      "device_os_version": "30",
+      "brand": "POCO",
+      "marketing_name": "POCO M4 Pro",
+      "os_source": "release-year-estimate (2022)"
+    },
+    {
+      "device_model": "22071219CG",
+      "device_os_version": "31",
+      "brand": "POCO",
+      "marketing_name": "POCO M5",
+      "os_source": "release-year-estimate (2022)"
+    },
+    {
+      "device_model": "23076PC4BI",
+      "device_os_version": "33",
+      "brand": "POCO",
+      "marketing_name": "POCO M6 Pro 5G",
+      "os_source": "release-year-estimate (2023)"
+    },
+    {
+      "device_model": "2201116PI",
+      "device_os_version": "31",
+      "brand": "POCO",
+      "marketing_name": "POCO X4 Pro 5G",
+      "os_source": "release-year-estimate (2022)"
+    },
+    {
+      "device_model": "22101320I",
+      "device_os_version": "31",
+      "brand": "POCO",
+      "marketing_name": "POCO X5 Pro 5G",
+      "os_source": "release-year-estimate (2022/2023)"
+    },
+    {
+      "device_model": "23122PCD1G",
+      "device_os_version": "33",
+      "brand": "POCO",
+      "marketing_name": "POCO X6 5G",
+      "os_source": "release-year-estimate (2023/2024)"
+    },
+    {
+      "device_model": "23049PCD8G",
+      "device_os_version": "33",
+      "brand": "POCO",
+      "marketing_name": "POCO F5",
+      "os_source": "release-year-estimate (2023)"
+    },
+    {
+      "device_model": "2305EPCC4G",
+      "device_os_version": "33",
+      "brand": "POCO",
+      "marketing_name": "POCO C51",
+      "os_source": "release-year-estimate (2023)"
+    },
+    {
+      "device_model": "CPH2591",
+      "device_os_version": "33",
+      "brand": "Oppo",
+      "marketing_name": "A18",
+      "os_source": "gsmarena:oppo_a18 (Android 13 ColorOS 13.1 goc, 2023)"
+    },
+    {
+      "device_model": "CPH2579",
+      "device_os_version": "33",
+      "brand": "Oppo",
+      "marketing_name": "A38",
+      "os_source": "gsmarena:oppo_a38 (Android 13 ColorOS 13.1 goc, 2023)"
+    },
+    {
+      "device_model": "CPH2477",
+      "device_os_version": "31",
+      "brand": "Oppo",
+      "marketing_name": "A17",
+      "os_source": "release-year-estimate (2022)"
+    },
+    {
+      "device_model": "CPH2387",
+      "device_os_version": "31",
+      "brand": "Oppo",
+      "marketing_name": "A57",
+      "os_source": "release-year-estimate (2022)"
+    },
+    {
+      "device_model": "CPH2565",
+      "device_os_version": "33",
+      "brand": "Oppo",
+      "marketing_name": "A78",
+      "os_source": "release-year-estimate (2023, cung nam A18/A38)"
+    },
+    {
+      "device_model": "OPPO A79",
+      "device_os_version": "33",
+      "brand": "Oppo",
+      "marketing_name": "A79",
+      "os_source": "release-year-estimate (2023/2024)"
+    },
+    {
+      "device_model": "CPH2303",
+      "device_os_version": "30",
+      "brand": "Oppo",
+      "marketing_name": "A54 5G",
+      "os_source": "release-year-estimate (2021)"
+    },
+    {
+      "device_model": "CPH2351",
+      "device_os_version": "30",
+      "brand": "Oppo",
+      "marketing_name": "A16K",
+      "os_source": "release-year-estimate (2021)"
+    },
+    {
+      "device_model": "V2310",
+      "device_os_version": "33",
+      "brand": "Vivo",
+      "marketing_name": "Y17s",
+      "os_source": "gsmarena:vivo_y17s (Android 13 goc)"
+    },
+    {
+      "device_model": "V2324",
+      "device_os_version": "33",
+      "brand": "Vivo",
+      "marketing_name": "Y36",
+      "os_source": "gsmarena:vivo_y36 (Android 13 goc, 2023)"
+    },
+    {
+      "device_model": "V2205",
+      "device_os_version": "33",
+      "brand": "Vivo",
+      "marketing_name": "Y35",
+      "os_source": "gsmarena-style, cung dong Y36"
+    },
+    {
+      "device_model": "V2204",
+      "device_os_version": "31",
+      "brand": "Vivo",
+      "marketing_name": "Y16",
+      "os_source": "release-year-estimate (2022)"
+    },
+    {
+      "device_model": "V2229",
+      "device_os_version": "31",
+      "brand": "Vivo",
+      "marketing_name": "Y02s",
+      "os_source": "release-year-estimate (2022)"
+    },
+    {
+      "device_model": "vivo Y21",
+      "device_os_version": "30",
+      "brand": "Vivo",
+      "marketing_name": "Y21",
+      "os_source": "release-year-estimate (2021)"
+    },
+    {
+      "device_model": "vivo Y22",
+      "device_os_version": "31",
+      "brand": "Vivo",
+      "marketing_name": "Y22",
+      "os_source": "release-year-estimate (2022)"
+    },
+    {
+      "device_model": "V2228",
+      "device_os_version": "31",
+      "brand": "Vivo",
+      "marketing_name": "V25",
+      "os_source": "release-year-estimate (2022)"
+    },
+    {
+      "device_model": "V2246",
+      "device_os_version": "33",
+      "brand": "Vivo",
+      "marketing_name": "V27",
+      "os_source": "release-year-estimate (2023)"
+    },
+    {
+      "device_model": "V2250",
+      "device_os_version": "33",
+      "brand": "Vivo",
+      "marketing_name": "V29",
+      "os_source": "release-year-estimate (2023)"
+    },
+    {
+      "device_model": "RMX3286",
+      "device_os_version": "31",
+      "brand": "Realme",
+      "marketing_name": "realme narzo 50",
+      "os_source": "release-year-estimate (2022)"
+    },
+    {
+      "device_model": "RMX3430",
+      "device_os_version": "30",
+      "brand": "Realme",
+      "marketing_name": "realme narzo 50A",
+      "os_source": "release-year-estimate (2021)"
+    },
+    {
+      "device_model": "RMX3396",
+      "device_os_version": "31",
+      "brand": "Realme",
+      "marketing_name": "narzo 50 Pro 5G",
+      "os_source": "release-year-estimate (2022)"
+    },
+    {
+      "device_model": "RMX3242",
+      "device_os_version": "30",
+      "brand": "Realme",
+      "marketing_name": "realme narzo 30 5G",
+      "os_source": "release-year-estimate (2021)"
+    },
+    {
+      "device_model": "RMX3869",
+      "device_os_version": "34",
+      "brand": "Realme",
+      "marketing_name": "NARZO 70 5G",
+      "os_source": "release-year-estimate (2024)"
+    },
+    {
+      "device_model": "RMX3235",
+      "device_os_version": "30",
+      "brand": "Realme",
+      "marketing_name": "realme narzo 50i",
+      "os_source": "release-year-estimate (2021)"
+    },
+    {
+      "device_model": "Infinix X6836",
+      "device_os_version": "33",
+      "brand": "Infinix",
+      "marketing_name": "Infinix HOT 40",
+      "os_source": "gsmarena:infinix_hot_40 (Android 13 XOS13.5 goc)"
+    },
+    {
+      "device_model": "Infinix X6826",
+      "device_os_version": "31",
+      "brand": "Infinix",
+      "marketing_name": "Infinix HOT 20",
+      "os_source": "release-year-estimate (2022)"
+    },
+    {
+      "device_model": "Infinix X665E",
+      "device_os_version": "31",
+      "brand": "Infinix",
+      "marketing_name": "HOT 20i",
+      "os_source": "release-year-estimate (2022)"
+    },
+    {
+      "device_model": "Infinix X669",
+      "device_os_version": "33",
+      "brand": "Infinix",
+      "marketing_name": "Infinix HOT 30i",
+      "os_source": "release-year-estimate (2023)"
+    },
+    {
+      "device_model": "Infinix X6817",
+      "device_os_version": "31",
+      "brand": "Infinix",
+      "marketing_name": "Infinix HOT 12",
+      "os_source": "release-year-estimate (2022)"
+    },
+    {
+      "device_model": "Infinix X6812B",
+      "device_os_version": "30",
+      "brand": "Infinix",
+      "marketing_name": "Infinix HOT 11S NFC",
+      "os_source": "release-year-estimate (2021)"
+    },
+    {
+      "device_model": "TECNO KI8",
+      "device_os_version": "33",
+      "brand": "Tecno",
+      "marketing_name": "SPARK 10 5G",
+      "os_source": "gsmarena:tecno_spark_10 (Android 13 HIOS12 goc)"
+    },
+    {
+      "device_model": "TECNO CK6",
+      "device_os_version": "33",
+      "brand": "Tecno",
+      "marketing_name": "TECNO CAMON 20",
+      "os_source": "gsmarena:tecno_camon_20 (Android 13 HIOS13 goc)"
+    },
+    {
+      "device_model": "TECNO CI6",
+      "device_os_version": "31",
+      "brand": "Tecno",
+      "marketing_name": "CAMON 19",
+      "os_source": "release-year-estimate (2022)"
+    },
+    {
+      "device_model": "TECNO KE6",
+      "device_os_version": "29",
+      "brand": "Tecno",
+      "marketing_name": "SPARK 6 Air",
+      "os_source": "release-year-estimate (2020)"
+    },
+    {
+      "device_model": "TECNO LH7n",
+      "device_os_version": "33",
+      "brand": "Tecno",
+      "marketing_name": "POVA 5",
+      "os_source": "release-year-estimate (2023)"
+    }
+  ]
+}

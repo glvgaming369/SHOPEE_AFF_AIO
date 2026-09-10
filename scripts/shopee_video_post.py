@@ -658,6 +658,7 @@ def shopee_create_post(
 def post_video_to_shopee(
     video_path: str, cookie_str: str, caption: str, merge_links: str,
     signing: SigningConfig, market: str = "th", proxy: str | None = None,
+    device_override: dict | None = None,
 ) -> PostResult:
     """Hàm tổng - chạy đủ 6 bước (preupload -> upload -> report -> đợi 10s -> precheck ->
     create) cho 1 video. Nhận thẳng (video_path, caption, merge_links) - xem
@@ -666,7 +667,15 @@ def post_video_to_shopee(
 
     proxy: dùng cho precheck/create - hữu ích để phân tán traffic khi chạy nhiều video/tài
     khoản cùng lúc - KHÔNG liên quan lỗi '400003 Post too many videos' (xem
-    shopee_create_post())."""
+    shopee_create_post()).
+
+    device_override: ghi đè 'device_model'/'os_version'/'rn_version' (vd lấy từ cột Device
+    Fingerprint của tài khoản trong bảng mail_accounts, xem tab "Quản lý account Shopee") -
+    CHỈ 3 field này được ghi đè, field nào rỗng/thiếu trong dict vẫn giữ nguyên DEFAULT_DEVICE.
+    CỐ Ý KHÔNG cho ghi đè 'client_version' (luôn suy từ cookie, xem bên dưới) lẫn device_id
+    (luôn là DEFAULT_DEVICE_ID cố định) - đây là 2 giá trị đã xác nhận PHẢI nhất quán/tĩnh,
+    khác android device fingerprint (model/os/rn) vốn hợp lý khi khác nhau giữa các tài khoản
+    (người dùng thật dùng nhiều dòng máy khác nhau)."""
     market_cfg = MARKET_CONFIG.get(market)
     if market_cfg is None:
         return PostResult(success=False, error=f"Market '{market}' chưa xác nhận cấu hình (xem MARKET_CONFIG)")
@@ -683,6 +692,11 @@ def post_video_to_shopee(
     # 'fallback' (_FALLBACK_APP_VERSION) - đúng cơ chế 2 biến thể của code gốc, xem
     # _cookie_with_app_version().
     device = {**DEFAULT_DEVICE, "client_version": cookie.get("shopee_app_version", DEFAULT_DEVICE["client_version"])}
+    if device_override:
+        for key in ("device_model", "os_version", "rn_version"):
+            value = device_override.get(key)
+            if value:
+                device[key] = value
     # device_id: PHẢI dùng ĐÚNG giá trị TĨNH này - xác nhận qua đọc source code gốc (biến
     # `clientInfoHeader` lặp lại y hệt giá trị này ở MỌI flow S1/S2/S3, hard-code cứng trong
     # tool, KHÔNG sinh ngẫu nhiên/theo thiết bị thật).

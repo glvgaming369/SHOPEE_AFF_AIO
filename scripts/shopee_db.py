@@ -290,6 +290,28 @@ create table if not exists video_post_log (
 );
 """
 
+# Danh sach "nguon video" nguoi dung dang ky qua tab "Quan ly nguon video" (UI) - moi dong la
+# 1 thu muc chua video + file *_results.xlsx (xem gsheet_video_scanner.build_matched_pool()).
+# Thong ke (total/success/error/pending_count) duoc CACHE o day thay vi tinh lai moi lan hien
+# thi (build_matched_pool() phai doc xlsx + liet ke thu muc - ton chi phi voi thu muc vai
+# nghin video) - CHI cap nhat khi nguoi dung bam "Cap nhat lai nguon"/"Cap nhat lai DB" (hoac
+# ngay sau khi them nguon/xoa video), xem update_video_source_stats(). last_scanned_at NULL =
+# chua tung quet lan nao (UI hien "Chua quet" thay vi "0").
+CREATE_VIDEO_SOURCES_TABLE_SQL = """
+create table if not exists video_sources (
+    id integer primary key autoincrement,
+    folder text not null unique,
+    market text not null,
+    total_count integer,
+    success_count integer,
+    error_count integer,
+    pending_count integer,
+    last_scan_error text,
+    last_scanned_at timestamp,
+    created_at timestamp default current_timestamp
+);
+"""
+
 
 def init_db(db_path=DB_PATH_DEFAULT):
     dirname = os.path.dirname(db_path)
@@ -455,6 +477,17 @@ def init_db(db_path=DB_PATH_DEFAULT):
     conn.execute(
         "create index if not exists idx_video_post_log_lookup on video_post_log(market, sp_id, success)"
     )
+    # Cot 'account_id' (them sau, 2026-09-10): tham chieu mail_accounts.id cua tai khoan THAT
+    # SU dung de dang video nay - chi duoc dien khi dang qua tab "Đăng video" (xem
+    # /api/video_sources/<id>/post_next trong affiliate_scrape_server.py); dong log tao boi
+    # post_videos_cli.py (dung 1 cookie chung ca thu muc, khong biet id tai khoan) VAN de
+    # NULL - khong bat buoc. Dung de: (1) tinh count_account_success_today() cho
+    # rate_limit_video, (2) hien "dang bang tai khoan nao" o lich su. KHONG dung foreign key
+    # cung (ON DELETE) vi log can GIU LAI ke ca sau khi tai khoan bi xoa khoi mail_accounts.
+    existing_video_post_log_cols = {row[1] for row in conn.execute("pragma table_info(video_post_log)").fetchall()}
+    if "account_id" not in existing_video_post_log_cols:
+        conn.execute("alter table video_post_log add column account_id integer")
+    conn.execute(CREATE_VIDEO_SOURCES_TABLE_SQL)
     conn.execute(CREATE_MAIL_ACCOUNTS_TABLE_SQL)
     # Cot 'slot' them sau - DB cu (tao truoc khi co dong nay trong
     # CREATE_MAIL_ACCOUNTS_TABLE_SQL) can ALTER TABLE rieng, cung ly do nhu xtra/fail_reason.
@@ -482,8 +515,36 @@ def init_db(db_path=DB_PATH_DEFAULT):
     # TABLE rieng, cung ly do nhu slot/profile/group_gpm/id_gpm/engine.
     if "cookie" not in existing_mail_cols:
         conn.execute("alter table mail_accounts add column cookie text default ''")
+    # Cot 'proxy' (them sau, 2026-09-10): nhap tay HOAC dong bo tu GPM/GEM (field 'raw_proxy'
+    # cua profile - xem antidetect.list_profiles(), mail_accounts_gpm_sync()) - DB cu can
+    # ALTER TABLE rieng, cung ly do nhu cookie/slot/profile/group_gpm/id_gpm/engine.
+    if "proxy" not in existing_mail_cols:
+        conn.execute("alter table mail_accounts add column proxy text default ''")
+    # Cot 'device_model'/'device_os_version'/'device_rn_version' (them sau, 2026-09-10): gia
+    # lap thiet bi Android RIENG THEO TUNG TAI KHOAN, dung cho pipeline dang video
+    # (shopee_video_post.py, xem DEFAULT_DEVICE). CO Y - KHONG them cot 'device_id': gia tri
+    # nay PHAI la 1 hang so TINH lay nguyen tu source Chill 68 that (xem
+    # DEFAULT_DEVICE_ID trong shopee_video_post.py) - da xac nhan bang test that sinh
+    # device_id khac nhau/ngau nhien theo tung request la nguyen nhan gay loi '400003 Post
+    # too many videos' dai dang, nen KHONG de nguoi dung tu sua gia tri nay theo tung tai
+    # khoan de tranh vo tinh lap lai dung bug do.
+    if "device_model" not in existing_mail_cols:
+        conn.execute("alter table mail_accounts add column device_model text default ''")
+    if "device_os_version" not in existing_mail_cols:
+        conn.execute("alter table mail_accounts add column device_os_version text default ''")
+    if "device_rn_version" not in existing_mail_cols:
+        conn.execute("alter table mail_accounts add column device_rn_version text default ''")
+    # Cot 'rate_limit_video' (them sau, 2026-09-10): gioi han so video/ngay cho tai khoan nay -
+    # CHI luu/hien thi o buoc nay, CHUA duoc pipeline dang video (shopee_video_post.py) doc va
+    # ap dung (video_post_log hien khong gan voi 1 dong mail_accounts cu the - can noi day
+    # rieng sau neu muon enforce that, xem yeu cau nguoi dung 2026-09-10). NULL = khong gioi han.
+    if "rate_limit_video" not in existing_mail_cols:
+        conn.execute("alter table mail_accounts add column rate_limit_video integer")
     conn.execute(
         "create index if not exists idx_mail_accounts_market on mail_accounts(market)"
+    )
+    conn.execute(
+        "create index if not exists idx_mail_accounts_group_gpm on mail_accounts(group_gpm)"
     )
     # Dong nhat ma thi truong: 'MS' la ma CU (malaysia) trong bang mail_accounts, chuyen thanh
     # 'MY' cho khop ma chuan ca he thong dung (PH/TH/MY/ID/VN/SG). Lenh idempotent - chay lai
@@ -950,26 +1011,64 @@ def already_posted(db_path, sp_id, market, folder):
 
 
 def log_video_post(db_path, sp_id, market, folder, product_name=None, merge_links=None,
-                    success=False, post_id=None, vid=None, error=None):
+                    success=False, post_id=None, vid=None, error=None, account_id=None):
     """Ghi/ghi de 1 dong ket qua dang video (on conflict tren unique(market, sp_id,
     folder) - xem CREATE_VIDEO_POST_LOG_TABLE_SQL). Goi 1 lan/video NGAY SAU khi
     post_video_to_shopee() tra ve (ca thanh cong lan that bai) - KHONG doi den cuoi batch,
     de 1 video loi giua chung (vd mat mang) khong lam mat log cac video da xong truoc do
-    trong cung lan chay."""
+    trong cung lan chay.
+
+    account_id: id trong mail_accounts cua tai khoan THAT SU dung de dang (None neu khong
+    biet - vd goi tu post_videos_cli.py, dung 1 cookie chung khong gan voi 1 dong cu the).
+    Xem count_account_success_today()."""
     conn = _connect(db_path)
     try:
         conn.execute(
             "insert into video_post_log "
-            "(sp_id, market, folder, product_name, merge_links, success, post_id, vid, error, updated_at) "
-            "values (?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp) "
+            "(sp_id, market, folder, product_name, merge_links, success, post_id, vid, error, account_id, updated_at) "
+            "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp) "
             "on conflict(market, sp_id, folder) do update set "
             "product_name=excluded.product_name, merge_links=excluded.merge_links, "
             "success=excluded.success, post_id=excluded.post_id, vid=excluded.vid, "
-            "error=excluded.error, updated_at=current_timestamp",
+            "error=excluded.error, account_id=excluded.account_id, updated_at=current_timestamp",
             (str(sp_id), market, str(folder), product_name, merge_links,
-             int(bool(success)), post_id, vid, error),
+             int(bool(success)), post_id, vid, error, account_id),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def count_account_success_today(db_path, account_id):
+    """So video account_id nay da dang THANH CONG trong ngay HOM NAY (gio server, dua vao
+    updated_at) - dung de enforce mail_accounts.rate_limit_video khi chon tai khoan cho 1 lan
+    dang (xem /api/video_sources/<id>/post_next). CHI dem dong co account_id KHOP (dong log
+    cu tao truoc khi co cot nay, hoac tao qua CLI khong truyen account_id, se la NULL va
+    khong bao gio khop - dung y, khong the quy cho tai khoan nao)."""
+    conn = _connect(db_path)
+    try:
+        row = conn.execute(
+            "select count(*) from video_post_log where account_id=? and success=1 "
+            "and date(updated_at) = date('now')",
+            (account_id,),
+        ).fetchone()
+        return row[0] if row else 0
+    finally:
+        conn.close()
+
+
+def count_success_today_by_account(db_path):
+    """Nhu count_account_success_today() nhung cho TAT CA tai khoan 1 luot (1 query GROUP BY
+    thay vi N query rieng) - dung khi hien thi bang chon tai khoan o tab "Đăng video" (co the
+    vai tram/nghin tai khoan, khong the goi tung dong). Tra ve dict {account_id: count}, tai
+    khoan khong co dong nao hom nay KHONG xuat hien trong dict (caller tu .get(id, 0))."""
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "select account_id, count(*) from video_post_log where account_id is not null "
+            "and success=1 and date(updated_at) = date('now') group by account_id"
+        ).fetchall()
+        return {r[0]: r[1] for r in rows}
     finally:
         conn.close()
 
@@ -998,6 +1097,123 @@ def list_video_post_log(db_path=DB_PATH_DEFAULT, market=None, folder=None, succe
         return [dict(r) for r in rows]
     finally:
         conn.close()
+
+
+def delete_video_post_log_rows(db_path, market, folder, success):
+    """Xoa cac dong video_post_log khop dung (market, folder, success) - dung cho nut 'Xoa
+    video đã đăng' (success=True) / 'Xoa video lỗi' (success=False) o tab 'Quan ly nguon
+    video'. Tra ve DANH SACH sp_id vua xoa (KHONG tu xoa file .mp4 that - caller (route) tu
+    quyet dinh co xoa file tren dia hay khong, ham nay CHI dong cham DB)."""
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "select sp_id from video_post_log where market=? and folder=? and success=?",
+            (market, str(folder), int(bool(success))),
+        ).fetchall()
+        sp_ids = [r[0] for r in rows]
+        conn.execute(
+            "delete from video_post_log where market=? and folder=? and success=?",
+            (market, str(folder), int(bool(success))),
+        )
+        conn.commit()
+        return sp_ids
+    finally:
+        conn.close()
+
+
+def clear_all_video_post_log(db_path):
+    """Xoa TOAN BO bang video_post_log (moi nguon/market) - nut 'Xoa DB' o tab 'Quan ly nguon
+    video'. KHONG dong toi video_sources (danh sach nguon van giu nguyen, chi mat lich su
+    dang - dung y nguoi dung 2026-09-10). Tra ve so dong da xoa."""
+    conn = _connect(db_path)
+    try:
+        cur = conn.execute("delete from video_post_log")
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+# --- Nguon video (video_sources) - xem CREATE_VIDEO_SOURCES_TABLE_SQL, tab "Quan ly nguon
+# video" tren UI. ---
+
+def add_video_source(db_path, folder, market):
+    """Dang ky 1 thu muc nguon moi. Trung 'folder' (da dang ky roi) -> raise ValueError ro
+    rang (unique constraint) de route tra loi 409, KHONG phai crash 500."""
+    conn = _connect(db_path)
+    try:
+        try:
+            cur = conn.execute(
+                "insert into video_sources (folder, market) values (?, ?)",
+                (str(folder), market),
+            )
+        except sqlite3.IntegrityError as e:
+            raise ValueError(f"Thư mục '{folder}' đã được đăng ký làm nguồn trước đó.") from e
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def list_video_sources(db_path):
+    conn = _connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("select * from video_sources order by id desc").fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_video_source(db_path, source_id):
+    conn = _connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("select * from video_sources where id=?", (source_id,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def delete_video_source(db_path, source_id):
+    """Go dang ky 1 nguon - KHONG dong toi video_post_log (lich su dang cua thu muc do van
+    GIU NGUYEN, tra cuu lai duoc neu dang ky lai dung duong dan sau nay - dung y nguoi dung
+    2026-09-10)."""
+    conn = _connect(db_path)
+    try:
+        cur = conn.execute("delete from video_sources where id=?", (source_id,))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def update_video_source_stats(db_path, source_id, total_count=None, success_count=None,
+                               error_count=None, pending_count=None, last_scan_error=None):
+    """Ghi lai ket qua 1 lan quet (xem shopee_video_post.build_matched_pool() + dem tu
+    video_post_log o tang route) - luon cap nhat last_scanned_at=now, KE CA khi quet loi
+    (last_scan_error co gia tri, cac count khac co the None -> giu nguyen gia tri cu thay vi
+    ve 0, tranh hien thi sai '0 video' chi vi lan quet nay loi tam thoi vd thieu quyen doc)."""
+    current = get_video_source(db_path, source_id)
+    if not current:
+        return None
+    conn = _connect(db_path)
+    try:
+        conn.execute(
+            "update video_sources set total_count=?, success_count=?, error_count=?, "
+            "pending_count=?, last_scan_error=?, last_scanned_at=current_timestamp where id=?",
+            (
+                total_count if total_count is not None else current["total_count"],
+                success_count if success_count is not None else current["success_count"],
+                error_count if error_count is not None else current["error_count"],
+                pending_count if pending_count is not None else current["pending_count"],
+                last_scan_error, source_id,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_video_source(db_path, source_id)
 
 
 # --- Hang doi (queue) phang pending/done/fail - xem C:\Users\Administrator\.claude\
@@ -2702,9 +2918,12 @@ def add_mail_accounts_manual(db_path, lines):
 def import_mail_accounts_from_rows(db_path, rows):
     """Nhap lai danh sach 'Tai khoan da tao' tu file .xlsx dung dinh dang cot cua
     export_mail_accounts_xlsx() (Full info, Email, PassEmail, Shopee_id, Device, Profile,
-    Slot, Market, Shopee_code, Thoi gian tao) - dung cho nut 'Import Excel' canh 'Xuat Excel',
-    vd khoi phuc du lieu sau khi bam nham 'Xoa tat ca' hoac chuyen sang may khac. Moi dong la
-    1 dict {"full_info", "shopee_id", "device", "profile", "slot", "market", "shopee_code"}.
+    Group GPM, ID GPM, Slot, Market, Shopee_code, Proxy, Device Model/OS Version/RN Version,
+    Rate Limit Video, Thoi gian tao) - dung cho nut 'Import Excel' canh 'Xuat Excel', vd khoi
+    phuc du lieu sau khi bam nham 'Xoa tat ca' hoac chuyen sang may khac. Moi dong la 1 dict
+    {"full_info", "shopee_id", "device", "profile", "group_gpm", "id_gpm", "slot", "market",
+    "shopee_code", "proxy", "device_model", "device_os_version", "device_rn_version",
+    "rate_limit_video"}.
     Email/PassEmail trong file KHONG dung truc tiep - luon parse lai tu full_info (nguon du
     lieu goc, co ca refresh_token/client_id ma 2 cot do khong co) bang
     dongvanfb_client.parse_mail_line(). Bo qua dong full_info rong/khong parse duoc, VA bo
@@ -2742,6 +2961,8 @@ def import_mail_accounts_from_rows(db_path, rows):
             market_val = _cell_str(row.get("market")).upper()
             if market_val == "MS":  # ma cu cua Malaysia -> chuan hoa thanh 'MY'
                 market_val = "MY"
+            rate_limit_raw = _cell_str(row.get("rate_limit_video"))
+            rate_limit_val = int(rate_limit_raw) if rate_limit_raw.isdigit() else None
             parsed_rows.append((
                 full_info, parsed["email"], parsed["password"], parsed["refresh_token"],
                 parsed["client_id"], "import", None,
@@ -2750,14 +2971,18 @@ def import_mail_accounts_from_rows(db_path, rows):
                 _cell_str(row.get("id_gpm")),
                 _cell_str(row.get("slot")), market_val or "PH",
                 _cell_str(row.get("shopee_code")) or None,
+                _cell_str(row.get("proxy")), _cell_str(row.get("device_model")),
+                _cell_str(row.get("device_os_version")), _cell_str(row.get("device_rn_version")),
+                rate_limit_val,
             ))
         if not parsed_rows:
             return {"added": 0, "skipped_duplicate": skipped_duplicate, "invalid": invalid}
         conn.executemany(
             "insert into mail_accounts (full_info, email, password, refresh_token, "
             "client_id, account_type, order_code, shopee_id, device, profile, group_gpm, "
-            "id_gpm, slot, market, shopee_code) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-            "?, ?, ?, ?)",
+            "id_gpm, slot, market, shopee_code, proxy, device_model, device_os_version, "
+            "device_rn_version, rate_limit_video) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+            "?, ?, ?, ?, ?, ?, ?, ?, ?)",
             parsed_rows,
         )
         conn.commit()
@@ -2766,7 +2991,7 @@ def import_mail_accounts_from_rows(db_path, rows):
         conn.close()
 
 
-def list_mail_accounts(db_path, market=None, slot=None, search=None, limit=500):
+def list_mail_accounts(db_path, market=None, slot=None, search=None, group_gpm=None, limit=500):
     conn = _connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
@@ -2778,6 +3003,9 @@ def list_mail_accounts(db_path, market=None, slot=None, search=None, limit=500):
         if slot:
             where.append("slot = ?")
             params.append(slot)
+        if group_gpm:
+            where.append("group_gpm = ?")
+            params.append(group_gpm)
         if search:
             where.append("(email like ? or shopee_id like ? or device like ?)")
             like = f"%{search}%"
@@ -2789,6 +3017,22 @@ def list_mail_accounts(db_path, market=None, slot=None, search=None, limit=500):
         params.append(limit)
         rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def list_mail_account_groups(db_path):
+    """Danh sach GROUP GPM/GEM khac rong DANG CO trong DB (khong phan biet engine - group_gpm
+    la 1 cot text dung chung) - dung cho dropdown loc "Nhom GPM" tren UI (xem yeu cau nguoi
+    dung 2026-09-10). Lay theo TOAN BO bang (khong bi anh huong boi filter market/slot dang
+    ap dung tren UI), sap A-Z."""
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "select distinct group_gpm from mail_accounts "
+            "where group_gpm is not null and trim(group_gpm) != '' order by group_gpm collate nocase"
+        ).fetchall()
+        return [r[0] for r in rows]
     finally:
         conn.close()
 
@@ -2840,12 +3084,23 @@ def get_mail_account(db_path, account_id):
         conn.close()
 
 
-def update_mail_account_fields(db_path, account_id, shopee_id=None, device=None, profile=None, slot=None, market=None, group_gpm=None, id_gpm=None, engine=None, cookie=None):
+def update_mail_account_fields(db_path, account_id, shopee_id=None, device=None, profile=None, slot=None, market=None, group_gpm=None, id_gpm=None, engine=None, cookie=None, proxy=None, device_model=None, device_os_version=None, device_rn_version=None, rate_limit_video=None):
     """Cap nhat MOT PHAN cot nguoi dung tu nhap (tham so None = giu nguyen), dung cho nut
-    luu tung dong tren UI khi doi Shopee_id/Device/Profile/Slot/Market/Group_GPM/Id_GPM/Engine/Cookie."""
+    luu tung dong tren UI khi doi Shopee_id/Device/Profile/Slot/Market/Group_GPM/Id_GPM/
+    Engine/Cookie/Proxy/Device fingerprint/Rate limit video.
+
+    rate_limit_video: rieng gia tri nay CHO PHEP ghi de thanh chuoi rong '' -> None (xoa gioi
+    han) - khac cac field text khac coi '' la "khong doi" (None param). UI gui '' khi nguoi
+    dung xoa trang o nhap so."""
     current = get_mail_account(db_path, account_id)
     if not current:
         return None
+    if rate_limit_video is None:
+        rate_limit_val = current.get("rate_limit_video")
+    elif rate_limit_video == "":
+        rate_limit_val = None
+    else:
+        rate_limit_val = int(rate_limit_video)
     new_vals = {
         "shopee_id": shopee_id if shopee_id is not None else current["shopee_id"],
         "device": device if device is not None else current["device"],
@@ -2856,16 +3111,24 @@ def update_mail_account_fields(db_path, account_id, shopee_id=None, device=None,
         "market": market if market is not None else current["market"],
         "engine": (str(engine).strip().lower() or "gpm") if engine is not None else (current.get("engine") or "gpm"),
         "cookie": cookie if cookie is not None else current.get("cookie", ""),
+        "proxy": proxy if proxy is not None else current.get("proxy", ""),
+        "device_model": device_model if device_model is not None else current.get("device_model", ""),
+        "device_os_version": device_os_version if device_os_version is not None else current.get("device_os_version", ""),
+        "device_rn_version": device_rn_version if device_rn_version is not None else current.get("device_rn_version", ""),
+        "rate_limit_video": rate_limit_val,
     }
     conn = _connect(db_path)
     try:
         conn.execute(
             "update mail_accounts set shopee_id=?, device=?, profile=?, group_gpm=?, id_gpm=?, "
-            "slot=?, market=?, engine=?, cookie=? where id=?",
+            "slot=?, market=?, engine=?, cookie=?, proxy=?, device_model=?, device_os_version=?, "
+            "device_rn_version=?, rate_limit_video=? where id=?",
             (
                 new_vals["shopee_id"], new_vals["device"], new_vals["profile"],
                 new_vals["group_gpm"], new_vals["id_gpm"],
-                new_vals["slot"], new_vals["market"], new_vals["engine"], new_vals["cookie"], account_id,
+                new_vals["slot"], new_vals["market"], new_vals["engine"], new_vals["cookie"],
+                new_vals["proxy"], new_vals["device_model"], new_vals["device_os_version"],
+                new_vals["device_rn_version"], new_vals["rate_limit_video"], account_id,
             ),
         )
         conn.commit()
