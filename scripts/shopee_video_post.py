@@ -59,7 +59,13 @@ _POST_ANTI_BOT_MAX_ATTEMPTS = 4
 _POST_ANTI_BOT_RETRY_DELAY_SECONDS = 2  # nhân dần theo số lần đã thử (2s, 4s, 6s...)
 _AFTER_REPORT_WAIT_SECONDS = 10  # Shopee cần thời gian xử lý/transcode sau reportupload
 
-# Cấu hình theo market - CHỈ 'th' đã xác nhận bằng capture thật. Xem docstring module.
+# Cấu hình theo market - 'th' VÀ 'my' đã xác nhận bằng post THÀNH CÔNG THẬT (không chỉ
+# capture). 'ph' domain đoán ĐÚNG (resolve ra hạ tầng Shopee thật) nhưng CHƯA post được -
+# xem docstring MARKET_CONFIG["ph"] bên dưới + CHILL68_VIDEO_UPLOAD_RE.md mục "Chưa xác
+# nhận". Domain của 'ph'/'my' suy theo ĐÚNG pattern đặt tên domain của 'th' (sv.shopee.{tld},
+# up-ws-{market}.vod.susercontent.com, api-quic.mms.shopee.{tld}). 'language' lấy ĐÚNG giá
+# trị field 'language' trong cookie thật PH/MY người dùng cung cấp (cả 2 đều 'en', khác 'th'
+# của TH) - không suy đoán.
 MARKET_CONFIG = {
     "th": {
         "host": "shopee.co.th",
@@ -76,6 +82,33 @@ MARKET_CONFIG = {
         "video_cdn": "down-ws-global.vod.susercontent.com",
         "timezone": "Asia/Bangkok",
         "language": "th",
+    },
+    "ph": {
+        # DOMAIN ĐÚNG (đã verify DNS resolve ra hạ tầng Shopee thật) nhưng POST BỊ CHẶN
+        # 418/code 90309999 (anti-bot) dù retry đủ 4 lần - test thật 2026-09-10. Nghi vấn
+        # chính: PH cần gọi server ký RIÊNG `phServer2Url = http://157.66.24.236:3004` (xem
+        # creditInfo mục 4 trong CHILL68_VIDEO_UPLOAD_RE.md) thay vì dùng chung server2_url
+        # như TH/MY - server đó CÒN SỐNG nhưng chưa capture được path/định dạng request thật.
+        # SigningConfig hiện KHÔNG có chỗ override signing server theo market - cần thêm nếu
+        # xác nhận đúng là do server ký riêng.
+        "host": "shopee.ph",
+        "sv": "sv.shopee.ph",
+        "api_mms": "api-quic.mms.shopee.ph",
+        "wscloud": "up-ws-ph.vod.susercontent.com",
+        "video_cdn": "down-ws-global.vod.susercontent.com",
+        "timezone": "Asia/Manila",
+        "language": "en",  # lấy ĐÚNG từ field 'language' trong cookie PH thật (upload/PH/ph.txt)
+    },
+    "my": {
+        # ĐÃ XÁC NHẬN bằng post THÀNH CÔNG THẬT (2026-09-10, 3/3 video) - domain đoán theo
+        # pattern là ĐÚNG, dùng CHUNG server2_url với TH (không cần server ký riêng như PH).
+        "host": "shopee.com.my",
+        "sv": "sv.shopee.com.my",
+        "api_mms": "api-quic.mms.shopee.com.my",
+        "wscloud": "up-ws-my.vod.susercontent.com",
+        "video_cdn": "down-ws-global.vod.susercontent.com",
+        "timezone": "Asia/Kuala_Lumpur",
+        "language": "en",  # lấy ĐÚNG từ field 'language' trong cookie MY thật (upload/MY/MY.txt)
     },
 }
 

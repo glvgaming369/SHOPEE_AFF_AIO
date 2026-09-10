@@ -52,9 +52,24 @@ QUOCGIA_MAP['th'] = {
 }
 ```
 
-> Chưa xác nhận VN/PH cụ thể — nhưng theo pattern trên, đoán hợp lý: `sv.shopee.vn`, `up-ws-vn.vod.susercontent.com`,
-> `sv.shopee.ph`, `up-ws-ph.vod.susercontent.com`. Cần bắt lại 1 lần với account/profile chạy market VN hoặc PH
-> để xác nhận (dùng lại watcher trong mục 6).
+> Chưa xác nhận VN cụ thể — nhưng theo pattern trên, đoán hợp lý: `sv.shopee.vn`,
+> `up-ws-vn.vod.susercontent.com`. Cần bắt lại 1 lần với account/profile chạy market VN để
+> xác nhận (dùng lại watcher trong mục 6).
+>
+> **MY: ĐÃ XÁC NHẬN bằng post thành công thật** (2026-09-10, 3/3 video, xem MARKET_CONFIG["my"]
+> trong `scripts/shopee_video_post.py`) - domain đoán theo đúng pattern (`sv.shopee.com.my`,
+> `up-ws-my.vod.susercontent.com`, `api-quic.mms.shopee.com.my`) là ĐÚNG, và **dùng CHUNG
+> server ký `server2Url` với TH** (không cần server riêng).
+>
+> **PH: domain đoán ĐÚNG** (`sv.shopee.ph`/`up-ws-ph...`/`shopee.ph` đều resolve ra hạ tầng
+> Shopee thật) nhưng **KHÔNG post được** - bị chặn `418`/`code 90309999` (anti-bot) ở precheck
+> dù đã retry đủ 4 lần (khác hẳn pattern xác suất của TH, thường qua sau 1-2 lần). Nghi vấn
+> chính: PH cần gọi đúng server ký RIÊNG `phServer2Url = http://157.66.24.236:3004` (xem
+> `creditInfo` mục 4) thay vì dùng chung `server2Url` như TH/MY - server này CÒN SỐNG thật
+> (`GET /` trả `{"message":"API is running successfully"}`) nhưng **chưa capture được** request/
+> response thật gửi tới nó (không có trong log Frida cũ) nên chưa biết đúng path/định dạng
+> body (`/api/sign` kiểu server2, hay `/generate` + base64 body kiểu server1). Cần bắt lại
+> bằng Frida khi Chill 68 đăng 1 video PH thật (dùng lại watcher mục 6) để xác nhận.
 
 ## 3. Toàn bộ pipeline (đúng thứ tự thực thi)
 
