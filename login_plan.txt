@@ -1,0 +1,11 @@
+Thiết kế module login
+1. Truy cập https://shopee.ph/user/account/profile
+1.1 Xuất hiện popup chọn ngôn ngữ : //*[text()="Select Your Language"]/parent::*//parent::*//*[text()="English"] => Click chọn English
+2. Đợi xuất hiện : //*[@name="loginKey"] => nhập mail; //*[@type="password"] => nhập shopee_pass
+3. Click : /button[text()="Log In" and not(@disabled)] => Để login
+Các trường hợp có thể xảy ra sau khi click Login:
+4. Đợi xuất hiện : //*[text()="my profile"] hoặc URL là : https://shopee.ph/user/account/profile => Login thành công!
+6. Xuất hiện : //*[text()="Your account and/or password is incorrect, please try again"] => Sai thông tin đăng nhập => Fail
+5. Shopee bắt xác thực link liên kết qua email xuất hiện : //button[@aria-label="Verify by Email Link"] => click nó
+	- Đợi xuất hiện : //*[text()="Please respond to the notification sent via Email to"] => delay 5s để shopee gửi link kích hoạt => gọi đến module kích hoạt link đăng nhập để active lên tab 1 và đợi : //*[text()="Sign-in attempt has been approved."] => chuyển sang tab 0 (tab login shopee)
+	- sau khi active thành công => chuyển về đợi bước 4

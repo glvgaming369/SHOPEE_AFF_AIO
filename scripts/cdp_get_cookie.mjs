@@ -21,7 +21,10 @@
 //       [--gpm-base http://127.0.0.1:9495] [--gem-base http://127.0.0.1:1010]
 //       [--timeout 60000]
 // exit 0 khi da phan loai xong (ke ca login/captcha), exit !=0 khi loi fatal (khong start
-// duoc profile / khong CDP). Voi login/captcha de cua so do lai cho nguoi dung xu ly.
+// duoc profile / khong CDP). KHAC cdp_get_shopee_id.mjs (van de cua so mo cho nguoi dung xu ly
+// login/captcha) - o day LUON dong browser (GPM stop / GEM close) truoc khi thoat, CA THANH
+// CONG LAN THAT BAI (xem closeProfile(), yeu cau nguoi dung 2026-09-11), tranh tich luy nhieu
+// cua so trinh duyet mo lai khi chay hang loat "Get Cookie".
 
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : d; };
 const ENGINE = arg('--engine', 'gpm');
@@ -50,7 +53,20 @@ const ft = (u, opts = {}) => {
 };
 
 function out(obj) { process.stdout.write(JSON.stringify(obj) + '\n'); }
-function fail(status, detail) { out({ status, cookie: null, url: URL, detail }); process.exit(0); }
+
+// Dong browser (GPM stop / GEM close) sau khi DA CO KET QUA - THANH CONG hay THAT BAI deu dong
+// (khac cac nut khac nhu Get ID van co y de cua so mo lai cho nguoi dung xu ly login/captcha) -
+// xem yeu cau nguoi dung 2026-09-11 "sau khi lấy thành công hoặc thất bại thì cũng đóng trình
+// duyệt lại". Best-effort (nuot loi) - khong lam hong ket qua da co du dong khong thanh cong.
+async function closeProfile() {
+  try {
+    const base = ENGINE === 'gem' ? GEM_BASE : GPM_BASE;
+    const path = ENGINE === 'gem' ? `/api/profiles/close/${PROFILE}` : `/api/v1/profiles/stop/${PROFILE}`;
+    await ft(base + path, { ms: 20000 });
+  } catch (e) {}
+}
+
+async function fail(status, detail) { out({ status, cookie: null, url: URL, detail }); await closeProfile(); process.exit(0); }
 
 async function startProfile() {
   const base = ENGINE === 'gem' ? GEM_BASE : GPM_BASE;
@@ -168,16 +184,16 @@ async function main() {
   let st;
   try { st = await startProfile(); }
   catch (e) { process.stderr.write('START_ERR: ' + e.message + '\n'); process.exit(3); }
-  if (!(await waitCdpUp(st.port))) { process.stderr.write('CDP khong len port ' + st.port + '\n'); process.exit(4); }
+  if (!(await waitCdpUp(st.port))) { process.stderr.write('CDP khong len port ' + st.port + '\n'); await closeProfile(); process.exit(4); }
   const picked = await pickTab(st.port, URL);
-  if (!picked) { process.stderr.write('Mo tab that bai\n'); process.exit(5); }
+  if (!picked) { process.stderr.write('Mo tab that bai\n'); await closeProfile(); process.exit(5); }
   const cdp = new Cdp(picked.tab.webSocketDebuggerUrl);
-  try { await cdp.connect(); } catch (e) { process.stderr.write('WS loi: ' + e.message + '\n'); process.exit(6); }
+  try { await cdp.connect(); } catch (e) { process.stderr.write('WS loi: ' + e.message + '\n'); await closeProfile(); process.exit(6); }
   await cdp.send('Page.enable').catch(() => {});
   await cdp.send('Network.enable').catch(() => {});
   await cdp.send('Runtime.enable').catch(() => {});
   if (picked.needsNavigate) {
-    try { await cdp.send('Page.navigate', { url: URL }); } catch (e) { process.stderr.write('NAV loi: ' + (e && e.message) + '\n'); process.exit(7); }
+    try { await cdp.send('Page.navigate', { url: URL }); } catch (e) { process.stderr.write('NAV loi: ' + (e && e.message) + '\n'); await closeProfile(); process.exit(7); }
   }
 
   const deadline = Date.now() + TIMEOUT;
@@ -193,8 +209,8 @@ async function main() {
     await sleep(500);
   }
 
-  if (/\/login(\?|$)/.test(current) || /accounts\.shopee/.test(current)) { fail('no_login', 'Chua dang nhap: ' + current); return; }
-  if (/\/verify\/(captcha|traffic)/.test(current)) { fail('captcha', 'Bi chan captcha/traffic: ' + current); return; }
+  if (/\/login(\?|$)/.test(current) || /accounts\.shopee/.test(current)) { await fail('no_login', 'Chua dang nhap: ' + current); return; }
+  if (/\/verify\/(captcha|traffic)/.test(current)) { await fail('captcha', 'Bi chan captcha/traffic: ' + current); return; }
 
   // Network.getCookies({urls}) - GIONG chrome.cookies.getAll({url}) cua extension mau: chi
   // tra ve dung nhung cookie se duoc gui kem request toi URL nay (khop domain/path chuan cua
@@ -220,7 +236,7 @@ async function main() {
   const loggedIn = !!(spcU && spcU.value && spcU.value.trim() !== '' && spcU.value !== '-');
   if (!loggedIn) {
     const names = cookies.map((c) => c.name).join(',') || '(khong co cookie nao khop URL)';
-    fail('no_login', `Khong tim thay SPC_U hop le tai ${current} - cookie doc duoc: ${names}` + (lastCookieErr ? ` | loi: ${lastCookieErr}` : ''));
+    await fail('no_login', `Khong tim thay SPC_U hop le tai ${current} - cookie doc duoc: ${names}` + (lastCookieErr ? ` | loi: ${lastCookieErr}` : ''));
     return;
   }
 
@@ -232,6 +248,7 @@ async function main() {
   const cookieString = cookies.map((c) => `${c.name}=${c.value}`).join('; ') + (suffix ? '; ' + suffix : '');
   out({ status: 'ok', cookie: cookieString, url: current, detail: 'Lay tu CDP Network.getCookies (' + cookies.length + ' cookie).' });
   cdp.close();
+  await closeProfile();
   process.exit(0);
 }
 

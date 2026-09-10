@@ -403,6 +403,148 @@
   </div>
 </div>
 
+<!-- Popup rieng cho "Tạo tên profile" hang loat (tien to + hau to so tu nhien tang dan) -
+     tach khoi #modal-overlay vi can 2 o nhap rieng biet, khac cac mode alert/confirm/prompt
+     (1 message + toi da 1 o nhap) da co san. Dung lai CUNG CSS class .modal-* de dong bo giao
+     dien. -->
+<div id="profile-name-modal-overlay" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-icon" id="profile-name-modal-icon">✎</div>
+    <div class="modal-message">Tạo tên profile hàng loạt cho <b id="profile-name-modal-count">0</b> dòng đang tích chọn (theo đúng thứ tự hiển thị):</div>
+    <div style="margin-top:14px; display:flex; flex-direction:column; gap:12px;">
+      <label style="font-size:13px; font-weight:600; color:var(--ink);">Tiền tố
+        <input type="text" id="profile-name-prefix" placeholder="Ví dụ: PH-" oninput="updateProfileNamePreview()" style="width:100%; margin-top:4px; padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); box-sizing:border-box; font-size:13.5px;">
+      </label>
+      <label style="font-size:13px; font-weight:600; color:var(--ink);">Hậu tố bắt đầu (số tự nhiên - để trống mặc định 00001)
+        <input type="text" id="profile-name-suffix" placeholder="00001" oninput="updateProfileNamePreview()" style="width:100%; margin-top:4px; padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); box-sizing:border-box; font-size:13.5px; font-family:var(--font-mono);">
+      </label>
+      <div class="muted" id="profile-name-preview" style="font-size:12.5px;"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="secondary" id="profile-name-cancel-btn">Hủy</button>
+      <button id="profile-name-ok-btn">Đồng ý</button>
+    </div>
+  </div>
+</div>
+
+<!-- Popup rieng cho "Gom nhóm" hang loat - 1 dropdown chon nhom GPM/GEM THAT (lay truc tiep tu
+     /api/engines/groups, xem bulkAssignGroup() - KHONG dung /api/mail_accounts/groups vi ham
+     do chi liet ke ten nhom DA TUNG dung trong DB local, se bo sot nhom moi tao ben GPM/GEM
+     chua co profile nao tro toi). LUU Y (hien trong message): dong DA CO GPM ID (profile that
+     da ton tai) se bi "Đồng bộ GPM" ghi DE LAI ve dung nhom that o lan sync ke tiep - nut nay
+     chu yeu huu ich cho dong CHUA co GPM ID. -->
+<div id="group-assign-modal-overlay" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-icon" id="group-assign-modal-icon">🗂</div>
+    <div class="modal-message">Gom nhóm cho <b id="group-assign-modal-count">0</b> dòng đang tích chọn:</div>
+    <div style="margin-top:14px; display:flex; flex-direction:column; gap:8px;">
+      <select id="group-assign-select" style="width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); box-sizing:border-box; font-size:13.5px;">
+        <option value="">-- Chọn nhóm GPM --</option>
+      </select>
+      <div class="muted" style="font-size:12px;">Lưu ý: dòng ĐÃ CÓ GPM ID (profile thật đã tồn tại trong GPM) sẽ bị "⟳ Đồng bộ GPM" ghi đè lại đúng nhóm thật ở lần đồng bộ kế tiếp - nút này chủ yếu hữu ích cho dòng CHƯA có GPM ID (gom nhóm trước khi bấm "Tạo profile").</div>
+    </div>
+    <div class="modal-actions">
+      <button class="secondary" id="group-assign-cancel-btn">Hủy</button>
+      <button id="group-assign-ok-btn">Đồng ý</button>
+    </div>
+  </div>
+</div>
+
+<!-- Popup rieng cho "🔑 Đặt pass" hang loat - 1 o nhap password, thiet ke dang popup GIONG
+     "Gom nhóm" (xem yeu cau nguoi dung 2026-09-10) thay vi o nhap inline tren toolbar nhu
+     truoc. -->
+<div id="bulk-password-modal-overlay" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-icon" id="bulk-password-modal-icon">🔑</div>
+    <div class="modal-message">Đặt password Shopee cho <b id="bulk-password-modal-count">0</b> dòng đang tích chọn:</div>
+    <div style="margin-top:14px;">
+      <input type="text" id="bulk-password-input" placeholder="Password mới..." style="width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); box-sizing:border-box; font-size:13.5px; font-family:var(--font-mono);">
+    </div>
+    <div class="modal-actions">
+      <button class="secondary" id="bulk-password-cancel-btn">Hủy</button>
+      <button id="bulk-password-ok-btn">Đồng ý</button>
+    </div>
+  </div>
+</div>
+
+<!-- Popup DUNG CHUNG cho "Get ID" / "Get Cookie" / "Mở profile" - ca 3 deu can hoi "Số luồng
+     song song" (thay vi o nhap co dinh tren toolbar nhu truoc, xem yeu cau nguoi dung
+     2026-09-10) - xem _showThreadsModal(). message hien thi thay doi theo tung nut goi. -->
+<div id="threads-modal-overlay" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-icon" id="threads-modal-icon">⚡</div>
+    <div class="modal-message" id="threads-modal-message"></div>
+    <div style="margin-top:14px;">
+      <label style="font-size:13px; font-weight:600; color:var(--ink);">Số luồng chạy song song
+        <input type="number" id="threads-modal-input" min="1" value="2" style="width:100%; margin-top:4px; padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); box-sizing:border-box; font-size:13.5px;">
+      </label>
+    </div>
+    <div class="modal-actions">
+      <button class="secondary" id="threads-modal-cancel-btn">Hủy</button>
+      <button id="threads-modal-ok-btn">Đồng ý</button>
+    </div>
+  </div>
+</div>
+
+<!-- Popup rieng cho "Add rate-limit" hang loat - 1 o nhap so nguyen, thiet ke dang popup GIONG
+     "Gom nhóm"/"Đặt pass" (xem yeu cau nguoi dung 2026-09-10). De trong = KHONG GIOI HAN
+     (xoa gioi han cu), khac cac popup khac o cho rong la 1 lua chon HOP LE. -->
+<div id="rate-limit-modal-overlay" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-icon" id="rate-limit-modal-icon">⏱️</div>
+    <div class="modal-message">Đặt Rate limit video/ngày cho <b id="rate-limit-modal-count">0</b> dòng đang tích chọn:</div>
+    <div style="margin-top:14px;">
+      <input type="number" id="rate-limit-input" min="0" placeholder="Để trống = không giới hạn" style="width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); box-sizing:border-box; font-size:13.5px;">
+      <div class="muted" style="font-size:12px; margin-top:6px;">Để trống rồi bấm "Đồng ý" sẽ XÓA giới hạn (không giới hạn) cho các dòng này.</div>
+    </div>
+    <div class="modal-actions">
+      <button class="secondary" id="rate-limit-cancel-btn">Hủy</button>
+      <button id="rate-limit-ok-btn">Đồng ý</button>
+    </div>
+  </div>
+</div>
+
+<!-- Popup "Login Shopee" - KHAC cac popup khac o cho no la 1 "bang dieu khien tien trinh" ton
+     tai xuyen suot qua trinh chay (khong dong lai khi bam Bat dau nhu _showThreadsModal), hien
+     danh sach tung tai khoan + nhat ky theo thoi gian thuc - xem yeu cau nguoi dung 2026-09-11
+     va _showLoginShopeeRunner(). 3 trang thai: chua bat dau (Huy/Bat dau) -> dang chay (chi co
+     nut Dung, KHONG cho dong bang click ra ngoai/Escape) -> da xong/da dung (Dong). -->
+<div id="login-shopee-modal-overlay" class="modal-overlay">
+  <div class="modal-box" style="max-width:720px; width:92vw;">
+    <div class="modal-icon" id="login-shopee-modal-icon">🔐</div>
+    <div class="modal-message" id="login-shopee-modal-title">Đăng nhập Shopee</div>
+    <div id="login-shopee-setup" style="margin-top:14px;">
+      <label style="font-size:13px; font-weight:600; color:var(--ink);">Số luồng chạy song song
+        <input type="number" id="login-shopee-threads-input" min="1" value="2" style="width:100%; margin-top:4px; padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); box-sizing:border-box; font-size:13.5px;">
+      </label>
+      <div class="muted" style="font-size:12px; margin-top:6px;">Trong lúc chạy popup này sẽ luôn hiện để bạn theo dõi tiến trình từng tài khoản - có thể bấm "Dừng" bất cứ lúc nào (các tài khoản đang chạy dở sẽ hoàn tất, chỉ các tài khoản chưa bắt đầu mới bị bỏ qua).</div>
+    </div>
+    <div id="login-shopee-progress" style="margin-top:14px; text-align:left;">
+      <div class="muted" id="login-shopee-summary" style="margin-bottom:8px;"></div>
+      <div style="max-height:220px; overflow:auto; border:1px solid var(--border); border-radius:var(--radius-sm);">
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+          <thead style="position:sticky; top:0; background:var(--surface, #f7f7f7);">
+            <tr>
+              <th style="text-align:left; padding:6px 8px;">Tài khoản</th>
+              <th style="text-align:left; padding:6px 8px;">Trạng thái</th>
+              <th style="text-align:left; padding:6px 8px;">Chi tiết</th>
+            </tr>
+          </thead>
+          <tbody id="login-shopee-account-tbody"></tbody>
+        </table>
+      </div>
+      <div class="muted" style="font-size:12px; margin-top:10px; margin-bottom:4px;">Nhật ký:</div>
+      <pre id="login-shopee-log" style="max-height:150px; overflow:auto; margin:0; padding:8px; background:var(--surface-alt, #f2f2f2); border:1px solid var(--border); border-radius:var(--radius-sm); font-family:var(--font-mono); font-size:12px; white-space:pre-wrap;"></pre>
+    </div>
+    <div class="modal-actions">
+      <button class="secondary" id="login-shopee-cancel-btn">Hủy</button>
+      <button id="login-shopee-start-btn">Bắt đầu</button>
+      <button class="secondary" id="login-shopee-stop-btn" style="display:none;">Dừng</button>
+      <button id="login-shopee-close-btn" style="display:none;">Đóng</button>
+    </div>
+  </div>
+</div>
+
 <header>
   <div class="logo-mark">S</div>
   <div>
@@ -793,7 +935,8 @@
 
   <section>
     <h2>Danh sách Email / Tài khoản Shopee</h2>
-    <div class="row" style="position:relative; flex-wrap:wrap;">
+    <!-- Hang 1: bo loc -->
+    <div class="row" style="flex-wrap:wrap;">
       <select id="mailacc-filter-market" onchange="loadMailAccounts()" style="max-width:180px;">
         <option value="">-- Thị trường: Tất cả --</option>
         <option value="PH">PH (Philippines)</option>
@@ -812,19 +955,19 @@
       <select id="mailacc-filter-group-gpm" onchange="loadMailAccounts()" style="max-width:200px;" title="Lọc theo nhóm GPM/GEM (cột GROUP GPM) - danh sách lấy từ các nhóm ĐANG có tài khoản trong bảng này">
         <option value="">-- Nhóm GPM: Tất cả --</option>
       </select>
+      <select id="mailacc-filter-has-id-gpm" onchange="loadMailAccounts()" style="max-width:160px;" title="Lọc theo cột GPM ID - hữu ích để tìm nhanh các dòng chưa gán, dùng với nút 'Import GPM ID'">
+        <option value="">-- GPM ID: Tất cả --</option>
+        <option value="0">Chưa có</option>
+        <option value="1">Đã có</option>
+      </select>
+      <select id="mailacc-filter-login-status" onchange="loadMailAccounts()" style="max-width:190px;" title="Lọc theo trạng thái lần chạy 'Login Shopee' gần nhất">
+        <option value="">-- Đăng nhập Shopee: Tất cả --</option>
+        <option value="ok">Đã đăng nhập</option>
+        <option value="failed">Đăng nhập thất bại</option>
+        <option value="unchecked">Chưa kiểm tra</option>
+      </select>
       <input type="text" id="mailacc-filter-search" placeholder="Tìm theo email / shopee_id / device..." onkeydown="if(event.key==='Enter') loadMailAccounts()">
-      <button class="secondary" onclick="loadMailAccounts()">Lọc danh sách</button>
-      <button class="secondary" onclick="exportMailAccountsXlsx()" title="Xuất Excel các dòng đang TÍCH CHỌN (kèm cột Group GPM / ID GPM để import lại)">Xuất Excel (đã chọn)</button>
-      <button class="secondary" onclick="createGpmProfilesSelected(this)" title="Tạo profile theo engine từng dòng (GPM/GEM) - dòng đã có ID GPM/GEM hoặc trùng tên trong cùng nhóm sẽ bỏ qua">Tạo profile (đã chọn)</button>
-      <button class="secondary" onclick="openGpmProfilesSelected(this)" title="Mở trang chủ Shopee của các dòng đang tích chọn theo engine từng dòng - dòng chưa có ID GPM/GEM sẽ bỏ qua">Mở profile (đã chọn)</button>
-      <button class="secondary" onclick="assignDeviceFingerprintSelected(this)" title="Gán NGẪU NHIÊN 1 mẫu Device Fingerprint (Model/OS version - dữ liệu thiết bị Android thật) cho từng dòng đang tích chọn, lấy từ pool scripts/device_fingerprints.json">🎲 Tạo device fingerprint (đã chọn)</button>
-      <button class="secondary" onclick="syncMailAccountsGpm(this)" title="Lấy tên profile / nhóm / proxy mới nhất từ GPM & GemLogin ghi đè vào bảng (theo engine từng dòng); ID không còn tồn tại sẽ bị xóa">⟳ Đồng bộ GPM/GEM</button>
-      <input type="number" id="mailacc-getid-threads" min="1" max="6" value="2" style="max-width:62px;" title="Số profile chạy song song khi Get Shopee ID / Get Cookie">
-      <button class="secondary" onclick="getShopeeIdsSelected(this)" title="Với từng dòng đang tích: mở trang hồ sơ Shopee theo market, lấy Username (Shopee ID) ghi vào cột Shopee ID; chưa login/captcha thì mở sẵn cửa sổ để xử lý">Get Shopee ID</button>
-      <button class="secondary" onclick="getCookiesSelected(this)" title="Với từng dòng đang tích: mở trang chủ Shopee theo market, lấy toàn bộ cookie đăng nhập ghi vào cột Cookie; chưa login/captcha thì mở sẵn cửa sổ để xử lý">Get Cookie</button>
-      <button class="secondary" onclick="document.getElementById('mailacc-import-file').click()">Import Excel</button>
-      <input type="file" id="mailacc-import-file" accept=".xlsx" style="display:none;" onchange="importMailAccountsXlsx(this)">
-      <button class="danger" onclick="clearMailAccounts()">Xóa tất cả</button>
+      <button class="secondary" onclick="loadMailAccounts()">Lọc</button>
       <span style="margin-left:auto;"></span>
       <button class="secondary" onclick="toggleMailAccColPop(event)" title="Chọn cột nào hiển thị / ẩn (bảng nhiều cột, có thể bị tràn màn hình)">⚙ Cột</button>
       <div id="mailacc-col-pop" class="col-pop" style="display:none;">
@@ -835,6 +978,28 @@
         <div class="muted" style="margin-top:6px;font-size:12px;">Bỏ tick cột nào sẽ ẩn cột đó. Cột tích chọn &amp; Thao tác luôn hiện. Lựa chọn được nhớ theo trình duyệt.</div>
       </div>
     </div>
+    <!-- Hang 2: thao tac hang loat tren cac dong DANG TICH CHON -->
+    <div class="row" style="flex-wrap:wrap; margin-top:8px;">
+      <button class="secondary" onclick="exportMailAccountsXlsx()" title="Xuất Excel các dòng đang TÍCH CHỌN (kèm cột Group GPM / GPM ID để import lại)">Xuất Excel</button>
+      <button class="secondary" onclick="bulkGenerateProfileNames(this)" title="Sinh tên Profile hàng loạt: Tiền tố cố định + hậu tố số tự nhiên tăng dần theo thứ tự các dòng đang tích chọn (vd 'PH-' → PH-00001, PH-00002, ...)">Tạo tên profile</button>
+      <button class="secondary" onclick="bulkAssignGroup(this)" title="Gán CÙNG 1 nhóm GPM (chọn từ danh sách nhóm đang có) cho MỌI dòng đang tích chọn">Gom nhóm</button>
+      <button class="secondary" onclick="createGpmProfilesSelected(this)" title="Tạo profile theo engine từng dòng (GPM/GEM) - dòng đã có GPM/GEM ID hoặc trùng tên trong cùng nhóm sẽ bỏ qua">Tạo profile</button>
+      <button class="secondary" onclick="openGpmProfilesSelected(this)" title="Mở trang chủ Shopee của các dòng đang tích chọn theo engine từng dòng - dòng chưa có GPM/GEM ID sẽ bỏ qua">Mở profile</button>
+      <button class="secondary" onclick="bulkImportGpmIds(this)" title="Dán nhiều GPM ID (mỗi dòng 1 ID) - gán LẦN LƯỢT từ trên xuống cho các dòng đang tích chọn theo đúng thứ tự hiển thị, rồi tự động đồng bộ lại Profile/Group/Proxy từ GPM">Import GPM ID</button>
+      <button class="secondary" onclick="assignDeviceFingerprintSelected(this)" title="Gán NGẪU NHIÊN 1 mẫu Device Fingerprint (Model/OS version - dữ liệu thiết bị Android thật) cho từng dòng đang tích chọn, lấy từ pool scripts/device_fingerprints.json">🎲 Fingerprint</button>
+      <button class="secondary" onclick="getShopeeIdsSelected(this)" title="Với từng dòng đang tích: mở trang hồ sơ Shopee theo market, lấy Username (Shopee ID) ghi vào cột Shopee ID; chưa login/captcha thì mở sẵn cửa sổ để xử lý">Get ID</button>
+      <button class="secondary" onclick="getCookiesSelected(this)" title="Với từng dòng đang tích: mở trang chủ Shopee theo market, lấy toàn bộ cookie đăng nhập ghi vào cột Cookie; luôn đóng trình duyệt lại sau khi xong (thành công hoặc thất bại)">Get Cookie</button>
+      <button class="secondary" onclick="loginShopeeSelected(this)" title="Với từng dòng đang tích: tự động đăng nhập Shopee bằng Email + Shopee Password (tự xử lý luôn bước xác thực qua link email nếu Shopee yêu cầu)">Login Shopee</button>
+      <button class="secondary" onclick="bulkSetShopeePassword(this)" title="Mở popup nhập password - ghi ĐÈ vào cột 'Shopee Password' của TẤT CẢ dòng đang tích chọn">🔑 Đặt pass</button>
+      <button class="secondary" onclick="bulkSetRateLimitVideo(this)" title="Mở popup nhập Rate limit video/ngày - ghi ĐÈ vào cột này của TẤT CẢ dòng đang tích chọn (để trống = không giới hạn)">Add rate-limit</button>
+    </div>
+    <!-- Hang 3: thao tac chung (khong phu thuoc tich chon) -->
+    <div class="row" style="flex-wrap:wrap; margin-top:8px;">
+      <button class="secondary" onclick="syncMailAccountsGpm(this)" title="Lấy tên profile / nhóm / proxy mới nhất từ GPM & GemLogin ghi đè vào bảng (theo engine từng dòng); ID không còn tồn tại sẽ bị xóa">⟳ Đồng bộ</button>
+      <button class="secondary" onclick="document.getElementById('mailacc-import-file').click()">Import</button>
+      <input type="file" id="mailacc-import-file" accept=".xlsx" style="display:none;" onchange="importMailAccountsXlsx(this)">
+      <button class="danger" onclick="clearMailAccounts()">Xóa tất cả</button>
+    </div>
     <div class="muted" style="margin-bottom:10px;" id="mailacc-count"></div>
     <datalist id="gpm-group-names"></datalist>
     <datalist id="gem-group-names"></datalist>
@@ -843,8 +1008,8 @@
         <tr id="mailacc-thead-row">
           <th style="width:36px;"><input type="checkbox" id="mailacc-sel-all" onclick="mailAccToggleAll(this)" title="Chọn / bỏ chọn tất cả dòng đang hiển thị"></th>
           <th style="width:64px;">Engine</th>
-          <th>Thông tin đầy đủ</th><th>Email</th><th>Mật khẩu Mail</th><th>Shopee ID</th><th>Cookie</th>
-          <th>Thiết bị</th><th>Profile</th><th>GROUP GPM</th><th>ID GPM</th><th>Proxy</th><th>Device Fingerprint (Android)</th><th>Rate limit video/ngày</th><th>Slot</th><th>Thị trường</th><th>Mã Shopee</th><th>Thao tác</th><th>Thời gian tạo</th>
+          <th>Thông tin đầy đủ</th><th>Email</th><th>Mật khẩu Mail</th><th>Shopee ID</th><th>Shopee Password</th><th>Cookie</th>
+          <th>Thiết bị</th><th>Profile</th><th>GROUP GPM</th><th>GPM ID</th><th>Proxy</th><th>Device Fingerprint (Android)</th><th>Rate limit video/ngày</th><th>Slot</th><th>Thị trường</th><th>Mã Shopee</th><th>Thao tác</th><th>Thời gian tạo</th>
         </tr>
       </thead>
       <tbody id="mailacc-tbody"></tbody>
@@ -1293,21 +1458,46 @@ async function api(method, path, body, timeoutMs = API_TIMEOUT_MS) {
   return json;
 }
 
-function _showModal(message, { mode, danger } = {}) {
+// mode 'prompt' (them sau, 2026-09-10 - cho "Import GPM ID hàng loạt"): hien them 1
+// <textarea> duoi message, tra ve CHUOI da nhap khi bam "Đồng ý" hoac null khi Huy/Escape/
+// click ra ngoai (KHAC mode 'confirm' tra ve boolean) - xem customPrompt(). Textarea DOM
+// element dung lai (tao 1 lan, an/hien qua display) thay vi tao moi moi lan goi.
+function _showModal(message, { mode, danger, placeholder } = {}) {
   return new Promise(resolve => {
     const overlay = document.getElementById('modal-overlay');
     const icon = document.getElementById('modal-icon');
     const actions = document.getElementById('modal-actions');
-    document.getElementById('modal-message').textContent = message;
+    const msgEl = document.getElementById('modal-message');
+    msgEl.textContent = message;
     icon.className = 'modal-icon' + (danger ? ' danger' : '');
-    icon.textContent = mode === 'confirm' ? '?' : (danger ? '!' : 'i');
-    actions.innerHTML = mode === 'confirm'
+    icon.textContent = (mode === 'confirm' || mode === 'prompt') ? '?' : (danger ? '!' : 'i');
+
+    let textarea = document.getElementById('modal-input');
+    if (!textarea) {
+      textarea = document.createElement('textarea');
+      textarea.id = 'modal-input';
+      textarea.style.cssText = 'width:100%; box-sizing:border-box; margin-top:14px; min-height:140px; font-family:var(--font-mono); font-size:12.5px; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm); resize:vertical;';
+      msgEl.insertAdjacentElement('afterend', textarea);
+    }
+    if (mode === 'prompt') {
+      textarea.value = '';
+      textarea.placeholder = placeholder || '';
+      textarea.style.display = '';
+    } else {
+      textarea.style.display = 'none';
+    }
+
+    actions.innerHTML = (mode === 'confirm' || mode === 'prompt')
       ? `<button class="secondary" id="modal-cancel-btn">Hủy</button><button id="modal-ok-btn" class="${danger ? 'danger' : ''}">Đồng ý</button>`
       : `<button id="modal-ok-btn">OK</button>`;
 
+    const cancelResult = mode === 'prompt' ? null : false;
+    const confirmResult = mode === 'prompt' ? () => textarea.value : true;
     const onKeydown = (e) => {
-      if (e.key === 'Escape') close(false);
-      if (e.key === 'Enter') close(true);
+      if (e.key === 'Escape') close(cancelResult);
+      // Enter trong textarea (mode 'prompt') phai xuong dong binh thuong, KHONG submit -
+      // chi cac mode khac (khong co textarea de go nhieu dong) moi dung Enter de xac nhan.
+      if (e.key === 'Enter' && mode !== 'prompt') close(true);
     };
     const close = (result) => {
       overlay.classList.remove('show');
@@ -1315,14 +1505,14 @@ function _showModal(message, { mode, danger } = {}) {
       resolve(result);
     };
 
-    document.getElementById('modal-ok-btn').onclick = () => close(true);
+    document.getElementById('modal-ok-btn').onclick = () => close(typeof confirmResult === 'function' ? confirmResult() : confirmResult);
     const cancelBtn = document.getElementById('modal-cancel-btn');
-    if (cancelBtn) cancelBtn.onclick = () => close(false);
-    overlay.onclick = (e) => { if (e.target === overlay) close(mode === 'confirm' ? false : true); };
+    if (cancelBtn) cancelBtn.onclick = () => close(cancelResult);
+    overlay.onclick = (e) => { if (e.target === overlay) close(mode === 'confirm' || mode === 'prompt' ? cancelResult : true); };
     document.addEventListener('keydown', onKeydown);
 
     overlay.classList.add('show');
-    document.getElementById('modal-ok-btn').focus();
+    (mode === 'prompt' ? textarea : document.getElementById('modal-ok-btn')).focus();
   });
 }
 
@@ -1332,6 +1522,12 @@ function customAlert(message, opts) {
 
 function customConfirm(message, opts) {
   return _showModal(message, { mode: 'confirm', danger: !!(opts && opts.danger) });
+}
+
+// Tra ve chuoi nguoi dung nhap (co the rong '') khi bam "Đồng ý", hoac null khi Huy/Escape/
+// click ra ngoai popup - dung cho "Import GPM ID hàng loạt" (nhap nhieu dong).
+function customPrompt(message, opts) {
+  return _showModal(message, { mode: 'prompt', danger: !!(opts && opts.danger), placeholder: (opts && opts.placeholder) || '' });
 }
 
 let currentSettings = null;
@@ -2187,11 +2383,13 @@ const MAILACC_COLUMNS = [
   { field: 'email', label: 'Email' },
   { field: 'password', label: 'Mật khẩu Mail' },
   { field: 'shopee_id', label: 'Shopee ID' },
+  { field: 'shopee_password', label: 'Shopee Password' },
+  { field: 'shopee_login_status', label: 'Đăng nhập Shopee' },
   { field: 'cookie', label: 'Cookie' },
   { field: 'device', label: 'Thiết bị' },
   { field: 'profile', label: 'Profile' },
   { field: 'group_gpm', label: 'GROUP GPM' },
-  { field: 'id_gpm', label: 'ID GPM' },
+  { field: 'id_gpm', label: 'GPM ID' },
   { field: 'proxy', label: 'Proxy' },
   { field: 'device_model', label: 'Device Fingerprint (Android)' },
   { field: 'rate_limit_video', label: 'Rate limit video/ngày' },
@@ -2211,11 +2409,13 @@ const MAILACC_COL_SETTINGS = [
   { field: 'email', label: 'Email' },
   { field: 'password', label: 'Mật khẩu Mail' },
   { field: 'shopee_id', label: 'Shopee ID' },
+  { field: 'shopee_password', label: 'Shopee Password' },
+  { field: 'shopee_login_status', label: 'Đăng nhập Shopee' },
   { field: 'cookie', label: 'Cookie' },
   { field: 'device', label: 'Thiết bị' },
   { field: 'profile', label: 'Profile' },
   { field: 'group_gpm', label: 'GROUP GPM' },
-  { field: 'id_gpm', label: 'ID GPM' },
+  { field: 'id_gpm', label: 'GPM ID' },
   { field: 'proxy', label: 'Proxy' },
   { field: 'device_model', label: 'Device Fingerprint (Android)' },
   { field: 'rate_limit_video', label: 'Rate limit video/ngày' },
@@ -2451,10 +2651,14 @@ async function loadMailAccounts() {
   const market = document.getElementById('mailacc-filter-market').value;
   const slot = document.getElementById('mailacc-filter-slot').value;
   const groupGpm = document.getElementById('mailacc-filter-group-gpm').value;
+  const hasIdGpm = document.getElementById('mailacc-filter-has-id-gpm').value;
+  const loginStatus = document.getElementById('mailacc-filter-login-status').value;
   const search = document.getElementById('mailacc-filter-search').value.trim();
   if (market) params.set('market', market);
   if (slot) params.set('slot', slot);
   if (groupGpm) params.set('group_gpm', groupGpm);
+  if (hasIdGpm) params.set('has_id_gpm', hasIdGpm);
+  if (loginStatus) params.set('login_status', loginStatus);
   if (search) params.set('search', search);
   params.set('limit', '300');
   const { accounts } = await api('GET', '/api/mail_accounts/list?' + params.toString());
@@ -2476,6 +2680,27 @@ async function loadMailAccountGroups() {
       (groups || []).map(g => `<option value="${g.replace(/"/g, '&quot;')}">${g}</option>`).join('');
     if (current && (groups || []).includes(current)) sel.value = current;
   } catch (e) { /* im lang - dropdown chi con option "Tat ca" */ }
+}
+
+// Badge mau cho cot "Đăng nhập Shopee" - trang thai LAN CUOI nut "Login Shopee" cho dong nay
+// (xem cot shopee_login_status, yeu cau nguoi dung 2026-09-11 "thiết kế thêm trạng thái đã
+// login để lọc dữ liệu tốt hơn"). NULL = chua tung chay nut nay lan nao.
+const MAILACC_LOGIN_STATUS_BADGE = {
+  ok: ['done', 'Đã đăng nhập'],
+  invalid_credentials: ['fail', 'Sai mật khẩu'],
+  captcha: ['insufficient', 'Bị captcha'],
+  no_email_link: ['insufficient', 'Không đọc được mail'],
+  no_credentials: ['idle', 'Thiếu thông tin'],
+  no_id: ['idle', 'Chưa có GPM ID'],
+  timeout: ['insufficient', 'Quá thời gian'],
+  error: ['fail', 'Lỗi'],
+};
+function mailAccLoginStatusBadge(a) {
+  const status = a.shopee_login_status;
+  if (!status) return '<span class="badge idle">Chưa kiểm tra</span>';
+  const [cls, label] = MAILACC_LOGIN_STATUS_BADGE[status] || ['idle', status];
+  const title = a.shopee_login_checked_at ? `Lần kiểm tra gần nhất: ${a.shopee_login_checked_at}` : '';
+  return `<span class="badge ${cls}" title="${title.replace(/"/g, '&quot;')}">${label}</span>`;
 }
 
 function renderMailAccounts() {
@@ -2508,15 +2733,19 @@ function renderMailAccounts() {
         <button class="secondary" onclick="copyMailField(${idx}, 'full_info')">Sao chép</button></td>
       <td><b>${a.email}</b>
         <button class="secondary" onclick="copyMailField(${idx}, 'email')">Sao chép</button></td>
-      <td><code>${a.password || '-'}</code>
-        ${a.password ? `<button class="secondary" onclick="copyMailField(${idx}, 'password')">Sao chép</button>` : ''}</td>
+      <td><input type="password" id="mailacc-pass-${a.id}" value="${(a.password || '').replace(/"/g, '&quot;')}" readonly style="min-width:90px; width:100%; border:none; background:transparent; font-family:var(--font-mono); padding:0;">
+        ${a.password ? `<button class="secondary" onclick="toggleMaskedField(this, 'mailacc-pass-${a.id}')" title="Hiện/ẩn mật khẩu">👁</button><button class="secondary" onclick="copyMailField(${idx}, 'password')">Sao chép</button>` : ''}</td>
       <td><input type="text" value="${(a.shopee_id || '').replace(/"/g, '&quot;')}" onchange="updateShopeeId(${a.id}, this)" placeholder="Shopee ID" style="min-width:160px; width:100%;"></td>
+      <td><input type="password" id="mailacc-shopeepass-${a.id}" value="${(a.shopee_password || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'shopee_password', this.value)" placeholder="Shopee Password" style="min-width:140px; width:100%;">
+        <button class="secondary" onclick="toggleMaskedField(this, 'mailacc-shopeepass-${a.id}')" title="Hiện/ẩn mật khẩu">👁</button>
+        ${a.shopee_password ? `<button class="secondary" onclick="copyMailField(${idx}, 'shopee_password')">Sao chép</button>` : ''}</td>
+      <td>${mailAccLoginStatusBadge(a)}</td>
       <td>${a.cookie ? `<span class="ellipsis" style="max-width:140px;" title="${a.cookie.replace(/"/g, '&quot;')}">${a.cookie}</span>
         <button class="secondary" onclick="copyMailField(${idx}, 'cookie')">Sao chép</button>` : '<span class="muted">Chưa có</span>'}</td>
       <td><input type="text" value="${(a.device || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'device', this.value)" placeholder="Tên thiết bị" style="min-width:160px; width:100%;"></td>
       <td><input type="text" data-field="profile" value="${(a.profile || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'profile', this.value)" placeholder="Profile" style="min-width:160px; width:100%;"></td>
       <td><input type="text" data-field="group_gpm" list="${(a.engine || 'gpm') === 'gem' ? 'gem-group-names' : 'gpm-group-names'}" value="${(a.group_gpm || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'group_gpm', this.value)" placeholder="Group GPM/GEM" title="Tên nhóm muốn tạo profile (gợi ý theo engine của dòng)" style="min-width:150px; width:100%;"></td>
-      <td><input type="text" value="${(a.id_gpm || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'id_gpm', this.value)" placeholder="ID GPM/GEM" title="ID profile GPM/GEM (tự điền sau khi bấm Tạo profile, hoặc dán tay)" style="min-width:150px; width:100%; font-family:monospace; font-size:12px;"></td>
+      <td><input type="text" value="${(a.id_gpm || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'id_gpm', this.value)" placeholder="GPM/GEM ID" title="ID profile GPM/GEM (tự điền sau khi bấm Tạo profile, hoặc dán tay)" style="min-width:150px; width:100%; font-family:monospace; font-size:12px;"></td>
       <td><input type="text" value="${(a.proxy || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'proxy', this.value)" placeholder="ip:port:user:pass" title="Proxy riêng của tài khoản này - nhập tay, hoặc bấm '⟳ Đồng bộ GPM/GEM' để tự lấy từ proxy đang gắn cho profile (field raw_proxy)" style="min-width:170px; width:100%; font-family:monospace; font-size:12px;"></td>
       <td style="white-space:nowrap;">
         <input type="text" value="${(a.device_model || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'device_model', this.value)" placeholder="Model (vd SM-G991B)" title="Model điện thoại Android giả lập - dùng cho pipeline đăng video sau này" style="width:120px; margin-bottom:3px;"><br>
@@ -2534,8 +2763,8 @@ function renderMailAccounts() {
       <td style="white-space:nowrap;">
         <button onclick="getMailCode(this, ${a.id})" title="Lấy mã xác minh Shopee (Get code)">Code</button>
         <button class="secondary" onclick="activateLoginLink(this, ${a.id})" title="Mở link kích hoạt đăng nhập Shopee">Link</button>
-        <button class="secondary" onclick="createGpmProfile(${a.id}, this)" ${a.id_gpm ? 'disabled title="Dòng này đã có ID GPM/GEM - xóa ID để tạo profile mới"' : 'title="Tạo profile theo engine của dòng từ cột Profile + GROUP GPM/GEM"'}">Tạo profile</button>
-        <button class="secondary" onclick="openGpmProfile(${a.id}, this)" ${a.id_gpm ? 'title="Mở trình duyệt (GPM/GEM) tới trang chủ Shopee theo thị trường của dòng"' : 'disabled title="Cần có ID GPM/GEM (bấm Tạo profile trước)"'}">Mở profile</button>
+        <button class="secondary" onclick="createGpmProfile(${a.id}, this)" ${a.id_gpm ? 'disabled title="Dòng này đã có GPM/GEM ID - xóa ID để tạo profile mới"' : 'title="Tạo profile theo engine của dòng từ cột Profile + GROUP GPM/GEM"'}">Tạo profile</button>
+        <button class="secondary" onclick="openGpmProfile(${a.id}, this)" ${a.id_gpm ? 'title="Mở trình duyệt (GPM/GEM) tới trang chủ Shopee theo thị trường của dòng"' : 'disabled title="Cần có GPM/GEM ID (bấm Tạo profile trước)"'}">Mở profile</button>
         <button class="secondary" onclick="deleteMailAccount(${a.id})">Xóa</button>
       </td>
       <td class="muted" style="white-space:nowrap;">${a.created_at || '-'}</td>
@@ -2553,6 +2782,18 @@ function copyMailField(idx, field) {
     () => {},
     () => customAlert('Không thể sao chép tự động (Trình duyệt chặn Clipboard) - Vui lòng chọn và Ctrl+C thủ công.', { danger: true })
   );
+}
+
+// An/hien mat khau (Mật khẩu Mail / Shopee Password) - mac dinh la type="password" (hien
+// ***** thay vi lo ro, xem yeu cau nguoi dung 2026-09-10). Bam icon con mat de doi type
+// password/text tren dung o input do, khong anh huong den gia tri that (van doc tu
+// lastMailAccountsList khi Sao chép).
+function toggleMaskedField(btn, inputId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  const hidden = input.type === 'password';
+  input.type = hidden ? 'text' : 'password';
+  btn.textContent = hidden ? '🙈' : '👁';
 }
 
 async function updateMailAccountField(id, field, value) {
@@ -2755,6 +2996,17 @@ async function createGpmProfile(id, btn) {
 async function openGpmProfile(id, btn) {
   await withBusy(btn, async () => {
     try {
+      // Dong da co Cookie: check con song truoc (KHONG mo browser) - con song thi bo qua
+      // khong mo lai, giong logic hang loat openGpmProfilesSelected() - xem yeu cau nguoi
+      // dung 2026-09-11.
+      const row = (lastMailAccountsList || []).find(a => a.id === id);
+      if (row && String(row.cookie || '').trim() !== '') {
+        const chk = await api('POST', `/api/mail_accounts/${id}/check_cookie`, undefined, 20000);
+        if (chk.status === 'alive') {
+          await customAlert('Cookie đã lưu vẫn còn đăng nhập được - không cần mở lại profile.\n\n' + (chk.detail || ''));
+          return;
+        }
+      }
       await api('POST', `/api/mail_accounts/${id}/gpm/open`);
       // Mo thanh cong: KHONG hien thong bao (chi bao khi loi - nguoi dung tu thay cua so GPM).
     } catch (e) {
@@ -2800,7 +3052,7 @@ async function createGpmProfilesSelected(btn) {
   if (!(await customConfirm(
     `Tạo profile cho ${ids.length} dòng đang tích chọn?\n\n` +
     `- Mỗi dòng tạo 1 profile theo engine của dòng (GPM/GEM), dựa vào cột Profile + GROUP GPM/GEM.\n` +
-    `- Dòng đã có ID GPM/GEM hoặc trùng tên trong cùng nhóm sẽ được bỏ qua.\n` +
+    `- Dòng đã có GPM/GEM ID hoặc trùng tên trong cùng nhóm sẽ được bỏ qua.\n` +
     `- Nếu cả Profile & GROUP GPM/GEM trống: tạo profile mặc định.`
   ))) return;
   const rows = ids.map(id => {
@@ -2866,21 +3118,50 @@ async function openGpmProfilesSelected(btn) {
     await customAlert('Chưa chọn dòng nào — hãy tích chọn các dòng cần mở profile trước.', { danger: true });
     return;
   }
-  if (!(await customConfirm(
-    `Mở profile cho ${ids.length} dòng đang tích chọn?\n\n` +
-    `- Mỗi dòng có ID GPM/GEM sẽ mở 1 cửa sổ (GPM hoặc GemLogin) tới trang chủ Shopee theo thị trường của dòng đó.\n` +
-    `- Dòng chưa có ID GPM/GEM sẽ được bỏ qua.`
-  ))) return;
+  const threads = await _showThreadsModal(
+    `Mở profile cho ${ids.length} dòng đang tích chọn:\n\n` +
+    `- Dòng ĐÃ CÓ Cookie: kiểm tra còn đăng nhập được không TRƯỚC (không cần mở browser, chỉ 1 request nhanh) - còn sống thì BỎ QUA, không mở lại.\n` +
+    `- Dòng chưa có Cookie (hoặc cookie đã hết hạn): mở 1 cửa sổ (GPM hoặc GemLogin) tới trang chủ Shopee theo thị trường của dòng đó.\n` +
+    `- Dòng chưa có GPM/GEM ID sẽ được bỏ qua.`,
+    2, 6
+  );
+  if (threads === null) return; // bam Huy
+  const rowById = new Map(lastMailAccountsList.map(a => [a.id, a]));
   await withBusy(btn, async () => {
-    try {
-      const res = await api('POST', '/api/mail_accounts/gpm/open_bulk', { ids }, 300000);
-      // Chi bao khi co dong loi/khong mo duoc - thanh cong het thi khong hien popup.
-      const fails = (res.results || []).filter(r => !r.ok);
-      if (fails.length) {
-        await mailAccSummarizeBulk('Mở profile', res.opened || 0, (res.results || []).length, res.results);
+    // Chay N luong song song (goi route DUNG 1 dong /gpm/open, KHONG dung route bulk tuan
+    // tu cu) - xem yeu cau nguoi dung 2026-09-10, cung mo hinh voi getShopeeIdsSelected()/
+    // getCookiesSelected() ben duoi. Dong DA CO cookie: check_cookie truoc (KHONG mo browser)
+    // - con song thi bo qua khong mo lai (xem yeu cau nguoi dung 2026-09-11 "check cookie còn
+    // sống hay không trước khi mở profile đối với những tài khoản đã có cookie trước rồi").
+    const results = [];
+    let cursor = 0;
+    const next = () => { const i = cursor++; return i < ids.length ? ids[i] : undefined; };
+    const worker = async () => {
+      for (let id; (id = next()) !== undefined;) {
+        try {
+          const row = rowById.get(id);
+          const hasCookie = row && String(row.cookie || '').trim() !== '';
+          if (hasCookie) {
+            const chk = await api('POST', `/api/mail_accounts/${id}/check_cookie`, undefined, 20000);
+            if (chk.status === 'alive') {
+              results.push({ id, ok: true, skipped: true, message: chk.detail || 'Cookie còn sống.' });
+              continue;
+            }
+          }
+          const r = await api('POST', `/api/mail_accounts/${id}/gpm/open`, undefined, 60000);
+          results.push({ id, ...r });
+        } catch (e) {
+          results.push({ id, ok: false, error: e.message || 'Lỗi không rõ' });
+        }
       }
-    } catch (e) {
-      await customAlert('Lỗi mở profile hàng loạt: ' + e.message, { danger: true });
+    };
+    await Promise.all(Array.from({ length: threads }, () => worker()));
+    const opened = results.filter(r => r.ok && !r.skipped).length;
+    const skipped = results.filter(r => r.skipped).length;
+    // Chi bao khi co dong bi bo qua (cookie con song) hoac loi - mo het thanh cong thi khong hien popup.
+    if (skipped > 0 || opened < results.length - skipped) {
+      const extraNote = skipped ? `Đã bỏ qua ${skipped} dòng vì Cookie đã lưu vẫn còn đăng nhập được (không cần mở lại).` : '';
+      await mailAccSummarizeBulk('Mở profile', opened, results.length, results, extraNote);
     }
   });
 }
@@ -2909,6 +3190,409 @@ async function assignDeviceFingerprintSelected(btn) {
       }
     } catch (e) {
       await customAlert('Lỗi tạo device fingerprint hàng loạt: ' + e.message, { danger: true });
+    }
+  });
+}
+
+// ---- Popup DUNG CHUNG "Số luồng" cho "Get ID"/"Get Cookie"/"Mở profile" (xem yeu cau nguoi
+// dung 2026-09-10: thay o nhap co dinh tren toolbar bang popup rieng moi lan bam nut). Tra ve
+// SO NGUYEN da kep trong [1, maxValue] khi bam "Đồng ý"/Enter, null khi Huy/Escape/click ra
+// ngoai. message = noi dung giai thich hanh dong (thay doi theo tung nut goi). ----
+function _clampThreads(raw, maxValue) {
+  return Math.max(1, Math.min(maxValue, parseInt(raw, 10) || 1));
+}
+
+function _showThreadsModal(message, defaultValue, maxValue) {
+  return new Promise(resolve => {
+    const overlay = document.getElementById('threads-modal-overlay');
+    document.getElementById('threads-modal-message').textContent = message;
+    const input = document.getElementById('threads-modal-input');
+    input.value = defaultValue;
+    input.max = maxValue;
+
+    const onKeydown = (e) => {
+      if (e.key === 'Escape') close(null);
+      if (e.key === 'Enter') close(_clampThreads(input.value, maxValue));
+    };
+    const close = (result) => {
+      overlay.classList.remove('show');
+      document.removeEventListener('keydown', onKeydown);
+      resolve(result);
+    };
+    document.getElementById('threads-modal-ok-btn').onclick = () => close(_clampThreads(input.value, maxValue));
+    document.getElementById('threads-modal-cancel-btn').onclick = () => close(null);
+    overlay.onclick = (e) => { if (e.target === overlay) close(null); };
+    document.addEventListener('keydown', onKeydown);
+
+    overlay.classList.add('show');
+    input.focus();
+  });
+}
+
+// ---- "🔑 Đặt pass" hang loat: popup rieng (#bulk-password-modal-overlay, GIONG thiet ke
+// "Gom nhóm" - xem yeu cau nguoi dung 2026-09-10) nhap 1 password, ghi DUNG password do cho
+// MOI dong dang tich chon - xem /api/mail_accounts/shopee_password/set_bulk. ----
+
+// Tra ve chuoi password khi bam "Đồng ý", null khi Huy/Escape/click ra ngoai.
+function _showBulkPasswordModal(count) {
+  return new Promise(resolve => {
+    const overlay = document.getElementById('bulk-password-modal-overlay');
+    document.getElementById('bulk-password-modal-count').textContent = count;
+    const input = document.getElementById('bulk-password-input');
+    input.value = '';
+
+    const onKeydown = (e) => {
+      if (e.key === 'Escape') close(null);
+      if (e.key === 'Enter') close(input.value);
+    };
+    const close = (result) => {
+      overlay.classList.remove('show');
+      document.removeEventListener('keydown', onKeydown);
+      resolve(result);
+    };
+    document.getElementById('bulk-password-ok-btn').onclick = () => close(input.value);
+    document.getElementById('bulk-password-cancel-btn').onclick = () => close(null);
+    overlay.onclick = (e) => { if (e.target === overlay) close(null); };
+    document.addEventListener('keydown', onKeydown);
+
+    overlay.classList.add('show');
+    input.focus();
+  });
+}
+
+async function bulkSetShopeePassword(btn) {
+  const ids = mailAccSelectedIds();
+  if (!ids.length) {
+    await customAlert('Chưa chọn dòng nào — hãy tích chọn các dòng cần đặt password trước.', { danger: true });
+    return;
+  }
+  const password = await _showBulkPasswordModal(ids.length);
+  if (password === null) return; // bam Huy
+  if (!password) {
+    await customAlert('Chưa nhập password.', { danger: true });
+    return;
+  }
+  await withBusy(btn, async () => {
+    try {
+      const res = await api('POST', '/api/mail_accounts/shopee_password/set_bulk', { ids, password }, 30000);
+      await loadMailAccounts();
+      await customAlert(`Đã đặt password cho ${res.updated}/${ids.length} dòng.`);
+    } catch (e) {
+      await customAlert('Lỗi đặt password hàng loạt: ' + e.message, { danger: true });
+    }
+  });
+}
+
+// ---- "Add rate-limit" hang loat: popup rieng (#rate-limit-modal-overlay, GIONG thiet ke
+// "Đặt pass"/"Gom nhóm" - xem yeu cau nguoi dung 2026-09-10) nhap 1 so nguyen, ghi DUNG gia
+// tri do cho cot Rate limit video/ngày cua MOI dong dang tich chon. De trong = XOA gioi han
+// (khong gioi han) - xem /api/mail_accounts/rate_limit_video/set_bulk. ----
+
+// Tra ve { ok:true, value } khi bam "Đồng ý" (value = so nguyen hoac null neu de trong),
+// hoac null khi Huy/Escape/click ra ngoai. Tra ve 'invalid' (chuoi) neu nhap khong hop le.
+function _showRateLimitModal(count) {
+  return new Promise(resolve => {
+    const overlay = document.getElementById('rate-limit-modal-overlay');
+    document.getElementById('rate-limit-modal-count').textContent = count;
+    const input = document.getElementById('rate-limit-input');
+    input.value = '';
+
+    const parseResult = () => {
+      const raw = input.value.trim();
+      if (!raw) return { ok: true, value: null };
+      if (!/^\d+$/.test(raw)) return 'invalid';
+      return { ok: true, value: parseInt(raw, 10) };
+    };
+    const onKeydown = (e) => {
+      if (e.key === 'Escape') close(null);
+      if (e.key === 'Enter') close(parseResult());
+    };
+    const close = (result) => {
+      overlay.classList.remove('show');
+      document.removeEventListener('keydown', onKeydown);
+      resolve(result);
+    };
+    document.getElementById('rate-limit-ok-btn').onclick = () => close(parseResult());
+    document.getElementById('rate-limit-cancel-btn').onclick = () => close(null);
+    overlay.onclick = (e) => { if (e.target === overlay) close(null); };
+    document.addEventListener('keydown', onKeydown);
+
+    overlay.classList.add('show');
+    input.focus();
+  });
+}
+
+async function bulkSetRateLimitVideo(btn) {
+  const ids = mailAccSelectedIds();
+  if (!ids.length) {
+    await customAlert('Chưa chọn dòng nào — hãy tích chọn các dòng cần đặt rate-limit trước.', { danger: true });
+    return;
+  }
+  const result = await _showRateLimitModal(ids.length);
+  if (result === null) return; // bam Huy
+  if (result === 'invalid') {
+    await customAlert('Rate limit phải là số nguyên không âm, hoặc để trống (không giới hạn).', { danger: true });
+    return;
+  }
+  await withBusy(btn, async () => {
+    try {
+      const res = await api('POST', '/api/mail_accounts/rate_limit_video/set_bulk', { ids, rate_limit_video: result.value }, 30000);
+      await loadMailAccounts();
+      const label = result.value === null ? 'không giới hạn' : result.value;
+      await customAlert(`Đã đặt rate limit video/ngày = ${label} cho ${res.updated}/${ids.length} dòng.`);
+    } catch (e) {
+      await customAlert('Lỗi đặt rate-limit hàng loạt: ' + e.message, { danger: true });
+    }
+  });
+}
+
+// ---- "Import GPM ID" hang loat: dan nhieu ID (moi dong 1 ID) trong popup, gan LAN LUOT tu
+// tren xuong cho cac dong DANG TICH CHON theo dung thu tu hien thi, roi TU DONG dong bo lai
+// GPM (Profile/Group/Proxy that) - xem yeu cau nguoi dung 2026-09-10. ----
+async function bulkImportGpmIds(btn) {
+  const ids = mailAccSelectedIds();
+  if (!ids.length) {
+    await customAlert('Chưa chọn dòng nào — hãy tích chọn các dòng cần import GPM ID trước.', { danger: true });
+    return;
+  }
+  const text = await customPrompt(
+    `Dán GPM ID cho ${ids.length} dòng đang tích chọn - MỖI ID 1 DÒNG, theo ĐÚNG thứ tự các dòng đang hiển thị (từ trên xuống):`,
+    { placeholder: 'gpm_id_dòng_thứ_1\ngpm_id_dòng_thứ_2\n...' }
+  );
+  if (text === null) return; // bam Huy
+  const gpmIds = text.split('\n').map(s => s.trim()).filter(s => s);
+  if (!gpmIds.length) {
+    await customAlert('Chưa nhập GPM ID nào.', { danger: true });
+    return;
+  }
+  const n = Math.min(ids.length, gpmIds.length);
+  if (gpmIds.length !== ids.length) {
+    if (!(await customConfirm(
+      `Bạn đang tích chọn ${ids.length} dòng nhưng nhập ${gpmIds.length} GPM ID.\n\n` +
+      `Sẽ chỉ gán cho ${n} dòng ĐẦU TIÊN (theo đúng thứ tự hiển thị). Tiếp tục?`,
+      { danger: true }
+    ))) return;
+  }
+  const items = ids.slice(0, n).map((id, i) => ({ id, id_gpm: gpmIds[i] }));
+
+  // Canh bao truoc khi GHI DE cac dong DA CO san GPM ID (xem yeu cau nguoi dung 2026-09-10) -
+  // dung lai lastMailAccountsList (da nap san tren UI) thay vi goi them API. Van giu DUNG thu
+  // tu vi tri 1-1 nhu yeu cau ban dau (khong tu dong bo qua dong da co ID) - chi hoi xac nhan
+  // khi THAT SU co rui ro ghi de.
+  const accountById = new Map(lastMailAccountsList.map(a => [a.id, a]));
+  const overwrites = items.filter(it => ((accountById.get(it.id) || {}).id_gpm || '').trim());
+  if (overwrites.length) {
+    const preview = overwrites.slice(0, 10).map(it => {
+      const a = accountById.get(it.id) || {};
+      const label = a.profile || a.email || a.shopee_id || ('#' + it.id);
+      return `- ${label}: "${a.id_gpm}" → "${it.id_gpm}"`;
+    }).join('\n');
+    const more = overwrites.length > 10 ? `\n... và ${overwrites.length - 10} dòng khác.` : '';
+    if (!(await customConfirm(
+      `${overwrites.length}/${items.length} dòng đang tích chọn ĐÃ CÓ SẴN GPM ID - sẽ bị GHI ĐÈ:\n\n${preview}${more}\n\nTiếp tục?`,
+      { danger: true }
+    ))) return;
+  }
+
+  await withBusy(btn, async () => {
+    try {
+      const res = await api('POST', '/api/mail_accounts/id_gpm/import_bulk', { items }, 30000);
+      await syncMailAccountsGpm(null, true); // "Đồng thời kích hoạt đồng bộ gpm" - lay lai Profile/Group/Proxy that tu ID vua gan
+      await customAlert(`Đã gán ${res.updated}/${items.length} GPM ID và đồng bộ lại Profile/Group/Proxy từ GPM.`);
+    } catch (e) {
+      await customAlert('Lỗi import GPM ID hàng loạt: ' + e.message, { danger: true });
+    }
+  });
+}
+
+// ---- "Tạo tên profile" hang loat: Tien to CO DINH + hau to SO TU NHIEN tang dan 1 don vi
+// theo dung thu tu cac dong dang tich chon (vd 'PH-' + '00001' -> PH-00001, PH-00002, ...) -
+// xem yeu cau nguoi dung 2026-09-10. Do rong hau to -> mac dinh '00001' (5 chu so). ----
+
+// Phan tich chuoi hau to nguoi dung nhap -> {width, start}, hoac null neu khong hop le (co ky
+// tu khac chu so). width = DO DAI chuoi da nhap (giu nguyen so 0 dau, vd '007' -> width=3) -
+// dung padStart() khi sinh tung ten de GIU DUNG dinh dang, van tang tu nhien qua khoi do dai
+// ban dau (vd 007..099..100..) giong 1 bo dem thuc su.
+function _parseProfileSuffix(raw) {
+  const trimmed = (raw || '').trim();
+  if (!trimmed) return { width: 5, start: 1 }; // khong nhap -> mac dinh 00001
+  if (!/^\d+$/.test(trimmed)) return null;
+  return { width: trimmed.length, start: parseInt(trimmed, 10) };
+}
+
+function _computeProfileNames(prefix, suffixParsed, count) {
+  const names = [];
+  for (let i = 0; i < count; i++) {
+    names.push((prefix || '') + String(suffixParsed.start + i).padStart(suffixParsed.width, '0'));
+  }
+  return names;
+}
+
+function updateProfileNamePreview() {
+  const previewEl = document.getElementById('profile-name-preview');
+  if (!previewEl) return;
+  const prefix = document.getElementById('profile-name-prefix').value;
+  const suffixRaw = document.getElementById('profile-name-suffix').value;
+  const count = parseInt(document.getElementById('profile-name-modal-count').textContent, 10) || 0;
+  const parsed = _parseProfileSuffix(suffixRaw);
+  if (!parsed) {
+    previewEl.textContent = 'Hậu tố phải là số tự nhiên (chỉ gồm chữ số) - để trống nếu muốn dùng mặc định 00001.';
+    previewEl.style.color = 'var(--danger-text)';
+    return;
+  }
+  previewEl.style.color = '';
+  if (!count) { previewEl.textContent = ''; return; }
+  const sample = _computeProfileNames(prefix, parsed, Math.min(count, 3));
+  previewEl.textContent = count > 3
+    ? `Xem trước: ${sample.join(', ')}, ... (${count} dòng)`
+    : `Xem trước: ${sample.join(', ')} (${count} dòng)`;
+}
+
+// Popup rieng (#profile-name-modal-overlay trong HTML) - tra ve {prefix, suffix} khi bam
+// "Đồng ý", null khi Huy/Escape/click ra ngoai.
+function _showProfileNameModal(count) {
+  return new Promise(resolve => {
+    const overlay = document.getElementById('profile-name-modal-overlay');
+    document.getElementById('profile-name-modal-count').textContent = count;
+    document.getElementById('profile-name-prefix').value = '';
+    document.getElementById('profile-name-suffix').value = '';
+    updateProfileNamePreview();
+
+    const onKeydown = (e) => { if (e.key === 'Escape') close(null); };
+    const close = (result) => {
+      overlay.classList.remove('show');
+      document.removeEventListener('keydown', onKeydown);
+      resolve(result);
+    };
+    document.getElementById('profile-name-ok-btn').onclick = () => close({
+      prefix: document.getElementById('profile-name-prefix').value,
+      suffix: document.getElementById('profile-name-suffix').value,
+    });
+    document.getElementById('profile-name-cancel-btn').onclick = () => close(null);
+    overlay.onclick = (e) => { if (e.target === overlay) close(null); };
+    document.addEventListener('keydown', onKeydown);
+
+    overlay.classList.add('show');
+    document.getElementById('profile-name-prefix').focus();
+  });
+}
+
+async function bulkGenerateProfileNames(btn) {
+  const ids = mailAccSelectedIds();
+  if (!ids.length) {
+    await customAlert('Chưa chọn dòng nào — hãy tích chọn các dòng cần tạo tên profile trước.', { danger: true });
+    return;
+  }
+  const result = await _showProfileNameModal(ids.length);
+  if (result === null) return; // bam Huy
+  const parsed = _parseProfileSuffix(result.suffix);
+  if (!parsed) {
+    await customAlert('Hậu tố không hợp lệ - phải là số tự nhiên (chỉ gồm chữ số), hoặc để trống để dùng mặc định 00001.', { danger: true });
+    return;
+  }
+  const names = _computeProfileNames(result.prefix, parsed, ids.length);
+  const items = ids.map((id, i) => ({ id, profile: names[i] }));
+
+  // Canh bao truoc khi GHI DE cac dong DA CO san ten Profile - cung nguyen tac voi "Import
+  // GPM ID" (xem yeu cau nguoi dung truoc do 2026-09-10).
+  const accountById = new Map(lastMailAccountsList.map(a => [a.id, a]));
+  const overwrites = items.filter(it => ((accountById.get(it.id) || {}).profile || '').trim());
+  if (overwrites.length) {
+    const preview = overwrites.slice(0, 10).map(it => {
+      const a = accountById.get(it.id) || {};
+      const label = a.email || a.shopee_id || ('#' + it.id);
+      return `- ${label}: "${a.profile}" → "${it.profile}"`;
+    }).join('\n');
+    const more = overwrites.length > 10 ? `\n... và ${overwrites.length - 10} dòng khác.` : '';
+    if (!(await customConfirm(
+      `${overwrites.length}/${items.length} dòng đang tích chọn ĐÃ CÓ SẴN tên Profile - sẽ bị GHI ĐÈ:\n\n${preview}${more}\n\nTiếp tục?`,
+      { danger: true }
+    ))) return;
+  }
+
+  await withBusy(btn, async () => {
+    try {
+      const res = await api('POST', '/api/mail_accounts/profile/set_bulk', { items }, 30000);
+      await loadMailAccounts();
+      await customAlert(`Đã đặt tên Profile cho ${res.updated}/${items.length} dòng.`);
+    } catch (e) {
+      await customAlert('Lỗi tạo tên profile hàng loạt: ' + e.message, { danger: true });
+    }
+  });
+}
+
+// ---- "Gom nhóm" hang loat: chon 1 nhom GPM tu dropdown (nhom DANG CO trong DB, cung nguon
+// voi filter "Nhóm GPM"), gan CUNG 1 nhom do cho MOI dong dang tich chon - xem yeu cau nguoi
+// dung 2026-09-10. ----
+
+// Popup rieng (#group-assign-modal-overlay) - tra ve ten nhom (string, co the rong neu nguoi
+// dung khong chon) khi bam "Đồng ý", null khi Huy/Escape/click ra ngoai.
+function _showGroupAssignModal(count, groups) {
+  return new Promise(resolve => {
+    const overlay = document.getElementById('group-assign-modal-overlay');
+    document.getElementById('group-assign-modal-count').textContent = count;
+    const select = document.getElementById('group-assign-select');
+    select.innerHTML = '<option value="">-- Chọn nhóm GPM --</option>' +
+      (groups || []).map(g => `<option value="${g.replace(/"/g, '&quot;')}">${g}</option>`).join('');
+
+    const onKeydown = (e) => { if (e.key === 'Escape') close(null); };
+    const close = (result) => {
+      overlay.classList.remove('show');
+      document.removeEventListener('keydown', onKeydown);
+      resolve(result);
+    };
+    document.getElementById('group-assign-ok-btn').onclick = () => close(select.value);
+    document.getElementById('group-assign-cancel-btn').onclick = () => close(null);
+    overlay.onclick = (e) => { if (e.target === overlay) close(null); };
+    document.addEventListener('keydown', onKeydown);
+
+    overlay.classList.add('show');
+    select.focus();
+  });
+}
+
+async function bulkAssignGroup(btn) {
+  const ids = mailAccSelectedIds();
+  if (!ids.length) {
+    await customAlert('Chưa chọn dòng nào — hãy tích chọn các dòng cần gom nhóm trước.', { danger: true });
+    return;
+  }
+  // Nhom phai lay THAT tu chinh GPM/GEM (/api/engines/groups, dung ham list_groups() da co
+  // san cho o goi y GROUP GPM/GEM tren tung dong) - KHONG dung /api/mail_accounts/groups
+  // (chi liet ke ten nhom DA TUNG duoc dung trong DB local, nen nhom MOI tao ben GPM nhung
+  // CHUA co profile nao tro toi se KHONG hien ra, dung y nguoi dung bao cao 2026-09-10).
+  const accountById = new Map(lastMailAccountsList.map(a => [a.id, a]));
+  const engines = new Set(ids.map(id => (accountById.get(id) || {}).engine || 'gpm'));
+  if (engines.size > 1) {
+    await customAlert('Các dòng đang tích chọn thuộc NHIỀU engine khác nhau (GPM và GEM) - "Gom nhóm" chỉ hỗ trợ tích chọn các dòng CÙNG 1 engine (xem cột Engine).', { danger: true });
+    return;
+  }
+  const engine = [...engines][0];
+  let groups = [];
+  try {
+    const res = await api('GET', '/api/engines/groups?engine=' + engine);
+    groups = (res.groups || []).map(g => g.name).filter(n => n);
+  } catch (e) {
+    await customAlert(`Lỗi tải danh sách nhóm ${engine.toUpperCase()} thật: ${e.message} (kiểm tra ứng dụng ${engine === 'gem' ? 'GemLogin' : 'GPM'} đang chạy).`, { danger: true });
+    return;
+  }
+  if (!groups.length) {
+    await customAlert(`Chưa có nhóm ${engine.toUpperCase()} nào — hãy tạo nhóm trong ứng dụng ${engine === 'gem' ? 'GemLogin' : 'GPM'} trước.`, { danger: true });
+    return;
+  }
+  const groupName = await _showGroupAssignModal(ids.length, groups);
+  if (groupName === null) return; // bam Huy
+  if (!groupName) {
+    await customAlert('Chưa chọn nhóm nào.', { danger: true });
+    return;
+  }
+  await withBusy(btn, async () => {
+    try {
+      const res = await api('POST', '/api/mail_accounts/group_gpm/set_bulk', { ids, group_gpm: groupName }, 30000);
+      await loadMailAccounts();
+      await customAlert(`Đã gom ${res.updated}/${ids.length} dòng vào nhóm "${groupName}".`);
+    } catch (e) {
+      await customAlert('Lỗi gom nhóm hàng loạt: ' + e.message, { danger: true });
     }
   });
 }
@@ -3141,7 +3825,7 @@ function postVideoSessionCardHtml(sid) {
       <div class="table-wrap" style="max-height:220px;overflow-y:auto;"><table>
         <thead><tr>
           <th style="width:36px;"><input type="checkbox" id="postvideo-sel-all-${sid}" onclick="postVideoToggleAll(${sid}, this)" title="Chọn/bỏ chọn tất cả tài khoản đang nạp"></th>
-          <th>Tài khoản</th><th>Cookie</th><th>Proxy</th><th>Rate limit/ngày</th><th>Đã đăng hôm nay</th>
+          <th>Tài khoản</th><th>Cookie</th><th>Proxy</th><th style="text-align:center;">Rate limit/ngày</th><th style="text-align:center;">Đã đăng hôm nay</th>
         </tr></thead>
         <tbody id="postvideo-accounts-tbody-${sid}"><tr><td colspan="6" class="muted">Chưa nạp tài khoản - chọn nguồn rồi bấm "Nạp tài khoản theo lọc".</td></tr></tbody>
       </table></div>
@@ -3471,19 +4155,19 @@ async function getShopeeIdsSelected(btn) {
   });
   const skipped = ids.length - valid.length;
   if (!valid.length) {
-    await customAlert('Không có dòng nào đang tích có ID GPM/GEM — hãy tạo profile trước.', { danger: true });
+    await customAlert('Không có dòng nào đang tích có GPM/GEM ID — hãy tạo profile trước.', { danger: true });
     return;
   }
-  const threadsEl = document.getElementById('mailacc-getid-threads');
-  const threads = Math.max(1, Math.min(6, parseInt(threadsEl ? threadsEl.value : '2', 10) || 2));
   const skipNote = skipped ? `- ${skipped} dòng chưa có ID profile sẽ bỏ qua.\n` : '';
-  if (!(await customConfirm(
-    `Lấy Shopee ID cho ${valid.length} dòng đang tích chọn (chạy ${threads} dòng song song)?\n\n` +
+  const threads = await _showThreadsModal(
+    `Lấy Shopee ID cho ${valid.length} dòng đang tích chọn:\n\n` +
     `- Mở trang hồ sơ Shopee theo market của từng dòng, lấy Username rồi ghi vào cột Shopee ID (ghi đè nếu đã có).\n` +
     `- Dòng chưa đăng nhập / bị captcha sẽ MỞ SẴN cửa sổ để bạn xử lý (không ghi ID).\n` +
     skipNote +
-    `- Quá trình mỗi dòng có thể mất 30-60s, cửa sổ sẽ mở ra trong lúc chạy.`
-  ))) return;
+    `- Quá trình mỗi dòng có thể mất 30-60s, cửa sổ sẽ mở ra trong lúc chạy.`,
+    2, 6
+  );
+  if (threads === null) return; // bam Huy
   await withBusy(btn, async () => {
     const results = [];
     let cursor = 0;
@@ -3549,19 +4233,19 @@ async function getCookiesSelected(btn) {
   });
   const skipped = ids.length - valid.length;
   if (!valid.length) {
-    await customAlert('Không có dòng nào đang tích có ID GPM/GEM — hãy tạo profile trước.', { danger: true });
+    await customAlert('Không có dòng nào đang tích có GPM/GEM ID — hãy tạo profile trước.', { danger: true });
     return;
   }
-  const threadsEl = document.getElementById('mailacc-getid-threads');
-  const threads = Math.max(1, Math.min(6, parseInt(threadsEl ? threadsEl.value : '2', 10) || 2));
   const skipNote = skipped ? `- ${skipped} dòng chưa có ID profile sẽ bỏ qua.\n` : '';
-  if (!(await customConfirm(
-    `Lấy Cookie cho ${valid.length} dòng đang tích chọn (chạy ${threads} dòng song song)?\n\n` +
+  const threads = await _showThreadsModal(
+    `Lấy Cookie cho ${valid.length} dòng đang tích chọn:\n\n` +
     `- Mở trang chủ Shopee theo market của từng dòng, lấy toàn bộ cookie đăng nhập rồi ghi vào cột Cookie (ghi đè nếu đã có).\n` +
-    `- Dòng chưa đăng nhập / bị captcha sẽ MỞ SẴN cửa sổ để bạn xử lý (không ghi cookie).\n` +
+    `- Dòng chưa đăng nhập / bị captcha sẽ không ghi cookie - trình duyệt luôn được đóng lại sau khi xong (dù thành công hay thất bại).\n` +
     skipNote +
-    `- Quá trình mỗi dòng có thể mất 30-60s, cửa sổ sẽ mở ra trong lúc chạy.`
-  ))) return;
+    `- Quá trình mỗi dòng có thể mất 30-60s, cửa sổ sẽ mở ra trong lúc chạy.`,
+    2, 6
+  );
+  if (threads === null) return; // bam Huy
   await withBusy(btn, async () => {
     const results = [];
     let cursor = 0;
@@ -3604,6 +4288,238 @@ async function getCookiesSelected(btn) {
   });
 }
 
+// ---- "Login Shopee" (hang loat): tu dong dang nhap Shopee bang Email + Shopee Password cho
+// tung dong dang tich chon - dung /api/mail_accounts/<id>/login_shopee, server tu xu ly luon
+// buoc xac thuc qua link email neu Shopee yeu cau (xem login_plan.txt). Popup thiet ke rieng
+// (#login-shopee-modal-overlay) theo yeu cau nguoi dung 2026-09-11: KHONG dong lai khi bam
+// "Bắt đầu" nhu cac popup khac - o lai xuyen suot qua trinh chay, hien danh sach tung tai
+// khoan + nhat ky theo thoi gian thuc, co nut "Dừng" (dung nhan them tai khoan moi, tai khoan
+// dang chay do van hoan tat - KHONG the huy giua chung 1 request server dang chay vi do la 1
+// tien trinh browser automation dai hoi, khong co co che huy giua chung an toan). ----
+
+const LOGIN_SHOPEE_STATUS_LABEL = {
+  ok: 'Đăng nhập OK',
+  invalid_credentials: 'Sai Email/Shopee Password',
+  captcha: 'Bị captcha/traffic',
+  no_email_link: 'Không đọc được mail xác thực',
+  no_credentials: 'Thiếu Email/Shopee Password',
+  no_id: 'Chưa có GPM/GEM ID',
+  verify_email_link: 'Đang chờ email xác thực',
+  timeout: 'Quá thời gian',
+  error: 'Lỗi',
+};
+
+// Hien 1 popup "bang dieu khien tien trinh" cho danh sach accounts=[{id,label}], tra ve mang
+// ket qua khi nguoi dung bam "Đóng" (sau khi da chay xong/da dung) hoac "Hủy" (truoc khi bam
+// Bắt đầu - tra ve null).
+// Poll /login_shopee/progress cho 1 tai khoan MOI 1.3s trong luc request POST .../login_shopee
+// cua no dang chay (server ghi step moi nhat vao _LOGIN_PROGRESS ngay khi cdp_login_shopee.mjs
+// in ra - xem affiliate_scrape_server.py). Goi onUpdate(step, detail) MOI KHI step DOI (tranh
+// spam log lap lai cung 1 dong). Tra ve ham stop() de goi trong finally khi request xong.
+function _pollLoginShopeeProgress(accountId, onUpdate) {
+  let lastStep = null;
+  let stopped = false;
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      const r = await api('GET', `/api/mail_accounts/${accountId}/login_shopee/progress`, undefined, 8000);
+      if (r && r.step && r.step !== lastStep) {
+        lastStep = r.step;
+        onUpdate(r.step, r.detail || '');
+      }
+    } catch (e) { /* im lang - loi poll tien trinh khong duoc lam gian doan tien trinh chinh */ }
+  };
+  tick();
+  const timer = setInterval(tick, 1300);
+  return () => { stopped = true; clearInterval(timer); };
+}
+
+function _showLoginShopeeRunner(accounts, skipped) {
+  return new Promise(resolve => {
+    const overlay = document.getElementById('login-shopee-modal-overlay');
+    const titleEl = document.getElementById('login-shopee-modal-title');
+    const setupEl = document.getElementById('login-shopee-setup');
+    const threadsInput = document.getElementById('login-shopee-threads-input');
+    const summaryEl = document.getElementById('login-shopee-summary');
+    const tbody = document.getElementById('login-shopee-account-tbody');
+    const logEl = document.getElementById('login-shopee-log');
+    const cancelBtn = document.getElementById('login-shopee-cancel-btn');
+    const startBtn = document.getElementById('login-shopee-start-btn');
+    const stopBtn = document.getElementById('login-shopee-stop-btn');
+    const closeBtn = document.getElementById('login-shopee-close-btn');
+
+    // Popup hien DANH SACH TAI KHOAN NGAY khi mo (khong doi bam "Bắt đầu" moi thay - yeu cau
+    // nguoi dung 2026-09-11), chi phan "Nhật ký" con trong khi chay.
+    titleEl.textContent = `Đăng nhập Shopee cho ${accounts.length} dòng đang tích chọn`;
+    threadsInput.value = Math.min(2, accounts.length);
+    threadsInput.disabled = false;
+    setupEl.style.display = '';
+    cancelBtn.style.display = '';
+    startBtn.style.display = '';
+    stopBtn.style.display = 'none';
+    closeBtn.style.display = 'none';
+    summaryEl.textContent = `${accounts.length} tài khoản đang chờ chạy.`;
+    logEl.textContent = '';
+
+    tbody.innerHTML = '';
+    const rowEls = new Map();
+    accounts.forEach(a => {
+      const tr = document.createElement('tr');
+      const tdLabel = document.createElement('td');
+      tdLabel.textContent = a.label;
+      tdLabel.style.cssText = 'padding:5px 8px; border-top:1px solid var(--border);';
+      const tdStatus = document.createElement('td');
+      tdStatus.className = 'status';
+      tdStatus.textContent = 'Đang chờ';
+      tdStatus.style.cssText = 'padding:5px 8px; border-top:1px solid var(--border); white-space:nowrap;';
+      const tdDetail = document.createElement('td');
+      tdDetail.className = 'detail';
+      tdDetail.style.cssText = 'padding:5px 8px; border-top:1px solid var(--border); font-size:12px; color:var(--ink-muted, #777);';
+      tr.appendChild(tdLabel); tr.appendChild(tdStatus); tr.appendChild(tdDetail);
+      tbody.appendChild(tr);
+      rowEls.set(a.id, tr);
+    });
+
+    function log(msg) {
+      const t = new Date().toLocaleTimeString('vi-VN', { hour12: false });
+      logEl.textContent += `[${t}] ${msg}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    function setRowStatus(id, status, detail) {
+      const tr = rowEls.get(id);
+      if (!tr) return;
+      tr.querySelector('.status').textContent = status;
+      tr.querySelector('.detail').textContent = detail || '';
+    }
+    const counts = {};
+    function updateSummary(done) {
+      const parts = Object.keys(counts).map(k => `${LOGIN_SHOPEE_STATUS_LABEL[k] || k}: ${counts[k]}`);
+      summaryEl.textContent = `Đã xong: ${done}/${accounts.length}` + (parts.length ? ' — ' + parts.join(', ') : '');
+    }
+
+    let stopRequested = false;
+    let escHandler = null;
+    const enableDismiss = () => {
+      escHandler = (e) => { if (e.key === 'Escape') doClose(); };
+      document.addEventListener('keydown', escHandler);
+      overlay.onclick = (e) => { if (e.target === overlay) doClose(); };
+    };
+    const disableDismiss = () => {
+      if (escHandler) { document.removeEventListener('keydown', escHandler); escHandler = null; }
+      overlay.onclick = null;
+    };
+    let results = [];
+    const doClose = () => {
+      disableDismiss();
+      overlay.classList.remove('show');
+      resolve(results);
+    };
+
+    cancelBtn.onclick = doClose; // chi hien truoc khi Bat dau
+    closeBtn.onclick = doClose; // chi hien sau khi da xong/da dung
+
+    startBtn.onclick = async () => {
+      const threads = _clampThreads(threadsInput.value, Math.min(accounts.length, 6));
+      threadsInput.disabled = true;
+      cancelBtn.style.display = 'none';
+      startBtn.style.display = 'none';
+      stopBtn.style.display = '';
+      stopBtn.disabled = false;
+      stopBtn.textContent = 'Dừng';
+      disableDismiss(); // "trong qua trinh chay popup se khong bi tat di" - khoa Escape/click ra ngoai
+
+      if (skipped) log(`Bỏ qua ${skipped} dòng thiếu ID profile / Email / Shopee Password.`);
+      log(`Bắt đầu với ${threads} luồng song song cho ${accounts.length} tài khoản.`);
+
+      let cursor = 0;
+      const next = () => {
+        if (stopRequested) return undefined;
+        const i = cursor++;
+        return i < accounts.length ? accounts[i] : undefined;
+      };
+      const worker = async () => {
+        for (let acc; (acc = next()) !== undefined;) {
+          setRowStatus(acc.id, 'Đang chạy', 'đang bắt đầu...');
+          log(`${acc.label}: bắt đầu đăng nhập...`);
+          // Poll chi tiet tung buoc (yeu cau nguoi dung 2026-09-11: "muon chi tiet hon tung tai
+          // khoan") - moi khi step doi, ghi vao cot Chi tiet cua dong VA vao Nhat ky.
+          const stopProgressPoll = _pollLoginShopeeProgress(acc.id, (step, detail) => {
+            setRowStatus(acc.id, 'Đang chạy', step);
+            log(`${acc.label}: ${step}${detail ? ' — ' + detail : ''}`);
+          });
+          try {
+            const r = await api('POST', `/api/mail_accounts/${acc.id}/login_shopee`, undefined, 260000);
+            results.push({ id: acc.id, ...r });
+            const label = LOGIN_SHOPEE_STATUS_LABEL[r.status] || r.status;
+            setRowStatus(acc.id, label, r.detail || '');
+            counts[r.status] = (counts[r.status] || 0) + 1;
+            log(`${acc.label}: ${label}${r.detail ? ' — ' + r.detail : ''}`);
+          } catch (e) {
+            results.push({ id: acc.id, status: 'error', detail: e.message || 'Lỗi không rõ' });
+            setRowStatus(acc.id, 'Lỗi', e.message || '');
+            counts.error = (counts.error || 0) + 1;
+            log(`${acc.label}: Lỗi — ${e.message || 'không rõ'}`);
+          } finally {
+            stopProgressPoll();
+          }
+          updateSummary(results.length);
+        }
+      };
+      await Promise.all(Array.from({ length: threads }, () => worker()));
+
+      if (stopRequested) {
+        accounts.forEach(a => {
+          const tr = rowEls.get(a.id);
+          if (tr && tr.querySelector('.status').textContent === 'Đang chờ') {
+            tr.querySelector('.status').textContent = 'Đã dừng (chưa chạy)';
+          }
+        });
+        log('Đã dừng theo yêu cầu — các tài khoản chưa chạy đã bị bỏ qua.');
+      } else {
+        log('Đã chạy xong tất cả.');
+      }
+      stopBtn.style.display = 'none';
+      closeBtn.style.display = '';
+    };
+
+    stopBtn.onclick = () => {
+      stopRequested = true;
+      stopBtn.disabled = true;
+      stopBtn.textContent = 'Đang dừng... (chờ tài khoản dở xong)';
+      log('Yêu cầu dừng — không nhận thêm tài khoản mới, tài khoản đang chạy dở sẽ chạy tiếp tới khi xong.');
+    };
+
+    enableDismiss(); // truoc khi Bat dau: Escape/click ra ngoai = Huy
+    overlay.classList.add('show');
+  });
+}
+
+async function loginShopeeSelected(btn) {
+  const ids = mailAccSelectedIds();
+  if (!ids.length) {
+    await customAlert('Chưa chọn dòng nào — hãy tích chọn các dòng cần đăng nhập Shopee trước.', { danger: true });
+    return;
+  }
+  const rowById = new Map(lastMailAccountsList.map(a => [a.id, a]));
+  const valid = ids.filter(id => {
+    const a = rowById.get(id);
+    return a && String(a.id_gpm || '').trim() !== '' && String(a.email || '').trim() !== '' && String(a.shopee_password || '').trim() !== '';
+  });
+  const skipped = ids.length - valid.length;
+  if (!valid.length) {
+    await customAlert('Không có dòng nào đủ điều kiện (cần có GPM/GEM ID, Email và Shopee Password).', { danger: true });
+    return;
+  }
+  const accounts = valid.map(id => {
+    const a = rowById.get(id);
+    return { id, label: a.email || a.shopee_id || a.profile || ('#' + id) };
+  });
+  await withBusy(btn, async () => {
+    await _showLoginShopeeRunner(accounts, skipped);
+    await loadMailAccounts();
+  });
+}
+
 // Dong bo GPM/GEM -> bang: cap nhat ten Profile/GROUP GPM theo engine cua tung dong, tu xoa ID
 // khong con ton tai. btn=null -> chay tham lang (tu dong moi khi mo tab).
 async function syncMailAccountsGpm(btn, silent) {
@@ -3613,9 +4529,9 @@ async function syncMailAccountsGpm(btn, silent) {
     loadAllEngineGroups();
     loadMailAccountGroups();
     if (!silent) {
-      const parts = [`Đã kiểm tra ${r.checked} dòng có ID GPM/GEM.`];
+      const parts = [`Đã kiểm tra ${r.checked} dòng có GPM/GEM ID.`];
       if (r.updated) parts.push(`Đã cập nhật tên Profile / GROUP GPM theo GPM/GEM: ${r.updated} dòng.`);
-      if (r.cleared) parts.push(`Đã xóa ${r.cleared} ID GPM/GEM không còn tồn tại (profile đã bị xóa).`);
+      if (r.cleared) parts.push(`Đã xóa ${r.cleared} GPM/GEM ID không còn tồn tại (profile đã bị xóa).`);
       if (!r.updated && !r.cleared) parts.push('Dữ liệu đã khớp với GPM/GEM — không có gì thay đổi.');
       await customAlert(parts.join('\n'));
     }

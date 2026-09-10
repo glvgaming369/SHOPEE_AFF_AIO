@@ -540,6 +540,23 @@ def init_db(db_path=DB_PATH_DEFAULT):
     # rieng sau neu muon enforce that, xem yeu cau nguoi dung 2026-09-10). NULL = khong gioi han.
     if "rate_limit_video" not in existing_mail_cols:
         conn.execute("alter table mail_accounts add column rate_limit_video integer")
+    # Cot 'shopee_password' (them sau, 2026-09-10): mat khau dang nhap SHOPEE cua tai khoan -
+    # nguoi dung tu nhap tay (KHAC 'password' - mat khau MAIL da co san tu truoc, xem cot
+    # 'Mật khẩu Mail'). Chua dung o dau trong pipeline dang video (pipeline dang dung Cookie
+    # co san, khong can dang nhap lai) - hien chi de LUU/THAM CHIEU, xem yeu cau nguoi dung
+    # 2026-09-10 "Tạo pass hàng loạt".
+    if "shopee_password" not in existing_mail_cols:
+        conn.execute("alter table mail_accounts add column shopee_password text default ''")
+    # Cot 'shopee_login_status'/'shopee_login_checked_at' (them sau, 2026-09-11): trang thai
+    # LAN CUOI nut "Login Shopee" tu dong dang nhap cho dong nay - ghi lai gia tri 'status' tra
+    # ve tu /api/mail_accounts/<id>/login_shopee ('ok', 'invalid_credentials', 'captcha',
+    # 'no_email_link', 'no_credentials', 'no_id', 'timeout', 'error') de loc du lieu tot hon
+    # (vd loc rieng cac dong da dang nhap thanh cong - xem yeu cau nguoi dung 2026-09-11).
+    # NULL = CHUA TUNG chay nut nay cho dong do (khac voi 'error' - da chay nhung loi).
+    if "shopee_login_status" not in existing_mail_cols:
+        conn.execute("alter table mail_accounts add column shopee_login_status text")
+    if "shopee_login_checked_at" not in existing_mail_cols:
+        conn.execute("alter table mail_accounts add column shopee_login_checked_at text")
     conn.execute(
         "create index if not exists idx_mail_accounts_market on mail_accounts(market)"
     )
@@ -2973,7 +2990,7 @@ def import_mail_accounts_from_rows(db_path, rows):
                 _cell_str(row.get("shopee_code")) or None,
                 _cell_str(row.get("proxy")), _cell_str(row.get("device_model")),
                 _cell_str(row.get("device_os_version")), _cell_str(row.get("device_rn_version")),
-                rate_limit_val,
+                rate_limit_val, _cell_str(row.get("shopee_password")),
             ))
         if not parsed_rows:
             return {"added": 0, "skipped_duplicate": skipped_duplicate, "invalid": invalid}
@@ -2981,8 +2998,8 @@ def import_mail_accounts_from_rows(db_path, rows):
             "insert into mail_accounts (full_info, email, password, refresh_token, "
             "client_id, account_type, order_code, shopee_id, device, profile, group_gpm, "
             "id_gpm, slot, market, shopee_code, proxy, device_model, device_os_version, "
-            "device_rn_version, rate_limit_video) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-            "?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "device_rn_version, rate_limit_video, shopee_password) values (?, ?, ?, ?, ?, ?, "
+            "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             parsed_rows,
         )
         conn.commit()
@@ -2991,7 +3008,15 @@ def import_mail_accounts_from_rows(db_path, rows):
         conn.close()
 
 
-def list_mail_accounts(db_path, market=None, slot=None, search=None, group_gpm=None, limit=500):
+def list_mail_accounts(db_path, market=None, slot=None, search=None, group_gpm=None, has_id_gpm=None,
+                        login_status=None, limit=500):
+    """has_id_gpm: None = khong loc; False = CHI cac dong CHUA co GPM ID (id_gpm rong/NULL -
+    dung cho bo loc "Chưa có" tren UI, de tim nhanh dong can dien qua nut 'Import GPM ID');
+    True = CHI cac dong DA CO GPM ID.
+    login_status (them 2026-09-11, xem cot 'shopee_login_status'): None = khong loc; 'ok' =
+    CHI dong da dang nhap Shopee thanh cong lan gan nhat; 'failed' = CHI dong DA TUNG chay nut
+    'Login Shopee' nhung KHONG thanh cong (sai mat khau/captcha/loi/...); 'unchecked' = CHI
+    dong CHUA TUNG chay nut nay lan nao (shopee_login_status con NULL)."""
     conn = _connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
@@ -3006,6 +3031,16 @@ def list_mail_accounts(db_path, market=None, slot=None, search=None, group_gpm=N
         if group_gpm:
             where.append("group_gpm = ?")
             params.append(group_gpm)
+        if has_id_gpm is True:
+            where.append("(id_gpm is not null and trim(id_gpm) != '')")
+        elif has_id_gpm is False:
+            where.append("(id_gpm is null or trim(id_gpm) = '')")
+        if login_status == "ok":
+            where.append("shopee_login_status = 'ok'")
+        elif login_status == "failed":
+            where.append("(shopee_login_status is not null and shopee_login_status != 'ok')")
+        elif login_status == "unchecked":
+            where.append("shopee_login_status is null")
         if search:
             where.append("(email like ? or shopee_id like ? or device like ?)")
             like = f"%{search}%"
@@ -3084,10 +3119,10 @@ def get_mail_account(db_path, account_id):
         conn.close()
 
 
-def update_mail_account_fields(db_path, account_id, shopee_id=None, device=None, profile=None, slot=None, market=None, group_gpm=None, id_gpm=None, engine=None, cookie=None, proxy=None, device_model=None, device_os_version=None, device_rn_version=None, rate_limit_video=None):
+def update_mail_account_fields(db_path, account_id, shopee_id=None, device=None, profile=None, slot=None, market=None, group_gpm=None, id_gpm=None, engine=None, cookie=None, proxy=None, device_model=None, device_os_version=None, device_rn_version=None, rate_limit_video=None, shopee_password=None):
     """Cap nhat MOT PHAN cot nguoi dung tu nhap (tham so None = giu nguyen), dung cho nut
     luu tung dong tren UI khi doi Shopee_id/Device/Profile/Slot/Market/Group_GPM/Id_GPM/
-    Engine/Cookie/Proxy/Device fingerprint/Rate limit video.
+    Engine/Cookie/Proxy/Device fingerprint/Rate limit video/Shopee password.
 
     rate_limit_video: rieng gia tri nay CHO PHEP ghi de thanh chuoi rong '' -> None (xoa gioi
     han) - khac cac field text khac coi '' la "khong doi" (None param). UI gui '' khi nguoi
@@ -3116,25 +3151,90 @@ def update_mail_account_fields(db_path, account_id, shopee_id=None, device=None,
         "device_os_version": device_os_version if device_os_version is not None else current.get("device_os_version", ""),
         "device_rn_version": device_rn_version if device_rn_version is not None else current.get("device_rn_version", ""),
         "rate_limit_video": rate_limit_val,
+        "shopee_password": shopee_password if shopee_password is not None else current.get("shopee_password", ""),
     }
     conn = _connect(db_path)
     try:
         conn.execute(
             "update mail_accounts set shopee_id=?, device=?, profile=?, group_gpm=?, id_gpm=?, "
             "slot=?, market=?, engine=?, cookie=?, proxy=?, device_model=?, device_os_version=?, "
-            "device_rn_version=?, rate_limit_video=? where id=?",
+            "device_rn_version=?, rate_limit_video=?, shopee_password=? where id=?",
             (
                 new_vals["shopee_id"], new_vals["device"], new_vals["profile"],
                 new_vals["group_gpm"], new_vals["id_gpm"],
                 new_vals["slot"], new_vals["market"], new_vals["engine"], new_vals["cookie"],
                 new_vals["proxy"], new_vals["device_model"], new_vals["device_os_version"],
-                new_vals["device_rn_version"], new_vals["rate_limit_video"], account_id,
+                new_vals["device_rn_version"], new_vals["rate_limit_video"], new_vals["shopee_password"], account_id,
             ),
         )
         conn.commit()
     finally:
         conn.close()
     return get_mail_account(db_path, account_id)
+
+
+def bulk_set_shopee_password(db_path, ids, password):
+    """Ap dung CUNG 1 password cho NHIEU dong 1 luc (nut 'Tạo pass hàng loạt' - xem yeu cau
+    nguoi dung 2026-09-10) - 1 lenh UPDATE...IN thay vi N lan goi update_mail_account_fields()
+    rieng, nhanh hon dang ke khi tich chon nhieu dong. Tra ve so dong thuc su duoc cap nhat."""
+    ids = [int(i) for i in ids if str(i).strip().lstrip("-").isdigit()]
+    if not ids:
+        return 0
+    conn = _connect(db_path)
+    try:
+        placeholders = ",".join("?" for _ in ids)
+        cur = conn.execute(
+            f"update mail_accounts set shopee_password=? where id in ({placeholders})",
+            (password, *ids),
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def bulk_set_group_gpm(db_path, ids, group_name):
+    """Ap dung CUNG 1 ten nhom GPM cho NHIEU dong 1 luc (nut 'Gom nhóm' - xem yeu cau nguoi
+    dung 2026-09-10) - CHI ghi cot group_gpm (nhan noi bo, dung khi TAO profile moi qua nut
+    'Tạo profile'). LUU Y: dong DA CO id_gpm (profile that da ton tai trong GPM) se bi
+    'Đồng bộ GPM' ghi DE LAI ve dung nhom that ngay lan sync ke tiep - nut nay chu yeu huu ich
+    cho dong CHUA co id_gpm (dang gom nhom truoc khi tao profile that). Tra ve so dong duoc
+    cap nhat."""
+    ids = [int(i) for i in ids if str(i).strip().lstrip("-").isdigit()]
+    if not ids:
+        return 0
+    conn = _connect(db_path)
+    try:
+        placeholders = ",".join("?" for _ in ids)
+        cur = conn.execute(
+            f"update mail_accounts set group_gpm=? where id in ({placeholders})",
+            (group_name, *ids),
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def bulk_set_rate_limit_video(db_path, ids, rate_limit_video):
+    """Ap dung CUNG 1 gia tri Rate limit video/ngày cho NHIEU dong 1 luc (nut 'Add rate-limit'
+    - xem yeu cau nguoi dung 2026-09-10). rate_limit_video=None -> XOA gioi han (khong gioi
+    han) cho tat ca dong duoc chon - dung y (khac cac ham bulk_set_* khac, gia tri rong o day
+    la 1 lua chon HOP LE, khong phai 'bo qua'). Tra ve so dong duoc cap nhat."""
+    ids = [int(i) for i in ids if str(i).strip().lstrip("-").isdigit()]
+    if not ids:
+        return 0
+    conn = _connect(db_path)
+    try:
+        placeholders = ",".join("?" for _ in ids)
+        cur = conn.execute(
+            f"update mail_accounts set rate_limit_video=? where id in ({placeholders})",
+            (rate_limit_video, *ids),
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
 
 
 def find_mail_accounts_by_shopee_id(db_path, shopee_id, exclude_id=None):
@@ -3166,6 +3266,20 @@ def set_mail_account_code(db_path, account_id, code):
         conn.execute(
             "update mail_accounts set shopee_code=?, checked_at=current_timestamp where id=?",
             (code, account_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_mail_account_login_status(db_path, account_id, status):
+    """Ghi lai trang thai LAN CUOI nut 'Login Shopee' cho 1 dong - xem cot
+    'shopee_login_status' trong init_db() va bo loc login_status cua list_mail_accounts()."""
+    conn = _connect(db_path)
+    try:
+        conn.execute(
+            "update mail_accounts set shopee_login_status=?, shopee_login_checked_at=current_timestamp where id=?",
+            (status, account_id),
         )
         conn.commit()
     finally:

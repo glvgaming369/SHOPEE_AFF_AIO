@@ -17,6 +17,7 @@ import argparse
 import io
 import json
 import os
+import queue
 import random
 import re
 import shutil
@@ -1022,8 +1023,14 @@ def mail_accounts_list():
     slot = request.args.get("slot") or None
     search = request.args.get("search") or None
     group_gpm = request.args.get("group_gpm") or None
+    # has_id_gpm: '0' = loc CHUA co GPM ID, '1' = loc DA co, khong truyen = khong loc.
+    has_id_gpm_raw = request.args.get("has_id_gpm")
+    has_id_gpm = None if has_id_gpm_raw is None else has_id_gpm_raw == "1"
+    # login_status: 'ok'/'failed'/'unchecked', khong truyen = khong loc - xem
+    # shopee_db.list_mail_accounts() va yeu cau nguoi dung 2026-09-11.
+    login_status = request.args.get("login_status") or None
     limit = request.args.get("limit", 500, type=int)
-    rows = shopee_db.list_mail_accounts(DB_PATH, market=market, slot=slot, search=search, group_gpm=group_gpm, limit=limit)
+    rows = shopee_db.list_mail_accounts(DB_PATH, market=market, slot=slot, search=search, group_gpm=group_gpm, has_id_gpm=has_id_gpm, login_status=login_status, limit=limit)
     # with_today_count=1: kem so video da dang THANH CONG HOM NAY moi dong - dung cho bang
     # chon tai khoan o tab "Đăng video" (doi chieu voi rate_limit_video). 1 query GROUP BY
     # chung cho CA trang (xem count_success_today_by_account()), khong phai N query rieng.
@@ -1508,13 +1515,13 @@ def export_mail_accounts_xlsx():
     ws = wb.active
     ws.title = "Tai khoan Shopee"
     ws.append([
-        "Full info", "Email", "PassEmail", "Shopee_id", "Device", "Profile", "Group GPM", "ID GPM",
+        "Full info", "Email", "PassEmail", "Shopee_id", "Shopee Password", "Device", "Profile", "Group GPM", "ID GPM",
         "Slot", "Market", "Shopee_code", "Proxy", "Device Model", "Device OS Version",
         "Device RN Version", "Rate Limit Video", "Thoi gian tao",
     ])
     for a in accounts:
         ws.append([
-            a["full_info"], a["email"], a["password"], a["shopee_id"],
+            a["full_info"], a["email"], a["password"], a["shopee_id"], a.get("shopee_password") or "",
             a["device"], a["profile"], a.get("group_gpm") or "", a.get("id_gpm") or "",
             a["slot"], a["market"], a["shopee_code"],
             a.get("proxy") or "", a.get("device_model") or "", a.get("device_os_version") or "",
@@ -1535,6 +1542,7 @@ def export_mail_accounts_xlsx():
 _IMPORT_MAIL_ACCOUNTS_COLUMN_MAP = {
     "full info": "full_info",
     "shopee_id": "shopee_id",
+    "shopee password": "shopee_password",
     "device": "device",
     "profile": "profile",
     "group gpm": "group_gpm",
@@ -1610,10 +1618,128 @@ def mail_accounts_update(account_id):
         device_os_version=body.get("device_os_version"),
         device_rn_version=body.get("device_rn_version"),
         rate_limit_video=body.get("rate_limit_video"),
+        shopee_password=body.get("shopee_password"),
     )
     if row is None:
         return _bad_request(f"khong tim thay mail id={account_id}")
     return jsonify({"account": row})
+
+
+@app.route("/api/mail_accounts/shopee_password/set_bulk", methods=["POST"])
+def mail_accounts_shopee_password_set_bulk():
+    """Nut 'Tạo pass hàng loạt': ghi DUNG 1 password nguoi dung nhap cho MOI dong dang TICH
+    CHON tren UI - xem shopee_db.bulk_set_shopee_password()."""
+    body = request.get_json(force=True, silent=True) or {}
+    ids = body.get("ids")
+    password = body.get("password")
+    if not isinstance(ids, list) or not ids:
+        return _bad_request("thieu 'ids'")
+    if not password:
+        return _bad_request("thieu 'password'")
+    updated = shopee_db.bulk_set_shopee_password(DB_PATH, ids, password)
+    return jsonify({"ok": True, "updated": updated})
+
+
+@app.route("/api/mail_accounts/group_gpm/set_bulk", methods=["POST"])
+def mail_accounts_group_gpm_set_bulk():
+    """Nut 'Gom nhóm': ghi DUNG 1 ten nhom GPM (chon tu dropdown - nhom DANG CO trong DB) cho
+    MOI dong dang TICH CHON - xem shopee_db.bulk_set_group_gpm()."""
+    body = request.get_json(force=True, silent=True) or {}
+    ids = body.get("ids")
+    group_name = body.get("group_gpm")
+    if not isinstance(ids, list) or not ids:
+        return _bad_request("thieu 'ids'")
+    if not group_name:
+        return _bad_request("thieu 'group_gpm'")
+    updated = shopee_db.bulk_set_group_gpm(DB_PATH, ids, group_name)
+    return jsonify({"ok": True, "updated": updated})
+
+
+@app.route("/api/mail_accounts/rate_limit_video/set_bulk", methods=["POST"])
+def mail_accounts_rate_limit_video_set_bulk():
+    """Nut 'Add rate-limit': ghi DUNG 1 gia tri Rate limit video/ngày (nhap trong popup - de
+    trong = xoa gioi han) cho MOI dong dang TICH CHON - xem shopee_db.bulk_set_rate_limit_video().
+    KHAC cac route bulk khac: 'rate_limit_video' rong/thieu trong body la LUA CHON HOP LE
+    (nghia la 'khong gioi han'), khong bi tu choi nhu 'thieu tham so'."""
+    body = request.get_json(force=True, silent=True) or {}
+    ids = body.get("ids")
+    if not isinstance(ids, list) or not ids:
+        return _bad_request("thieu 'ids'")
+    raw = body.get("rate_limit_video")
+    if raw is None or raw == "":
+        rate_limit_video = None
+    else:
+        try:
+            rate_limit_video = int(raw)
+        except (TypeError, ValueError):
+            return _bad_request("rate_limit_video phai la so nguyen hoac de trong")
+        if rate_limit_video < 0:
+            return _bad_request("rate_limit_video khong duoc am")
+    updated = shopee_db.bulk_set_rate_limit_video(DB_PATH, ids, rate_limit_video)
+    return jsonify({"ok": True, "updated": updated})
+
+
+@app.route("/api/mail_accounts/id_gpm/import_bulk", methods=["POST"])
+def mail_accounts_id_gpm_import_bulk():
+    """Nut 'Import GPM ID' hang loat: gan MOI dong 1 GPM ID KHAC NHAU (theo dung cap {id,
+    id_gpm} client gui, da ghep san theo dung thu tu cac dong dang tich chon <-> dung thu tu
+    tung dong nguoi dung nhap trong popup) - KHAC bulk_set_shopee_password() (dat CUNG 1 gia
+    tri cho tat ca). Khong tu dong bo GPM o day - client tu goi /gpm/sync ngay sau khi route
+    nay tra ve thanh cong (xem yeu cau nguoi dung 2026-09-10: "Đồng thời kích hoạt đồng bộ
+    gpm"), de lay lai dung Profile/Group/Proxy that tu ID vua gan."""
+    body = request.get_json(force=True, silent=True) or {}
+    items = body.get("items")
+    if not isinstance(items, list) or not items:
+        return _bad_request("thieu 'items' (danh sach {id, id_gpm})")
+    updated = 0
+    results = []
+    for it in items:
+        if not isinstance(it, dict):
+            results.append({"id": None, "ok": False, "error": "dong khong hop le."})
+            continue
+        try:
+            aid = int(str(it.get("id") or "").strip())
+        except (TypeError, ValueError):
+            results.append({"id": None, "ok": False, "error": "id khong hop le."})
+            continue
+        id_gpm = str(it.get("id_gpm") or "").strip()
+        row = shopee_db.update_mail_account_fields(DB_PATH, aid, id_gpm=id_gpm)
+        if row is None:
+            results.append({"id": aid, "ok": False, "error": f"khong tim thay mail id={aid}"})
+            continue
+        updated += 1
+        results.append({"id": aid, "ok": True, "id_gpm": id_gpm})
+    return jsonify({"ok": True, "updated": updated, "results": results})
+
+
+@app.route("/api/mail_accounts/profile/set_bulk", methods=["POST"])
+def mail_accounts_profile_set_bulk():
+    """Nut 'Tạo tên profile' hang loat: gan MOI dong 1 ten profile KHAC NHAU (tien to co dinh +
+    hau to tang dan, da tinh san o client - xem bulkGenerateProfileNames() trong index.html)
+    - CUNG dang {id, profile} nhu id_gpm/import_bulk, chi khac field dich."""
+    body = request.get_json(force=True, silent=True) or {}
+    items = body.get("items")
+    if not isinstance(items, list) or not items:
+        return _bad_request("thieu 'items' (danh sach {id, profile})")
+    updated = 0
+    results = []
+    for it in items:
+        if not isinstance(it, dict):
+            results.append({"id": None, "ok": False, "error": "dong khong hop le."})
+            continue
+        try:
+            aid = int(str(it.get("id") or "").strip())
+        except (TypeError, ValueError):
+            results.append({"id": None, "ok": False, "error": "id khong hop le."})
+            continue
+        profile = str(it.get("profile") or "").strip()
+        row = shopee_db.update_mail_account_fields(DB_PATH, aid, profile=profile)
+        if row is None:
+            results.append({"id": aid, "ok": False, "error": f"khong tim thay mail id={aid}"})
+            continue
+        updated += 1
+        results.append({"id": aid, "ok": True, "profile": profile})
+    return jsonify({"ok": True, "updated": updated, "results": results})
 
 
 @app.route("/api/mail_accounts/<int:account_id>", methods=["DELETE"])
@@ -1706,6 +1832,48 @@ def _gpm_market_home(market):
     """Market tren dong mail (PH/TH/MS/...) -> (url trang chu Shopee, code GPM). Mac dinh PH."""
     code = _GPM_MARKET_CODE.get(str(market or "").strip().upper(), "ph")
     return _GPM_HOME_URL.get(code, _GPM_HOME_URL["ph"]), code
+
+
+def _check_shopee_cookie_alive(cookie_str, market):
+    """Kiem tra cookie da luu (cot 'Cookie') con dang nhap duoc voi Shopee hay khong - KHONG
+    can mo browser/GPM, chi 1 request HTTP TRUC TIEP toi API that cua Shopee, dung cho nut
+    'Mở profile' (bo qua khong can mo browser neu cookie con song - xem yeu cau nguoi dung
+    2026-09-11 "check cookie còn sống hay không trước khi mở profile").
+    Da xac nhan THAT (2026-09-11, cookie that cua profile TH-00002):
+      GET /api/v4/account/get_profile voi header Cookie ->
+        con song : {"error": 0, "data": {"user_profile": {"userid": ..., ...}}}
+        chet/het han: {"error": 19, "error_msg": "Failed to authenticate", "data": null}
+    (dung endpoint nay thay vi mo trang SPA /user/account/profile qua requests tran - trang do
+    la React SPA, auth check chay o client-side JS NEN GET HTML tho se LUON tra 200 bat ke da
+    dang nhap hay chua, khong dung de kiem tra duoc qua 1 request HTTP don gian).
+    Tra ve (alive: bool, detail: str)."""
+    if not cookie_str or not cookie_str.strip():
+        return False, "Chua co cookie."
+    home_url, _code = _gpm_market_home(market)
+    host = home_url.split("//", 1)[-1].rstrip("/")
+    try:
+        r = _requests.get(
+            f"https://{host}/api/v4/account/get_profile",
+            headers={
+                "Cookie": cookie_str,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                "Accept": "application/json",
+                "Referer": f"https://{host}/",
+            },
+            timeout=15,
+        )
+    except Exception as e:
+        return False, f"Loi ket noi khi kiem tra cookie: {e}"
+    try:
+        j = r.json()
+    except Exception:
+        return False, f"Phan hoi khong phai JSON khi kiem tra cookie (HTTP {r.status_code})."
+    err = j.get("error")
+    userid = ((j.get("data") or {}).get("user_profile") or {}).get("userid")
+    if err == 0 and userid:
+        return True, f"Cookie con dang nhap (userid={userid})."
+    return False, j.get("error_msg") or f"Cookie khong con hop le (error={err})."
 
 
 def _gpm_list_page_items(payload):
@@ -2125,6 +2293,22 @@ def mail_accounts_gpm_open(account_id):
     })
 
 
+@app.route("/api/mail_accounts/<int:account_id>/check_cookie", methods=["POST"])
+def mail_accounts_check_cookie(account_id):
+    """Kiem tra cookie da luu cua dong nay CON SONG hay khong - KHONG mo browser (xem
+    _check_shopee_cookie_alive()). Dung boi nut 'Mở profile' de QUYET DINH co can mo browser
+    hay khong (cookie con song -> bo qua, khong can mo lai - xem yeu cau nguoi dung 2026-09-11),
+    hoac goi rieng de kiem tra nhanh. status: 'no_cookie' (chua co cookie) / 'alive' / 'dead'."""
+    row = shopee_db.get_mail_account(DB_PATH, account_id)
+    if not row:
+        return _bad_request(f"khong tim thay mail id={account_id}")
+    cookie_str = (row.get("cookie") or "").strip()
+    if not cookie_str:
+        return jsonify({"ok": True, "status": "no_cookie", "detail": "Chua co cookie."})
+    alive, detail = _check_shopee_cookie_alive(cookie_str, row.get("market"))
+    return jsonify({"ok": True, "status": "alive" if alive else "dead", "detail": detail})
+
+
 @app.route("/api/mail_accounts/gpm/open_bulk", methods=["POST"])
 def mail_accounts_gpm_open_bulk():
     """Nut 'Mở profile' hang loat cho cac dong dang duoc TICH CHON: mo browser theo engine cua
@@ -2269,6 +2453,205 @@ def mail_accounts_get_cookie(account_id):
     return jsonify({"ok": True, "status": status, "cookie": None,
                     "detail": res.get("detail") or "", "url": home_url,
                     "user_handle": status in ("no_login", "captcha")})
+
+
+# Trang thai "dang lam gi" MOI NHAT cua tung dong dang chay nut 'Login Shopee' - cho popup
+# tien trinh o frontend POLL de hien chi tiet tung buoc (xem yeu cau nguoi dung 2026-09-11:
+# "muon chi tiet hon tung tai khoan"), KHONG chi biet ket qua cuoi cung. Key = account_id,
+# value = {"step", "detail", "ts"}. Ghi de MOI LAN co buoc moi (khong can lich su), doc qua
+# GET /api/mail_accounts/<id>/login_shopee/progress.
+_LOGIN_PROGRESS = {}
+_LOGIN_PROGRESS_LOCK = threading.Lock()
+
+
+def _set_login_progress(account_id, step, detail=""):
+    with _LOGIN_PROGRESS_LOCK:
+        _LOGIN_PROGRESS[account_id] = {"step": step, "detail": detail, "ts": time.time()}
+
+
+@app.route("/api/mail_accounts/<int:account_id>/login_shopee/progress", methods=["GET"])
+def mail_accounts_login_shopee_progress(account_id):
+    """Frontend POLL endpoint nay (moi 1-2s) trong luc cho ket qua POST .../login_shopee de
+    hien buoc hien tai (vd 'Đang điền form...', 'Đang chờ email xác thực...') - xem
+    _LOGIN_PROGRESS. step=None neu chua co gi (chua bat dau/da xong tu lau)."""
+    with _LOGIN_PROGRESS_LOCK:
+        p = _LOGIN_PROGRESS.get(account_id)
+    if not p:
+        return jsonify({"ok": True, "step": None, "detail": "", "ts": None})
+    return jsonify({"ok": True, "step": p["step"], "detail": p["detail"], "ts": p["ts"]})
+
+
+def _run_login_node(extra_args, timeout, account_id):
+    """Chay cdp_login_shopee.mjs qua Popen (KHONG dung subprocess.run) de doc duoc stdout
+    THEO THOI GIAN THUC tung dong mot - script in ra nhieu dong JSON tien trinh trong luc chay
+    (dang {"progress": true, "step", "detail"} - xem progress() trong cdp_login_shopee.mjs) roi
+    1 dong JSON KET QUA CUOI CUNG (khong co key 'progress'). Moi dong tien trinh doc duoc se
+    ghi ngay vao _LOGIN_PROGRESS cho frontend poll thay ngay lap tuc, khong phai doi ca request
+    xong moi biet dang lam gi (xem yeu cau nguoi dung 2026-09-11).
+    Dung 1 thread doc rieng + queue.Queue de co the ap dung timeout tong the mot cach an toan
+    tren Windows (subprocess pipe KHONG ho tro select() nhu socket tren Windows, nen khong the
+    dat timeout truc tiep tren proc.stdout.readline())."""
+    node_exe = _find_node()
+    cmd = [node_exe, os.path.join(SCRIPTS_DIR, "cdp_login_shopee.mjs")] + extra_args
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, encoding="utf-8", errors="replace")
+    except OSError as e:
+        return {"status": "error", "detail": f"Khong chay duoc node: {e}"}
+
+    line_queue = queue.Queue()
+
+    def _reader():
+        try:
+            for line in proc.stdout:
+                line_queue.put(line)
+        except Exception:
+            pass
+        line_queue.put(None)  # bao hieu stdout da dong (process da ket thuc hoac loi)
+
+    threading.Thread(target=_reader, daemon=True).start()
+
+    last_result = None
+    deadline = time.time() + timeout
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            proc.kill()
+            return {"status": "error", "detail": f"Chay qua {timeout}s (timeout)."}
+        try:
+            line = line_queue.get(timeout=remaining)
+        except queue.Empty:
+            proc.kill()
+            return {"status": "error", "detail": f"Chay qua {timeout}s (timeout)."}
+        if line is None:
+            break
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except Exception:
+            continue
+        if obj.get("progress"):
+            _set_login_progress(account_id, obj.get("step") or "", obj.get("detail") or "")
+            continue
+        last_result = obj
+
+    try:
+        proc.wait(timeout=5)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+    if last_result is not None:
+        return last_result
+    stderr_tail = ""
+    try:
+        err_lines = (proc.stderr.read() or "").strip().splitlines()
+        stderr_tail = err_lines[-1] if err_lines else ""
+    except Exception:
+        pass
+    return {"status": "error", "detail": f"Helper loi: {stderr_tail[:240]}"}
+
+
+@app.route("/api/mail_accounts/<int:account_id>/login_shopee", methods=["POST"])
+def mail_accounts_login_shopee(account_id):
+    """Nut 'Login Shopee' (hang loat): tu dong dang nhap Shopee cho 1 dong bang loginKey=Email
+    (mail account) + password=Shopee Password, dung theo dung luong mo ta trong login_plan.txt.
+    Chay qua cdp_login_shopee.mjs theo 2 buoc:
+      1) --step login: mo trang profile (se bi dieu huong sang trang dang nhap neu chua login),
+         dong popup chon ngon ngu (neu co), dien loginKey/password, bam "Log In", poll ket qua.
+         Neu Shopee bat xac thuc qua link email ("Verify by Email Link") thi script da BAM nut
+         do va tra ve port+tab_id de buoc 2 xu ly tiep (KHONG tu doc mail - Node khong co
+         creds Microsoft Graph).
+      2) O day (Python): doc mail lay link kich hoat qua microsoft_mail_client.fetch_login_link
+         (cung ham dung boi nut '⟳ Kich hoat' hien co) - co retry vi email co the den tre vai
+         giay sau khi bam nut. Sau do goi --step activate: mo link o TAB MOI (khong dieu huong
+         tab dang cho), doi duoc duyet ("Sign-in attempt has been approved.") roi quay lai tab
+         dang dang nhap (Page.bringToFront) va poll tiep ket qua dang nhap cuoi cung.
+    Trong suot qua trinh, ghi tung buoc vao _LOGIN_PROGRESS (xem _run_login_node/
+    _set_login_progress) de frontend poll hien chi tiet theo thoi gian thuc (yeu cau nguoi dung
+    2026-09-11), khong chi bao ket qua cuoi.
+    Tra ve theo trang thai (giong cac nut Get ID/Get Cookie khac):
+      ok                  -> da dang nhap Shopee thanh cong
+      invalid_credentials -> sai Email/Shopee Password
+      captcha              -> bi chan captcha/traffic (de cua so do lai xu ly)
+      no_email_link        -> Shopee yeu cau xac thuc qua mail nhung khong doc duoc link trong mail
+      no_credentials        -> dong chua co Email va/hoac Shopee Password
+      timeout/error         -> qua han/loi khac."""
+    row = shopee_db.get_mail_account(DB_PATH, account_id)
+    if not row:
+        return _bad_request(f"khong tim thay mail id={account_id}")
+    profile_id = (row.get("id_gpm") or "").strip()
+    if not profile_id:
+        return jsonify({"ok": True, "status": "no_id", "detail": "Chua co ID GPM/GEM (bo qua)."})
+    login_key = (row.get("email") or "").strip()
+    password = (row.get("shopee_password") or "").strip()
+    if not login_key or not password:
+        return jsonify({"ok": True, "status": "no_credentials",
+                        "detail": "Chua co Email va/hoac Shopee Password de dang nhap (bo qua)."})
+    engine = _row_engine(row)
+    profile_url = _shopee_profile_base(row.get("market"))
+
+    _set_login_progress(account_id, "Đang mở trình duyệt profile...")
+    res = _run_login_node([
+        "--step", "login", "--engine", engine, "--profile", profile_id, "--url", profile_url,
+        "--login-key", login_key, "--password", password,
+        "--gpm-base", GPM_BASE, "--gem-base", GEM_BASE,
+    ], timeout=140, account_id=account_id)
+
+    status = str(res.get("status") or "error")
+    if status == "ok":
+        _set_login_progress(account_id, "Đăng nhập thành công.")
+        shopee_db.set_mail_account_login_status(DB_PATH, account_id, "ok")
+        return jsonify({"ok": True, "status": "ok", "detail": res.get("detail") or "Da dang nhap.",
+                        "url": profile_url})
+    if status != "verify_email_link":
+        _set_login_progress(account_id, "Đã xong.", res.get("detail") or "")
+        shopee_db.set_mail_account_login_status(DB_PATH, account_id, status)
+        return jsonify({"ok": True, "status": status, "detail": res.get("detail") or "",
+                        "url": profile_url, "user_handle": status in ("captcha",)})
+
+    # Shopee bat xac thuc qua link email - doc mail (co retry, email co the den tre vai giay).
+    port = res.get("port")
+    tab_id = res.get("tab_id")
+    link = None
+    fetch_note = ""
+    for attempt in range(6):  # ~30s cho phep email den tre
+        _set_login_progress(account_id, f"Đang đọc email lấy link kích hoạt (lần {attempt + 1}/6)...")
+        time.sleep(5)
+        try:
+            link, fetch_note, new_refresh_token = microsoft_mail_client.fetch_login_link(
+                row["refresh_token"], row["client_id"])
+            if new_refresh_token and new_refresh_token != row["refresh_token"]:
+                shopee_db.update_mail_account_refresh_token(DB_PATH, account_id, new_refresh_token)
+        except microsoft_mail_client.MicrosoftMailError as e:
+            _set_login_progress(account_id, "Đã xong.", f"Loi doc mail: {e}")
+            shopee_db.set_mail_account_login_status(DB_PATH, account_id, "error")
+            return jsonify({"ok": True, "status": "error", "detail": f"Loi doc mail: {e}",
+                            "url": profile_url})
+        if link:
+            break
+    if not link or not port or not tab_id:
+        detail = f"Khong tim thay link kich hoat trong mail sau nhieu lan thu. {fetch_note}"
+        _set_login_progress(account_id, "Đã xong.", detail)
+        shopee_db.set_mail_account_login_status(DB_PATH, account_id, "no_email_link")
+        return jsonify({"ok": True, "status": "no_email_link", "detail": detail, "url": profile_url})
+
+    _set_login_progress(account_id, "Đã tìm thấy link kích hoạt, đang mở để xác thực...")
+    res2 = _run_login_node([
+        "--step", "activate", "--port", str(port), "--tab0-id", str(tab_id), "--link", link,
+    ], timeout=90, account_id=account_id)
+    status2 = str(res2.get("status") or "error")
+    detail2 = res2.get("detail") or ""
+    if res2.get("approved") is False:
+        detail2 = (detail2 + " (Chua thay xac nhan duyet o tab kich hoat)").strip()
+    _set_login_progress(account_id, "Đã xong.", detail2)
+    shopee_db.set_mail_account_login_status(DB_PATH, account_id, status2)
+    return jsonify({"ok": True, "status": status2, "detail": detail2, "url": profile_url,
+                    "user_handle": status2 in ("captcha",)})
 
 
 @app.route("/api/mail_accounts/gpm/sync", methods=["POST"])

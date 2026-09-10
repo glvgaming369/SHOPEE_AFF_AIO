@@ -148,8 +148,47 @@ _LOGIN_LINK_PATTERN = re.compile(r"https?://[\w-]+\.shp\.ee/dlink/[\w-]+", re.I)
 _SECURITY_SENDER_RE = re.compile(r"^info@security\.shopee\.", re.I)
 
 
+# Shopee (it nhat thi truong TH, xac nhan THAT 2026-09-11) doi sang gui link kich hoat qua
+# SendGrid click-tracking: MOI the <a href> trong mail bi SendGrid boc lai thanh
+# "https://<id>.ct.sendgrid.net/ls/click?upn=..." - link shp.ee/dlink that KHONG con nam truc
+# tiep trong noi dung mail nua (khien _LOGIN_LINK_PATTERN.search() truc tiep khong tim thay
+# gi, du email THAT SU la email kich hoat dang nhap - bug nguoi dung phat hien 2026-09-11 qua
+# nut "Login Shopee": mail toi dung, nhung fetch_login_link tra ve None).
+_SENDGRID_CLICK_PATTERN = re.compile(r"https?://[\w.-]*\.ct\.sendgrid\.net/ls/click\?[^\s\"'<>]+", re.I)
+
+# URL DICH cuoi cung sau khi SendGrid resolve co the la link rut gon (*.shp.ee/dlink/...) HOAC
+# thang link that cua Shopee (vd shopee.co.th/dlink/verify/email-link?...) - khac voi gia dinh
+# ban dau (chi co dang *.shp.ee) - xac nhan THAT qua test 2026-09-11 (mail market TH tra thang
+# ve shopee.co.th/dlink/..., khong qua hop trung gian *.shp.ee nua trong lan resolve nay).
+_LOGIN_DLINK_DEST_RE = re.compile(r"\.shp\.ee/dlink/|shopee\.[a-z.]+/dlink/", re.I)
+
+
+def _resolve_sendgrid_login_link(content, timeout=15):
+    """Voi TUNG link SendGrid click-tracking tim thay trong noi dung mail, GIAI QUYET (follow
+    redirect qua GET - da xac nhan AN TOAN/idempotent bang test that 2026-09-11: goi truoc
+    bang requests tran khong co cookie KHONG lam hong duoc lan approve that su sau do trong
+    browser that) de xem URL DICH cuoi cung co khop _LOGIN_LINK_PATTERN (shp.ee/dlink/...)
+    khong. Tra ve link SendGrid GOC (CHUA resolve) cua ung vien dau tien khop - de trinh duyet
+    that (cdp_login_shopee.mjs --step activate) tu di theo chuoi redirect voi dung cookie/
+    session cua chinh no, KHONG dung URL da resolve san o day (co the mat q=... token dung 1
+    lan neu server gan token o buoc redirect trung gian). None neu khong ung vien nao khop
+    hoac loi mang."""
+    for link in _SENDGRID_CLICK_PATTERN.findall(content):
+        try:
+            r = requests.get(link, allow_redirects=True, timeout=timeout, stream=True)
+            r.close()
+        except requests.RequestException:
+            continue
+        if _LOGIN_DLINK_DEST_RE.search(r.url or ""):
+            return link
+    return None
+
+
 def _find_login_link(messages):
-    """Tim email 'co lan dang nhap moi' + trich link kich hoat - xem 2 pattern tren."""
+    """Tim email 'co lan dang nhap moi' + trich link kich hoat. Uu tien pattern truc tiep
+    (mail cu/thi truong khac co the van gui link tho khong qua SendGrid); fallback sang giai
+    quyet link SendGrid click-tracking neu khong tim thay truc tiep (xem
+    _resolve_sendgrid_login_link)."""
     for m in messages:
         from_addr = ((m.get("from") or {}).get("emailAddress") or {}).get("address") or ""
         if not _SECURITY_SENDER_RE.match(from_addr):
@@ -159,6 +198,9 @@ def _find_login_link(messages):
         match = _LOGIN_LINK_PATTERN.search(content) or _LOGIN_LINK_PATTERN.search(subject)
         if match:
             return match.group(0), subject
+        sendgrid_link = _resolve_sendgrid_login_link(content)
+        if sendgrid_link:
+            return sendgrid_link, subject
     return None, None
 
 
