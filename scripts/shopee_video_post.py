@@ -313,15 +313,25 @@ def sign_request(signing: SigningConfig, target_url: str, body_str: str, proxy: 
     khiến MỌI request ký của MỌI tài khoản cộng dồn vào rate-limit của DUY NHẤT 1 IP đó. Truyền
     proxy CỦA CHÍNH tài khoản đang đăng vào đây (xem _post_signed()) để rate-limit được tính
     RIÊNG theo từng IP, không cộng dồn - đồng thời IP ký và IP đăng khớp nhau, tránh khả năng
-    Shopee đối chiếu lệch IP giữa 2 bước."""
-    resp = requests.post(
-        signing.server2_url,
-        json={"url": target_url, "body": body_str},
-        headers={"Content-Type": "application/json", "X-API-Key": signing.server2_api_key},
-        proxies={"http": proxy, "https": proxy} if proxy else None,
-        timeout=_REQUEST_TIMEOUT_SECONDS,
-    )
-    resp.raise_for_status()
+    Shopee đối chiếu lệch IP giữa 2 bước.
+
+    Loi mang/HTTP tu requests (ConnectionError, Timeout, HTTPError...) bi bat va thay bang 1
+    thong bao CHUNG "Lỗi kết nối server ký" - yeu cau nguoi dung 2026-09-12: khong hien domain server
+    ky (server2_url) ra ngoai UI, vi thong bao loi mac dinh cua requests/urllib3 nhung the nay
+    LUON nhung nguyen host/port vao (vd "HTTPSConnectionPool(host='...', port=443)..."). Van
+    raise tu (`from exc`) de giu nguyen traceback goc phia server cho debug, chi phan HIEN THI
+    (str(exc) -> PostResult.error) la bi thay the."""
+    try:
+        resp = requests.post(
+            signing.server2_url,
+            json={"url": target_url, "body": body_str},
+            headers={"Content-Type": "application/json", "X-API-Key": signing.server2_api_key},
+            proxies={"http": proxy, "https": proxy} if proxy else None,
+            timeout=_REQUEST_TIMEOUT_SECONDS,
+        )
+        resp.raise_for_status()
+    except requests.exceptions.RequestException as exc:
+        raise RuntimeError("Lỗi kết nối server ký") from exc
     data = resp.json()
     headers = data.get("data") if isinstance(data, dict) else None
     if not headers:
