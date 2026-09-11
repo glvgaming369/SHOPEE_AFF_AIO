@@ -3836,7 +3836,9 @@ def main():
             "Python khien nhieu THREAD trong CUNG 1 process KHONG chay song song duoc phan "
             "CPU-bound (chi phan cho I/O that su moi thuc su chay song song trong 1 process) - "
             "chi PROCESS RIENG moi co GIL rieng, he dieu hanh moi xep duoc len loi CPU khac "
-            "nhau THAT SU. Mac dinh min(24, so loi CPU logic cua may nay)."
+            "nhau THAT SU. Mac dinh TU TINH = 80% so loi CPU logic cua may nay (lam tron xuong, "
+            "toi thieu 1) - luon chua 20% cho dashboard/DB/tac vu khac, khong hard-code 1 con "
+            "so co dinh nua."
         ),
     )
     ap.add_argument("--db-path", default=shopee_db.DB_PATH_DEFAULT)
@@ -3863,19 +3865,23 @@ def main():
         return
 
     VIDEO_PORT = args.video_port if args.video_port is not None else args.port + 1
-    # Tran mac dinh: 4 (ban dau) -> 12 (2026-09-11) -> 24 (2026-09-12, yeu cau nguoi dung "tăng
-    # tối đa nhất có thể" SAU KHI da vá proxy theo tung tai khoan cho ca 6 buoc dang video, xem
+    # Tran mac dinh: 4 (ban dau) -> 12 (2026-09-11) -> 24 co dinh (2026-09-12) -> TU TINH theo
+    # 80% so loi CPU logic cua CHINH may dang chay (2026-09-12, yeu cau nguoi dung "tool tự
+    # set-process thông minh theo 80% số process của máy server") - khong con hard-code 1 con
+    # so co dinh, tu thich nghi voi tung may (vd may 56 loi -> 44 process, may 8 loi -> 6
+    # process), luon chua 20% loi CPU cho dashboard/DB/cac tac vu khac (khong chiem het may).
+    # Van uu tien args.video_workers neu nguoi dung TU truyen tay (--video-workers N) - chi tu
+    # tinh khi KHONG truyen co nay.
+    #
+    # Boi canh: sau khi vá proxy theo tung tai khoan cho ca 6 buoc dang video (xem
     # sign_request()/vod_preupload()/upload_video_wscloud()/report_upload_wscloud() trong
-    # shopee_video_post.py) - nut that GIA TAO (server ky theo IP nguon ~30/IP, do thuc te
-    # 2026-09-12) coi nhu da go vi MOI tai khoan gio ky/dang bang DUNG proxy rieng cua no thay
-    # vi dong het vao 1 IP may chu. 24 process (~144 ket noi trinh duyet thuc su, 24 x 6/origin,
-    # xem POSTVIDEO_CONN_PER_ORIGIN o templates/index.html) du cho vai tram luong dong thoi ma
-    # KHONG con la nut that local - may nay 56 loi CPU/64GB RAM du du (con lai ~32 loi cho
-    # dashboard/DB/cac tac vu khac). TRAN THAT CON LAI TU DAY LA BANG THONG UPLOAD VAT LY cua
-    # may + rate-limit RIENG cua TUNG tai khoan Shopee (cot Rate limit video/ngay) - 2 cai nay
-    # KHONG the tang bang cach them process/luong, phai tu tang dan luong that va theo doi ty le
-    # loi/timeout de tim muc phu hop voi duong truyen that.
-    video_workers = args.video_workers if args.video_workers is not None else min(24, os.cpu_count() or 4)
+    # shopee_video_post.py), nut that server ky ngoai (Chill68, rate-limit ~30 request dong
+    # thoi/IP nguon - do thuc te 2026-09-12) coi nhu da go vi MOI tai khoan gio ky/dang bang
+    # DUNG proxy rieng cua no thay vi dong het vao 1 IP may chu - nen tang so process video-
+    # worker (quyet dinh tran ket noi trinh duyet that, xem POSTVIDEO_CONN_PER_ORIGIN o
+    # templates/index.html) gio an toan va co ich thuc su, khong con la "tang cho co" nua.
+    auto_video_workers = max(1, int((os.cpu_count() or 4) * 0.8))
+    video_workers = args.video_workers if args.video_workers is not None else auto_video_workers
     video_workers = max(1, video_workers)
     video_ports = [VIDEO_PORT + i for i in range(video_workers)]
     VIDEO_PORTS = video_ports
@@ -3884,9 +3890,10 @@ def main():
     for p in video_ports:
         _ensure_port_free("127.0.0.1", p)
 
+    workers_source = "tự tính 80% CPU" if args.video_workers is None else "--video-workers"
     print(
         f"[affiliate_scrape_server] DB: {DB_PATH} | chinh: http://127.0.0.1:{args.port} "
-        f"| video ({video_workers} process): {', '.join('http://127.0.0.1:' + str(p) for p in video_ports)}"
+        f"| video ({video_workers} process, {workers_source}): {', '.join('http://127.0.0.1:' + str(p) for p in video_ports)}"
     )
     # threaded=True QUAN TRONG: mac dinh Werkzeug dev server xu ly TUAN TU tung request 1
     # (single-threaded) - voi so luong tab Tampermonkey (worker) chay song song + dashboard

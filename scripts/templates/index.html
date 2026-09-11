@@ -5179,10 +5179,23 @@ function updatePostVideoCapacityInfo(sid) {
 // tai khoan nao san sang NGAY BAY GIO nhung van con tai khoan chua xong (dang cooldown), tra ve
 // null kem 'nextAt' la moc thoi gian SOM NHAT co the thu lai (de caller ngu dung khoang do
 // thay vi busy-poll).
+// Chon tai khoan SAN SANG SOM NHAT (nextAt nho nhat trong so dang <= now), KHONG PHAI tai
+// khoan dau tien gap trong mang accountIds - yeu cau nguoi dung 2026-09-12: "delay theo kieu
+// tinh tu video thu 1 hoan thanh toi khi bat dau video thu 2" nhung thuc te khi so tai khoan >
+// so luong, quet-tra-ve-ngay-khi-gap (code cu) LUON uu tien tai khoan dung TRUOC trong mang moi
+// khi co nhieu tai khoan cung san sang - tai khoan dung SAU bi "doi" lien tuc, khoang cach that
+// giua 2 video cua NO vuot xa delay da dat trong khi tai khoan dau mang lai gan dung delay (thien
+// vi co dinh theo vi tri, khong phai loi cong thuc tinh nextAt). Quet HET danh sach roi chon
+// nextAt NHO NHAT (tai khoan cho lau nhat ke tu luc het cooldown) moi lan claim - phan phoi CONG
+// BANG phan "cho du" (khi luong khong du phuc vu het) cho MOI tai khoan thay vi dong het vao
+// nhom cuoi mang, giup khoang cach thuc te bam sat delay da dat nhat co the trong gioi han so
+// luong dang co.
 function postVideoClaimReadyAccount(accountIds, accountState, perAccountTarget) {
   const now = Date.now();
   let soonestAt = Infinity;
   let anyPending = false;
+  let bestId = null;
+  let bestNextAt = Infinity;
   for (const id of accountIds) {
     const st = accountState.get(id);
     // 'stopped' = tai khoan da gap loi KHONG THE khac phuc (vd cookie hong/het quota that -
@@ -5191,8 +5204,15 @@ function postVideoClaimReadyAccount(accountIds, accountState, perAccountTarget) 
     if (st.done >= perAccountTarget || st.stopped) continue;
     anyPending = true;
     if (st.active) continue;
-    if (st.nextAt <= now) { st.active = true; return { id, anyPending: true }; }
-    if (st.nextAt < soonestAt) soonestAt = st.nextAt;
+    if (st.nextAt <= now) {
+      if (st.nextAt < bestNextAt) { bestNextAt = st.nextAt; bestId = id; }
+    } else if (st.nextAt < soonestAt) {
+      soonestAt = st.nextAt;
+    }
+  }
+  if (bestId != null) {
+    accountState.get(bestId).active = true;
+    return { id: bestId, anyPending: true };
   }
   return { id: null, anyPending, soonestAt };
 }
