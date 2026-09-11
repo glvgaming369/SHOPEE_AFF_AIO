@@ -77,6 +77,42 @@ function fail(status, detail, extra = {}) { out(Object.assign({ status, url: URL
 // 2026-09-11), khong lam script dung lai/thay doi luong xu ly.
 function progress(step, detail) { out({ progress: true, step, detail: detail || '' }); }
 
+// Phu 1 lop mau xanh nhat len TOAN BO man hinh tab kem chu thong bao lon - nguoi dung thuong
+// mo NHIEU cua so profile GPM/GEM cung luc, can nhan biet NGAY ket qua (thanh cong/that bai) ma
+// khong phai doc log rieng (yeu cau nguoi dung 2026-09-11 "phủ lên màn hình profile màu xanh
+// nhạt kèm chữ Thông báo ... sau mỗi logic"). Goi 2 lan tren 1 tab (vd "Login thành công" roi
+// sau do "Get cookie thành công") - tu xoa overlay CU truoc khi ve MOI, tranh chong 2 lop.
+// Best-effort (nuot loi) - khong lam hong ket qua da co du inject that bai (vd tab da dong).
+function overlayJs(title, ok) {
+  const accent = ok ? '#16a34a' : '#dc2626';
+  const icon = ok ? '✓' : '✕';
+  return `(() => {
+    try {
+      const old = document.getElementById('__dsh_notice_overlay');
+      if (old) old.remove();
+      const d = document.createElement('div');
+      d.id = '__dsh_notice_overlay';
+      d.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(173,216,230,0.92);display:flex;align-items:center;justify-content:center;font-family:Arial,Helvetica,sans-serif;';
+      const card = document.createElement('div');
+      card.style.cssText = 'background:#ffffff;border-radius:16px;padding:32px 56px;box-shadow:0 8px 30px rgba(0,0,0,0.28);text-align:center;border-top:8px solid ${accent};';
+      const iconEl = document.createElement('div');
+      iconEl.textContent = '${icon}';
+      iconEl.style.cssText = 'font-size:48px;line-height:1;color:${accent};margin-bottom:12px;';
+      const textEl = document.createElement('div');
+      textEl.textContent = ${JSON.stringify(title)};
+      textEl.style.cssText = 'font-size:26px;font-weight:700;color:#0f172a;white-space:nowrap;';
+      card.appendChild(iconEl);
+      card.appendChild(textEl);
+      d.appendChild(card);
+      document.body.appendChild(d);
+    } catch (e) {}
+  })()`;
+}
+async function showOverlay(cdp, title, ok) {
+  if (!cdp) return;
+  try { await cdp.evaluate(overlayJs(title, ok)); } catch (e) {}
+}
+
 async function startProfile() {
   const base = ENGINE === 'gem' ? GEM_BASE : GPM_BASE;
   const path = ENGINE === 'gem' ? `/api/profiles/start/${PROFILE}` : `/api/v1/profiles/start/${PROFILE}`;
@@ -517,7 +553,9 @@ async function navigateHomeAndExtractCookie(cdp) {
   try { await cdp.send('Page.navigate', { url: homeUrl }); } catch (e) {}
   const loaded = await loadEventPromise;
   await sleep(loaded ? 800 : 2000);
-  return await extractCookieString(cdp, homeUrl);
+  const cookie = await extractCookieString(cdp, homeUrl);
+  await showOverlay(cdp, cookie ? 'Get cookie thành công' : 'Get cookie thất bại', !!cookie);
+  return cookie;
 }
 
 async function runLogin() {
@@ -558,9 +596,12 @@ async function runLogin() {
   if (res.status === 'verify_email_link') {
     out({ status: res.status, detail: res.detail, url: URL, port: st.port, tab_id: tab.id });
   } else if (res.status === 'ok') {
+    await showOverlay(liveCdp, 'Login thành công', true);
+    await sleep(1500); // giu overlay hien du lau de nguoi dung kip nhin thay truoc khi dieu huong di
     const cookie = await navigateHomeAndExtractCookie(liveCdp);
     out({ status: res.status, detail: res.detail, url: URL, cookie });
   } else {
+    await showOverlay(liveCdp, 'Login thất bại', false);
     out({ status: res.status, detail: res.detail, url: URL });
   }
   process.exit(0);
@@ -608,9 +649,12 @@ async function runActivate() {
 
   const { res, cdp: liveCdp } = await handleCaptchaIfNeeded(cdp0, PORT, TAB0_ID, Date.now() + TIMEOUT, false);
   if (res.status === 'ok') {
+    await showOverlay(liveCdp, 'Login thành công', true);
+    await sleep(1500); // giu overlay hien du lau de nguoi dung kip nhin thay truoc khi dieu huong di
     const cookie = await navigateHomeAndExtractCookie(liveCdp);
     out({ status: res.status, detail: res.detail, url: URL, approved, cookie });
   } else {
+    await showOverlay(liveCdp, 'Login thất bại', false);
     out({ status: res.status, detail: res.detail, url: URL, approved });
   }
   process.exit(0);

@@ -54,6 +54,44 @@ const ft = (u, opts = {}) => {
 
 function out(obj) { process.stdout.write(JSON.stringify(obj) + '\n'); }
 
+// Phu 1 lop mau xanh nhat len TOAN BO man hinh tab kem chu thong bao lon truoc khi dong browser
+// - nguoi dung thuong mo NHIEU cua so profile GPM/GEM cung luc, can nhan biet NGAY ket qua
+// (thanh cong/that bai) ma khong phai doc log rieng (yeu cau nguoi dung 2026-09-11 "phủ lên màn
+// hình profile màu xanh nhạt kèm chữ Thông báo ... sau mỗi logic"). COPY nguyen logic tu
+// cdp_login_shopee.mjs. Best-effort (nuot loi) - khong lam hong ket qua da co du inject that bai.
+function overlayJs(title, ok) {
+  const accent = ok ? '#16a34a' : '#dc2626';
+  const icon = ok ? '✓' : '✕';
+  return `(() => {
+    try {
+      const old = document.getElementById('__dsh_notice_overlay');
+      if (old) old.remove();
+      const d = document.createElement('div');
+      d.id = '__dsh_notice_overlay';
+      d.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(173,216,230,0.92);display:flex;align-items:center;justify-content:center;font-family:Arial,Helvetica,sans-serif;';
+      const card = document.createElement('div');
+      card.style.cssText = 'background:#ffffff;border-radius:16px;padding:32px 56px;box-shadow:0 8px 30px rgba(0,0,0,0.28);text-align:center;border-top:8px solid ${accent};';
+      const iconEl = document.createElement('div');
+      iconEl.textContent = '${icon}';
+      iconEl.style.cssText = 'font-size:48px;line-height:1;color:${accent};margin-bottom:12px;';
+      const textEl = document.createElement('div');
+      textEl.textContent = ${JSON.stringify(title)};
+      textEl.style.cssText = 'font-size:26px;font-weight:700;color:#0f172a;white-space:nowrap;';
+      card.appendChild(iconEl);
+      card.appendChild(textEl);
+      d.appendChild(card);
+      document.body.appendChild(d);
+    } catch (e) {}
+  })()`;
+}
+// Sleep DU LAU sau khi ve overlay TRUOC KHI dong browser (closeProfile() dong ca thanh cong lan
+// that bai ngay sau khi co ket qua) - neu khong nguoi dung se khong kip nhin thay gi ca.
+async function showOverlayThenPause(cdp, title, ok) {
+  if (!cdp) return;
+  try { await cdp.evaluate(overlayJs(title, ok)); } catch (e) {}
+  await sleep(2000);
+}
+
 // Dong browser (GPM stop / GEM close) sau khi DA CO KET QUA - THANH CONG hay THAT BAI deu dong
 // (khac cac nut khac nhu Get ID van co y de cua so mo lai cho nguoi dung xu ly login/captcha) -
 // xem yeu cau nguoi dung 2026-09-11 "sau khi lấy thành công hoặc thất bại thì cũng đóng trình
@@ -66,7 +104,12 @@ async function closeProfile() {
   } catch (e) {}
 }
 
-async function fail(status, detail) { out({ status, cookie: null, url: URL, detail }); await closeProfile(); process.exit(0); }
+async function fail(cdp, status, detail) {
+  out({ status, cookie: null, url: URL, detail });
+  await showOverlayThenPause(cdp, 'Get cookie thất bại', false);
+  await closeProfile();
+  process.exit(0);
+}
 
 async function startProfile() {
   const base = ENGINE === 'gem' ? GEM_BASE : GPM_BASE;
@@ -209,8 +252,8 @@ async function main() {
     await sleep(500);
   }
 
-  if (/\/login(\?|$)/.test(current) || /accounts\.shopee/.test(current)) { await fail('no_login', 'Chua dang nhap: ' + current); return; }
-  if (/\/verify\/(captcha|traffic)/.test(current)) { await fail('captcha', 'Bi chan captcha/traffic: ' + current); return; }
+  if (/\/login(\?|$)/.test(current) || /accounts\.shopee/.test(current)) { await fail(cdp, 'no_login', 'Chua dang nhap: ' + current); return; }
+  if (/\/verify\/(captcha|traffic)/.test(current)) { await fail(cdp, 'captcha', 'Bi chan captcha/traffic: ' + current); return; }
 
   // Network.getCookies({urls}) - GIONG chrome.cookies.getAll({url}) cua extension mau: chi
   // tra ve dung nhung cookie se duoc gui kem request toi URL nay (khop domain/path chuan cua
@@ -236,7 +279,7 @@ async function main() {
   const loggedIn = !!(spcU && spcU.value && spcU.value.trim() !== '' && spcU.value !== '-');
   if (!loggedIn) {
     const names = cookies.map((c) => c.name).join(',') || '(khong co cookie nao khop URL)';
-    await fail('no_login', `Khong tim thay SPC_U hop le tai ${current} - cookie doc duoc: ${names}` + (lastCookieErr ? ` | loi: ${lastCookieErr}` : ''));
+    await fail(cdp, 'no_login', `Khong tim thay SPC_U hop le tai ${current} - cookie doc duoc: ${names}` + (lastCookieErr ? ` | loi: ${lastCookieErr}` : ''));
     return;
   }
 
@@ -247,6 +290,7 @@ async function main() {
     .map(([n, v]) => `${n}=${v}`).join('; ');
   const cookieString = cookies.map((c) => `${c.name}=${c.value}`).join('; ') + (suffix ? '; ' + suffix : '');
   out({ status: 'ok', cookie: cookieString, url: current, detail: 'Lay tu CDP Network.getCookies (' + cookies.length + ' cookie).' });
+  await showOverlayThenPause(cdp, 'Get cookie thành công', true);
   cdp.close();
   await closeProfile();
   process.exit(0);
