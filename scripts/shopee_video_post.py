@@ -646,7 +646,16 @@ def shopee_precheck(
 def _create_post_body(
     creator_id: str, market_cfg: dict, video_meta: dict, vid: str, caption: str,
     products: list[dict], extra_context: str, fsize: int, device: dict,
+    is_ai_generated: bool = False,
 ) -> dict:
+    """is_ai_generated: gia tri gan cho field 'is_creator_claim_aigc' (AIGC = AI-Generated
+    Content) - request that da bat duoc tu tool goc LUON gui False (xem
+    CHILL68_VIDEO_UPLOAD_RE.md dong 214), nhung do KHONG the biet chac video nguon co phai do
+    AI tao hay khong (tinh nang "Tạo Video"/VideoAI trong tool nay HOAN TOAN doc lap voi
+    pipeline dang video, xem chu thich o dau khoi route /api/video_sources/* trong
+    affiliate_scrape_server.py) nen de nguoi dung TU quyet dinh qua checkbox tren dashboard
+    (yeu cau nguoi dung 2026-09-12 "gắn nhãn video tạo bởi AI") thay vi hard-code cung 1 gia
+    tri cho moi truong hop."""
     return {
         "content": {
             "from_source": f"creator_id={creator_id}&pre_source=content_merge_tab",
@@ -665,7 +674,7 @@ def _create_post_body(
             "products": products,
             "post_attr": {"share_to_friends": False},
             "content_source": 0, "images": [], "content_type": 0,
-            "is_creator_claim_aigc": False,
+            "is_creator_claim_aigc": is_ai_generated,
             "extra_context": extra_context,
             "allow_info": {"allow_stitch": False, "allow_duet": False},
         },
@@ -687,7 +696,7 @@ def shopee_create_post(
     market_cfg: dict, video_meta: dict, vid: str, caption: str,
     products: list[dict], extra_context: str, fsize: int = 0, proxy: str | None = None,
     device: dict = DEFAULT_DEVICE, device_id: str = "", client_request_id: str = "",
-    session=None,
+    session=None, is_ai_generated: bool = False,
 ) -> str:
     """Bước 6. Trả về post_id nếu thành công, raise RuntimeError nếu vẫn thất bại sau khi thử
     cả 2 biến thể 'shopee_app_version'.
@@ -713,7 +722,7 @@ def shopee_create_post(
     last_data: dict = {}
     last_status = 0
     for label, variant_device, variant_cookie in variants:
-        body = _create_post_body(creator_id, market_cfg, video_meta, vid, caption, products, extra_context, fsize, variant_device)
+        body = _create_post_body(creator_id, market_cfg, video_meta, vid, caption, products, extra_context, fsize, variant_device, is_ai_generated)
         resp = _post_signed(signing, url, body, variant_cookie, csrf_token, market_cfg, proxy, variant_device, device_id, client_request_id, session)
         data = resp.json() if _get_header(resp.headers, "Content-Type", "").startswith("application/json") else {}
         if resp.status_code == 200 and data.get("code") == 0:
@@ -730,12 +739,16 @@ def shopee_create_post(
 def post_video_to_shopee(
     video_path: str, cookie_str: str, caption: str, merge_links: str,
     signing: SigningConfig, market: str = "th", proxy: str | None = None,
-    device_override: dict | None = None,
+    device_override: dict | None = None, is_ai_generated: bool = False,
 ) -> PostResult:
     """Hàm tổng - chạy đủ 6 bước (preupload -> upload -> report -> đợi 10s -> precheck ->
     create) cho 1 video. Nhận thẳng (video_path, caption, merge_links) - xem
     post_videos_from_folder() để nạp hàng loạt từ thư mục video + file .xlsx thay vì gọi
     hàm này 1 mình cho từng video.
+
+    is_ai_generated: truyền xuống shopee_create_post()/_create_post_body() để khai báo
+    trung thực field 'is_creator_claim_aigc' với Shopee (yêu cầu người dùng 2026-09-12) - xem
+    docstring _create_post_body() để hiểu vì sao KHÔNG hard-code cứng 1 giá trị.
 
     proxy: dùng cho precheck/create - hữu ích để phân tán traffic khi chạy nhiều video/tài
     khoản cùng lúc - KHÔNG liên quan lỗi '400003 Post too many videos' (xem
@@ -807,7 +820,7 @@ def post_video_to_shopee(
             signing, cookie_str, csrf_token, creator_id, market_cfg, video_meta,
             vid, caption, products, extra_context, fsize=fsize, proxy=proxy,
             device=device, device_id=device_id, client_request_id=client_request_id,
-            session=session,
+            session=session, is_ai_generated=is_ai_generated,
         )
         return PostResult(success=True, post_id=post_id, vid=vid, raw_responses=raw)
     except Exception as exc:  # noqa: BLE001 - lỗi 1 video phải trả về trong PostResult, không được crash cả batch (post_videos_from_folder cần chạy tiếp các video còn lại)

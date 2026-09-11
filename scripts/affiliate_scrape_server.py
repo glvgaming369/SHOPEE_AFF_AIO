@@ -1426,6 +1426,10 @@ def video_sources_post_next(source_id):
     account_ids = body.get("account_ids")
     if not isinstance(account_ids, list) or not account_ids:
         return _bad_request("thieu 'account_ids' (danh sach id tai khoan dung de xoay vong)")
+    # is_ai_generated: nguoi dung tu bat/tat qua checkbox tren dashboard truoc khi dang (yeu
+    # cau nguoi dung 2026-09-12 "gắn nhãn video tạo bởi AI") - xem docstring
+    # shopee_video_post._create_post_body() de biet vi sao KHONG hard-code cung 1 gia tri.
+    is_ai_generated = bool(body.get("is_ai_generated"))
 
     try:
         matched = _get_matched_pool_cached(folder)
@@ -1486,7 +1490,7 @@ def video_sources_post_next(source_id):
         result = shopee_video_post.post_video_to_shopee(
             video_path=video_path, cookie_str=chosen_account["cookie"], caption=target_row.product_name,
             merge_links=target_row.merge_links, signing=signing, market=market, proxy=proxy,
-            device_override=device_override,
+            device_override=device_override, is_ai_generated=is_ai_generated,
         )
         # log_video_post() + increment_video_source_stats() la 1 DON VI CONG VIEC LOGIC ("video
         # nay xong, ghi ket qua + cap nhat thong ke tong") - gop chung 1 connection/1 giao dich
@@ -1573,6 +1577,7 @@ def video_sources_node_pool_start(source_id):
         max_delay = max(min_delay, float(body.get("max_delay") or min_delay))
     except (TypeError, ValueError):
         return _bad_request("account_ids/threads/per_account_target/min_delay/max_delay khong hop le")
+    is_ai_generated = bool(body.get("is_ai_generated"))  # xem video_sources_post_next()
 
     run_id = uuid.uuid4().hex[:12]
     run_dir = Path(tempfile.gettempdir()) / "shopee_node_pool"
@@ -1591,6 +1596,7 @@ def video_sources_node_pool_start(source_id):
         "perAccountTarget": per_account_target,
         "minDelay": min_delay,
         "maxDelay": max_delay,
+        "isAiGenerated": is_ai_generated,
         "statusFilePath": str(status_path),
         "stopFilePath": str(stop_path),
     }

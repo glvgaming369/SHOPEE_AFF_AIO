@@ -37,6 +37,7 @@ const config = JSON.parse(fs.readFileSync(configPath, 'utf8').replace(/^﻿/, ''
 const {
   mainOrigin, videoPorts, sourceId, accountIds, threads,
   perAccountTarget, minDelay, maxDelay, statusFilePath, stopFilePath,
+  isAiGenerated,
 } = config;
 
 const REQUEST_TIMEOUT_MS = 200000; // dong bo voi API_TIMEOUT ben dashboard (xem templates/index.html)
@@ -65,7 +66,7 @@ async function callPostNext(accountId) {
     const resp = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account_ids: [accountId] }),
+      body: JSON.stringify({ account_ids: [accountId], is_ai_generated: !!isAiGenerated }),
       signal: controller.signal,
     });
     const json = await resp.json();

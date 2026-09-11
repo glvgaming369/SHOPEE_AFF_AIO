@@ -4615,6 +4615,9 @@ function postVideoSessionCardHtml(sid) {
         <label style="white-space:nowrap;font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer;" title="Chạy vòng lặp gọi post_next() bằng 1 tiến trình Node.js riêng thay vì JS trong tab trình duyệt này - thử nghiệm (2026-09-12): đo thực tế xác nhận gọi thẳng server KHÔNG qua Chrome tránh được hiện tượng 'Initial connection' bị kẹt hàng phút khi máy chạy nhiều Chrome/tiện ích mạng khác cùng lúc. Cần cài Node.js trên máy chạy server. Trạng thái vẫn hiện gần real-time qua polling, không mất khả năng theo dõi.">
           <input type="checkbox" id="postvideo-use-node-${sid}"> Chạy qua Node.js
         </label>
+        <label style="white-space:nowrap;font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer;" title="Khai báo trung thực với Shopee video này do AI tạo ra (field 'is_creator_claim_aigc') - yêu cầu người dùng 2026-09-12. CHỈ bật nếu video nguồn trong thư mục THẬT SỰ do AI tạo (tool này KHÔNG tự biết được điều đó - tính năng 'Tạo Video'/VideoAI hoàn toàn độc lập với pipeline đăng video này). Để trống nếu video tự quay/edit thủ công.">
+          <input type="checkbox" id="postvideo-ai-label-${sid}"> Gắn nhãn video do AI tạo
+        </label>
         <button id="postvideo-start-btn-${sid}" onclick="startPostVideoRun(${sid})">▶ Bắt đầu đăng</button>
         <button id="postvideo-stop-btn-${sid}" class="secondary" onclick="stopPostVideoRun(${sid})" disabled>■ Dừng</button>
       </div>
@@ -5259,7 +5262,7 @@ const POSTVIDEO_RAMP_WINDOW_MS = 10000;
 // phien (nghi van gay nghen "Initial connection" tren may co nhieu phan mem VPN/mang xung
 // dot cung chay - xem lich su hoi thoai 2026-09-12). KHONG anh huong toc do sau khi da chay on
 // dinh.
-async function postVideoPoolWorker(sid, sourceId, accountIds, accountState, perAccountTarget, minDelay, maxDelay, stats, session, startDelayMs = 0) {
+async function postVideoPoolWorker(sid, sourceId, accountIds, accountState, perAccountTarget, minDelay, maxDelay, stats, session, startDelayMs = 0, isAiGenerated = false) {
   if (startDelayMs > 0) await sleepMs(startDelayMs);
   while (!session.stopRequested) {
     const claim = postVideoClaimReadyAccount(accountIds, accountState, perAccountTarget);
@@ -5296,7 +5299,7 @@ async function postVideoPoolWorker(sid, sourceId, accountIds, accountState, perA
       // server, KHONG qua trinh duyet): 44/50 thanh cong that nhung co request mat toi 125.3s -
       // 120s la QUA SAT, huy oan cac request van dang xu ly binh thuong chi vi cham chut it duoi
       // tai dong thoi cao. 200s de du bien an toan tren muc da do thuc te.
-      res = await api('POST', postNextUrl, { account_ids: [accountId] }, 200000);
+      res = await api('POST', postNextUrl, { account_ids: [accountId], is_ai_generated: isAiGenerated }, 200000);
     } catch (e) {
       postVideoLog(sid, `✗ LỖI GỌI SERVER (tài khoản ${accountId}): ${e.message} - 1 luồng dừng.`);
       st.active = false;
@@ -5433,7 +5436,11 @@ async function startPostVideoRun(sid) {
   // van de "Initial connection" bi ket da xac nhan thuc nghiem CHI xay ra qua Chrome (nghi do
   // Chrome chia se lop mang voi nhieu Chrome GPM automation khac dang chay cung may).
   const useNode = document.getElementById('postvideo-use-node-' + sid).checked;
-  postVideoLog(sid, `Bắt đầu đăng${useNode ? ' (qua Node.js)' : ''} - nguồn "${s.folder}" (${s.market.toUpperCase()}), ${accountIds.length} tài khoản dùng chung pool ${effectiveThreads} luồng song song (luồng rảnh tự chọn tài khoản sẵn sàng bất kỳ, không cố định), MỖI tài khoản đăng tối đa ${perAccountTarget} video, nghỉ ${delayFixed ? 'cố định ' + minDelay + 's' : minDelay + '-' + maxDelay + 's'} giữa 2 video cùng tài khoản.`);
+  // "Gắn nhãn video do AI tạo" (yeu cau nguoi dung 2026-09-12) - xem docstring
+  // shopee_video_post._create_post_body() phia server de biet vi sao truong nay do NGUOI DUNG
+  // tu quyet dinh thay vi hard-code.
+  const isAiGenerated = document.getElementById('postvideo-ai-label-' + sid).checked;
+  postVideoLog(sid, `Bắt đầu đăng${useNode ? ' (qua Node.js)' : ''} - nguồn "${s.folder}" (${s.market.toUpperCase()}), ${accountIds.length} tài khoản dùng chung pool ${effectiveThreads} luồng song song (luồng rảnh tự chọn tài khoản sẵn sàng bất kỳ, không cố định), MỖI tài khoản đăng tối đa ${perAccountTarget} video, nghỉ ${delayFixed ? 'cố định ' + minDelay + 's' : minDelay + '-' + maxDelay + 's'} giữa 2 video cùng tài khoản${isAiGenerated ? ', gắn nhãn AI-generated' : ''}.`);
 
   // accountState: 1 dong ho rieng (done/nextAt/active) CHO TUNG tai khoan, DUNG CHUNG giua tat
   // ca cac worker cua pool (xem postVideoPoolWorker()/postVideoClaimReadyAccount()) - day la
@@ -5442,7 +5449,7 @@ async function startPostVideoRun(sid) {
   const stats = { posted: 0, ok: 0, fail: 0 };
   try {
     if (useNode) {
-      await runPostVideoNodeMode(sid, s, accountIds, effectiveThreads, perAccountTarget, minDelay, maxDelay, session, stats);
+      await runPostVideoNodeMode(sid, s, accountIds, effectiveThreads, perAccountTarget, minDelay, maxDelay, session, stats, isAiGenerated);
     } else {
       // Rai deu THOI DIEM BAT DAU cua tung luong trong 1 cua so ngan (POSTVIDEO_RAMP_WINDOW_MS)
       // thay vi bat het effectiveThreads luong cung mo ket noi moi trong CUNG 1 khoanh khac -
@@ -5455,7 +5462,7 @@ async function startPostVideoRun(sid) {
       // tu nhien theo cooldown/fairness nhu cu, xem postVideoClaimReadyAccount()).
       await Promise.all(Array.from({ length: effectiveThreads }, (_, workerIdx) =>
         postVideoPoolWorker(sid, s.id, accountIds, accountState, perAccountTarget, minDelay, maxDelay, stats, session,
-          Math.floor((workerIdx / effectiveThreads) * POSTVIDEO_RAMP_WINDOW_MS))
+          Math.floor((workerIdx / effectiveThreads) * POSTVIDEO_RAMP_WINDOW_MS), isAiGenerated)
       ));
     }
   } finally {
@@ -5487,12 +5494,12 @@ function stopPostVideoRun(sid) {
 // thai cua no moi 2s (khong co ket noi truc tiep/callback nao giua 2 ben, chi qua 2 file JSON
 // server doc/ghi) - do do trang thai tren UI cham hon toi da ~2s so voi thuc te, chap nhan duoc
 // doi lay viec goi post_next() hoan toan tach biet khoi lop mang cua Chrome. ----
-async function runPostVideoNodeMode(sid, s, accountIds, effectiveThreads, perAccountTarget, minDelay, maxDelay, session, stats) {
+async function runPostVideoNodeMode(sid, s, accountIds, effectiveThreads, perAccountTarget, minDelay, maxDelay, session, stats, isAiGenerated = false) {
   let runId;
   try {
     const resp = await api('POST', `/api/video_sources/${s.id}/node_pool/start`, {
       account_ids: accountIds, threads: effectiveThreads, per_account_target: perAccountTarget,
-      min_delay: minDelay, max_delay: maxDelay,
+      min_delay: minDelay, max_delay: maxDelay, is_ai_generated: isAiGenerated,
     }, 30000);
     runId = resp.run_id;
   } catch (e) {
