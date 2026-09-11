@@ -250,3 +250,27 @@ def delete_profile(engine, base=None, profile_id=""):
             f"{payload.get('message') or payload}"
         )
     return payload
+
+
+def update_profile_proxy(engine, base=None, profile_id="", raw_proxy=""):
+    """Cap nhat raw_proxy cua 1 profile DA TON TAI (KHONG tao moi) - dung cho nut 'Set-proxy'/
+    'Xoá proxy' (xem yeu cau nguoi dung 2026-09-11: goi len GPM/GEM truoc, dong bo xuong web
+    SAU). raw_proxy="" = XOA proxy (khong con proxy nao).
+    Ca 2 engine dung CHUNG dang endpoint POST .../profiles/update/{id} voi body
+    {"raw_proxy": raw_proxy} - GPM xac nhan qua docs chinh thuc (gpmlogin.com/doc,
+    "Partially updates a profile... raw_proxy: Empty means no proxy"); GEM xac nhan qua doc
+    API chinh thuc (manual-gemlogin-vn.gitbook.io/gemlogin/tai-lieu-api/api, 2026-09-11) - CUNG
+    dung field 'raw_proxy' dang chuoi, KHONG phai object {host,port,...} nhu 1 vai bai viet
+    third-party khac ghi (da doi chieu: list_profiles() o tren cung dang doc field 'raw_proxy'
+    dang chuoi cho CA 2 engine, da xac minh bang GEM that 2026-09-08). Nem AntidetectError neu
+    that bai."""
+    engine = normalize_engine(engine)
+    base = base or engine_base_url(engine)
+    pid = urllib.parse.quote(str(profile_id))
+    path = f"/api/v1/profiles/update/{pid}" if engine == ENGINE_GPM else f"/api/profiles/update/{pid}"
+    payload = _request(engine, "POST", path, base, body={"raw_proxy": raw_proxy}, timeout=30)
+    if not payload.get("success"):
+        engine_label = "GPM" if engine == ENGINE_GPM else "GemLogin"
+        msg = str(payload.get("message") or payload.get("error") or f"{engine_label} cap nhat proxy that bai")
+        raise AntidetectError(f"{engine_label} cap nhat proxy that bai: {msg}")
+    return True

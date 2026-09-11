@@ -59,49 +59,52 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  /* Header */
+  /* Header - thu gon toi da (yeu cau nguoi dung 2026-09-11 "tối ưu nhỏ lại đừng để chiếm quá
+     nhiều diện tích") - bo dong subtitle, giam padding/logo/font. Chieu cao thuc te render
+     ra ~44px (dung lam moc --app-header-h, tham chieu o .nav-container/.mailacc-sticky-toolbar/
+     #mailacc-table-wrap ben duoi - phai doi CA 3 cho nay cung nhau neu con thay doi chieu cao
+     header sau nay). */
   header {
     background: rgba(255, 255, 255, 0.85);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     color: var(--ink);
     border-bottom: 1px solid rgba(226, 232, 240, 0.8);
-    padding: 14px 28px;
+    padding: 8px 22px;
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 10px;
     position: sticky;
     top: 0;
     z-index: 50;
     box-shadow: 0 2px 10px rgba(0,0,0,0.02);
   }
   header .logo-mark {
-    width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+    width: 26px; height: 26px; border-radius: 8px; flex-shrink: 0;
     background: linear-gradient(135deg, var(--accent-light), var(--accent-dark));
     color: #fff; display: flex; align-items: center; justify-content: center;
-    font-weight: 800; font-size: 18px; box-shadow: 0 4px 10px rgba(238, 77, 45, 0.3);
+    font-weight: 800; font-size: 13px; box-shadow: 0 4px 10px rgba(238, 77, 45, 0.3);
   }
-  header h1 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.02em; color: var(--ink); }
-  header .subtitle { margin-top: 1px; font-size: 12px; color: var(--ink-soft); font-weight: 400; }
+  header h1 { margin: 0; font-size: 13.5px; font-weight: 700; letter-spacing: -0.01em; color: var(--ink); }
   header .header-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
   header .version {
-    font-size: 11px; font-weight: 700; color: var(--accent-dark);
+    font-size: 10px; font-weight: 700; color: var(--accent-dark);
     background: var(--accent-soft); border: 1px solid rgba(238, 77, 45, 0.2);
-    padding: 4px 12px; border-radius: 20px;
+    padding: 3px 10px; border-radius: 20px;
   }
 
   /* Navigation Tabs — sidebar trai full-height (app shell) */
   .app-layout {
     display: flex; align-items: stretch;
-    min-height: calc(100vh - 65px);
+    min-height: calc(100vh - 44px);
   }
   .nav-container {
     flex: 0 0 240px; min-width: 0;
     background: var(--surface);
     border-right: 1px solid var(--border);
     display: flex; flex-direction: column;
-    position: sticky; top: 65px;
-    height: calc(100vh - 65px);
+    position: sticky; top: 44px;
+    height: calc(100vh - 44px);
     overflow-y: auto;
     padding: 14px 10px 18px;
   }
@@ -211,7 +214,51 @@
   tbody tr:last-child td { border-bottom: none; }
   tbody tr:hover { background: rgba(248, 250, 252, 0.8); }
   th.sortable { cursor: pointer; user-select: none; white-space: nowrap; transition: color 0.15s; }
+
+  /* Tab "Quản lý account Shopee": tiêu đề + bộ lọc + toolbar + dòng đếm CỐ ĐỊNH khi cuộn
+     trang (sticky ngay dưới header chính, top:44px giống .nav-container - header da thu gon,
+     xem ghi chu tren dinh file) - CHỈ danh sách tài khoản cuộn bên dưới (xem yêu cầu người
+     dùng 2026-09-11).
+     LƯU Ý QUAN TRỌNG: #mailacc-table-wrap có overflow-x:auto (cho bảng nhiều cột cuộn
+     ngang) - theo spec CSS, khi 1 trục overflow khác 'visible' thì trục kia BỊ ÉP thành
+     'auto' luôn (dù không khai báo overflow-y), khiến nó TỰ TRỞ THÀNH 1 scroll container
+     rồi VÔ TÌNH trở thành "khung tham chiếu" cho mọi phần tử sticky bên trong (thay vì
+     trang chính) - đã test thật qua Playwright thấy thead bị lệch sâu xuống trong bảng
+     nếu chỉ set top tính từ đỉnh trang cho thead. Cách ĐÚNG: biến no thành scroll container
+     CÓ CHỦ Ý (max-height cố định + overflow-y:auto) và cho thead sticky top:0 NGAY TRONG
+     no, KHÔNG cộng dồn offset với trang nữa. */
+  .mailacc-sticky-toolbar {
+    position: sticky; top: 44px; z-index: 30;
+    background: var(--surface);
+  }
+  #mailacc-table-wrap {
+    /* Mo rong toi da xuong duoi (yeu cau nguoi dung 2026-09-11) - chi tru phan chac chan can:
+       header chinh (44px) + chieu cao toolbar do bang JS + khoang dem toi thieu cho padding
+       duoi cua section (22px) + 1 chut le an toan. */
+    max-height: calc(100vh - 44px - var(--mailacc-toolbar-h, 190px) - 30px);
+    min-height: 240px;
+    overflow-y: auto;
+  }
+  #mailacc-thead-row th {
+    position: sticky; top: 0; z-index: 20;
+  }
   th.sortable:hover { color: var(--accent-dark); background: var(--border); }
+
+  /* Keo tha doi vi tri cot (xem yeu cau nguoi dung 2026-09-11 "tự do kéo vị trí các cột") */
+  #mailacc-thead-row th.col-draggable { cursor: grab; }
+  #mailacc-thead-row th.col-draggable:active { cursor: grabbing; }
+  #mailacc-thead-row th.dragging { opacity: 0.4; }
+
+  /* Cot checkbox ('_sel') LUON CO DINH ben trai khi cuon ngang (yeu cau nguoi dung
+     2026-09-11) - sticky ca 2 truc cung luc voi th (top:0 da co san o tren cho hang tieu
+     de) + left:0 rieng cho ca thead lan tbody. Can nen (background) rieng vi cac o khac
+     cuon qua duoi no. */
+  #mailacc-thead-row th[data-col="_sel"], #mailacc-tbody td[data-col="_sel"] {
+    position: sticky; left: 0; z-index: 15;
+    background: var(--surface);
+    border-right: 1px solid var(--border-strong);
+  }
+  #mailacc-thead-row th[data-col="_sel"] { z-index: 25; background: var(--surface-2); }
 
   /* Bang tai khoan - can chinh cot cho can doi, duong dan dai xuong dong gon gang */
   .accounts-table td { vertical-align: top; }
@@ -450,6 +497,49 @@
   </div>
 </div>
 
+<!-- Popup rieng cho "Add-market" hang loat - 1 dropdown chon THI TRUONG (MAIL_MARKET_OPTIONS
+     tinh, khong can goi API) ap dung cho MOI dong dang tich chon - xem yeu cau nguoi dung
+     2026-09-11, cung mo hinh voi "Gom nhóm". -->
+<div id="market-assign-modal-overlay" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-icon" id="market-assign-modal-icon">🌏</div>
+    <div class="modal-message">Đặt thị trường cho <b id="market-assign-modal-count">0</b> dòng đang tích chọn:</div>
+    <div style="margin-top:14px;">
+      <select id="market-assign-select" style="width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); box-sizing:border-box; font-size:13.5px;">
+        <option value="">-- Chọn thị trường --</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="secondary" id="market-assign-cancel-btn">Hủy</button>
+      <button id="market-assign-ok-btn">Đồng ý</button>
+    </div>
+  </div>
+</div>
+
+<!-- Popup rieng cho "Set-proxy" hang loat - 1 textarea dan nhieu proxy (moi dong 1 proxy), gan
+     LAN LUOT tu tren xuong cho cac dong dang tich chon theo dung thu tu hien thi. Bam "Đồng ý"
+     se GOI LEN GPM/GEM cap nhat proxy TRUC TIEP tren profile that TRUOC (GUI THANG dung
+     nguyen van dinh dang nguoi dung nhap, KHONG tu doi sang URL co scheme - xem yeu cau nguoi
+     dung 2026-09-11: da bao loi "http://user:pass@host:port sai, dung phai la
+     host:port:user:pass") roi moi dong bo xuong web; nut "Xoá proxy" cung goi len GPM/GEM xoa
+     truc tiep. KHONG con dropdown chon HTTP/SOCKS5 - GPM/GEM tu nhan dien loai proxy tu chinh
+     chuoi nguoi dung nhap (khong qua buoc doi dinh dang cua tool). -->
+<div id="proxy-import-modal-overlay" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-icon" id="proxy-import-modal-icon">🌐</div>
+    <div class="modal-message">Đặt Proxy cho <b id="proxy-import-modal-count">0</b> dòng đang tích chọn:</div>
+    <div style="margin-top:14px; display:flex; flex-direction:column; gap:8px;">
+      <textarea id="proxy-import-textarea" placeholder="host:port:user:pass hoặc host:port&#10;mỗi proxy 1 dòng..."></textarea>
+      <div class="muted" style="font-size:12px;">Dán mỗi proxy 1 dòng, theo ĐÚNG thứ tự các dòng đang hiển thị (từ trên xuống), giữ NGUYÊN VĂN định dạng <code>host:port:user:pass</code> hoặc <code>host:port</code> (không auth) - gửi thẳng lên GPM/GEM đúng như đã nhập, không qua bước đổi định dạng nào. Chỉ áp dụng được cho dòng ĐÃ CÓ GPM/GEM ID (đã "Tạo profile").</div>
+    </div>
+    <div class="modal-actions">
+      <button class="danger" id="proxy-import-clear-btn" style="margin-right:auto;">Xoá proxy</button>
+      <button class="secondary" id="proxy-import-cancel-btn">Hủy</button>
+      <button id="proxy-import-ok-btn">Đồng ý</button>
+    </div>
+  </div>
+</div>
+
 <!-- Popup rieng cho "🔑 Đặt pass" hang loat - 1 o nhap password, thiet ke dang popup GIONG
      "Gom nhóm" (xem yeu cau nguoi dung 2026-09-10) thay vi o nhap inline tren toolbar nhu
      truoc. -->
@@ -513,11 +603,14 @@
   <div class="modal-box" style="max-width:720px; width:92vw;">
     <div class="modal-icon" id="login-shopee-modal-icon">🔐</div>
     <div class="modal-message" id="login-shopee-modal-title">Đăng nhập Shopee</div>
-    <div id="login-shopee-setup" style="margin-top:14px;">
-      <label style="font-size:13px; font-weight:600; color:var(--ink);">Số luồng chạy song song
+    <div id="login-shopee-setup" style="margin-top:14px; display:flex; gap:12px; flex-wrap:wrap;">
+      <label style="font-size:13px; font-weight:600; color:var(--ink); flex:1; min-width:160px;">Số luồng chạy song song
         <input type="number" id="login-shopee-threads-input" min="1" value="2" style="width:100%; margin-top:4px; padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); box-sizing:border-box; font-size:13.5px;">
       </label>
-      <div class="muted" style="font-size:12px; margin-top:6px;">Trong lúc chạy popup này sẽ luôn hiện để bạn theo dõi tiến trình từng tài khoản - có thể bấm "Dừng" bất cứ lúc nào (các tài khoản đang chạy dở sẽ hoàn tất, chỉ các tài khoản chưa bắt đầu mới bị bỏ qua).</div>
+      <label style="font-size:13px; font-weight:600; color:var(--ink); flex:1; min-width:160px;" title="Mỗi tài khoản dùng 1 proxy tốc độ mạng khác nhau - proxy chậm cần timeout dài hơn để không bị báo lỗi/quá hạn oan">Timeout mỗi bước (giây)
+        <input type="number" id="login-shopee-timeout-input" min="20" max="600" value="90" style="width:100%; margin-top:4px; padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); box-sizing:border-box; font-size:13.5px;">
+      </label>
+      <div class="muted" style="font-size:12px; margin-top:6px; width:100%;">Trong lúc chạy popup này sẽ luôn hiện để bạn theo dõi tiến trình từng tài khoản - có thể bấm "Dừng" bất cứ lúc nào (các tài khoản đang chạy dở sẽ hoàn tất, chỉ các tài khoản chưa bắt đầu mới bị bỏ qua). "Timeout mỗi bước" áp dụng cho từng bước chờ trang tải/phản hồi (không tính thời gian đọc email) - proxy mạng chậm nên tăng lên.</div>
     </div>
     <div id="login-shopee-progress" style="margin-top:14px; text-align:left;">
       <div class="muted" id="login-shopee-summary" style="margin-bottom:8px;"></div>
@@ -545,12 +638,66 @@
   </div>
 </div>
 
+<!-- Popup "Add mail" - gop 3 khoi truoc day nam rieng tren trang (Cau hinh dongvanfb API /
+     Mua Email / Them Email thu cong) vao 1 popup DUY NHAT, de lay lai khong gian lam viec cho
+     bang danh sach tai khoan (xem yeu cau nguoi dung 2026-09-11 "làm gọn bố cục giao diện").
+     Cac phan tu ben trong GIU NGUYEN id/ham xu ly cu (mailacc-apikey/mailacc-balance/
+     mailacc-type/mailacc-qty/mailacc-manual-ta/...) - CHI di chuyen vi tri trong DOM, khong
+     doi logic. KHONG tu dong dong sau moi hanh dong (khac cac popup xac nhan khac) - de lam
+     lien tiep nhieu viec (vd luu API key roi mua Email roi dan them mail thu cong) ma khong
+     phai mo lai popup, dong bang nut "Đóng" hoac click ra ngoai/Escape. -->
+<div id="addmail-modal-overlay" class="modal-overlay">
+  <div class="modal-box" style="max-width:640px; width:92vw; text-align:left;">
+    <div class="modal-icon" id="addmail-modal-icon">📧</div>
+    <div class="modal-message">Add mail</div>
+
+    <div style="margin-top:14px; padding-bottom:14px; border-bottom:1px solid var(--border);">
+      <div style="font-size:13px; font-weight:600; color:var(--ink); margin-bottom:6px;">Cấu hình dongvanfb API</div>
+      <div class="muted" style="font-size:12px; margin-bottom:8px;">
+        Dùng chung cho cả mua Email và lấy mã xác minh Shopee - Lấy API key tại
+        <a href="https://docs.dongvanfb.net/" target="_blank">docs.dongvanfb.net</a>.
+      </div>
+      <div class="row" style="flex-wrap:wrap;">
+        <input type="password" id="mailacc-apikey" placeholder="dongvanfb API key" style="max-width:280px;">
+        <button onclick="saveDongvanfbKey(this)">Lưu API Key</button>
+        <span class="muted" style="margin-left:6px;">Số dư: <b id="mailacc-balance" style="color:var(--accent-dark);">--</b></span>
+        <button class="secondary" onclick="loadMailBalance()">Làm mới số dư</button>
+      </div>
+    </div>
+
+    <div style="margin-top:14px; padding-bottom:14px; border-bottom:1px solid var(--border);">
+      <div style="font-size:13px; font-weight:600; color:var(--ink); margin-bottom:6px;">Mua Email</div>
+      <div class="row" style="flex-wrap:wrap;">
+        <select id="mailacc-type" style="max-width:260px;"></select>
+        <label style="white-space:nowrap;font-weight:500;">Số lượng:</label>
+        <input type="number" id="mailacc-qty" min="1" value="1" style="max-width:90px;">
+        <button onclick="buyMailAccounts(this)">Mua Email</button>
+      </div>
+      <div class="muted" id="mailacc-buy-result" style="font-weight:600; color:var(--success-text); margin-top:6px;"></div>
+    </div>
+
+    <div style="margin-top:14px;">
+      <div style="font-size:13px; font-weight:600; color:var(--ink); margin-bottom:6px;">Thêm Email thủ công</div>
+      <div class="muted" style="font-size:12px; margin-bottom:8px;">
+        Dán mail hàng loạt, mỗi mail một dòng, đúng định dạng "full info" như mail mua trên dongvanfb:
+        <code>email|password|refresh_token|client_id</code>.
+      </div>
+      <textarea id="mailacc-manual-ta" placeholder="email1@outlook.com|password1|refresh_token1|client_id1&#10;email2@outlook.com|password2|refresh_token2|client_id2" style="width:100%; box-sizing:border-box;"></textarea>
+      <div class="row" style="margin-top:8px;">
+        <button onclick="addMailAccountsManual(this)">Thêm Email</button>
+        <span class="muted" id="mailacc-manual-result" style="font-weight:600; color:var(--success-text);"></span>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button id="addmail-close-btn">Đóng</button>
+    </div>
+  </div>
+</div>
+
 <header>
   <div class="logo-mark">S</div>
-  <div>
-    <h1>Shopee Affiliate Offer Scraper</h1>
-    <div class="subtitle">Bảng điều khiển vận hành & tự động hóa hệ thống</div>
-  </div>
+  <h1>Shopee Affiliate Offer Scraper</h1>
   <div class="header-right">
     <span class="version">v2.5</span>
   </div>
@@ -896,47 +1043,10 @@
 <div id="tab-mailacc" class="tab-panel">
 
   <section>
-    <h2>Cấu hình dongvanfb API</h2>
-    <div class="muted" style="margin-bottom:10px;">
-      Dùng chung cho cả mua Email và lấy mã xác minh Shopee trên tab này - Lấy API key tại
-      <a href="https://docs.dongvanfb.net/" target="_blank">docs.dongvanfb.net</a>.
-    </div>
-    <div class="row">
-      <input type="password" id="mailacc-apikey" placeholder="dongvanfb API key" style="max-width:360px;">
-      <button onclick="saveDongvanfbKey(this)">Lưu API Key</button>
-      <span class="muted" style="margin-left:10px;">Số dư: <b id="mailacc-balance" style="color:var(--accent-dark);">--</b></span>
-      <button class="secondary" onclick="loadMailBalance()">Làm mới số dư</button>
-    </div>
-  </section>
-
-  <section>
-    <h2>Mua Email</h2>
-    <div class="row">
-      <select id="mailacc-type" style="max-width:300px;"></select>
-      <label style="white-space:nowrap;font-weight:500;">Số lượng:</label>
-      <input type="number" id="mailacc-qty" min="1" value="1" style="max-width:90px;">
-      <button onclick="buyMailAccounts(this)">Mua Email</button>
-      <span class="muted" id="mailacc-buy-result" style="font-weight:600; color:var(--success-text);"></span>
-    </div>
-  </section>
-
-  <section>
-    <h2>Thêm Email thủ công</h2>
-    <div class="muted" style="margin-bottom:10px;">
-      Dán mail hàng loạt, mỗi mail một dòng, đúng định dạng "full info" như mail mua trên dongvanfb:
-      <code>email|password|refresh_token|client_id</code>.
-    </div>
-    <textarea id="mailacc-manual-ta" placeholder="email1@outlook.com|password1|refresh_token1|client_id1&#10;email2@outlook.com|password2|refresh_token2|client_id2"></textarea>
-    <div class="row" style="margin-top:10px;">
-      <button onclick="addMailAccountsManual(this)">Thêm Email</button>
-      <span class="muted" id="mailacc-manual-result" style="font-weight:600; color:var(--success-text);"></span>
-    </div>
-  </section>
-
-  <section>
+  <div class="mailacc-sticky-toolbar" id="mailacc-sticky-toolbar">
     <h2>Danh sách Email / Tài khoản Shopee</h2>
     <!-- Hang 1: bo loc -->
-    <div class="row" style="flex-wrap:wrap;">
+    <div class="row" style="flex-wrap:wrap; position:relative;">
       <select id="mailacc-filter-market" onchange="loadMailAccounts()" style="max-width:180px;">
         <option value="">-- Thị trường: Tất cả --</option>
         <option value="PH">PH (Philippines)</option>
@@ -983,9 +1093,11 @@
       <button class="secondary" onclick="exportMailAccountsXlsx()" title="Xuất Excel các dòng đang TÍCH CHỌN (kèm cột Group GPM / GPM ID để import lại)">Xuất Excel</button>
       <button class="secondary" onclick="bulkGenerateProfileNames(this)" title="Sinh tên Profile hàng loạt: Tiền tố cố định + hậu tố số tự nhiên tăng dần theo thứ tự các dòng đang tích chọn (vd 'PH-' → PH-00001, PH-00002, ...)">Tạo tên profile</button>
       <button class="secondary" onclick="bulkAssignGroup(this)" title="Gán CÙNG 1 nhóm GPM (chọn từ danh sách nhóm đang có) cho MỌI dòng đang tích chọn">Gom nhóm</button>
+      <button class="secondary" onclick="bulkAssignMarket(this)" title="Mở popup chọn thị trường từ dropdown - ghi ĐÈ vào cột 'Thị trường' của TẤT CẢ dòng đang tích chọn">Add-market</button>
       <button class="secondary" onclick="createGpmProfilesSelected(this)" title="Tạo profile theo engine từng dòng (GPM/GEM) - dòng đã có GPM/GEM ID hoặc trùng tên trong cùng nhóm sẽ bỏ qua">Tạo profile</button>
       <button class="secondary" onclick="openGpmProfilesSelected(this)" title="Mở trang chủ Shopee của các dòng đang tích chọn theo engine từng dòng - dòng chưa có GPM/GEM ID sẽ bỏ qua">Mở profile</button>
       <button class="secondary" onclick="bulkImportGpmIds(this)" title="Dán nhiều GPM ID (mỗi dòng 1 ID) - gán LẦN LƯỢT từ trên xuống cho các dòng đang tích chọn theo đúng thứ tự hiển thị, rồi tự động đồng bộ lại Profile/Group/Proxy từ GPM">Import GPM ID</button>
+      <button class="secondary" onclick="bulkSetProxy(this)" title="Dán nhiều Proxy dạng host:port:user:pass (mỗi dòng 1 proxy) - gán LẦN LƯỢT từ trên xuống cho các dòng đang tích chọn theo đúng thứ tự hiển thị, gọi lên GPM/GEM cập nhật trực tiếp trên profile trước khi đồng bộ xuống. Popup cũng có nút xoá proxy hàng loạt">Set-proxy</button>
       <button class="secondary" onclick="assignDeviceFingerprintSelected(this)" title="Gán NGẪU NHIÊN 1 mẫu Device Fingerprint (Model/OS version - dữ liệu thiết bị Android thật) cho từng dòng đang tích chọn, lấy từ pool scripts/device_fingerprints.json">🎲 Fingerprint</button>
       <button class="secondary" onclick="getShopeeIdsSelected(this)" title="Với từng dòng đang tích: mở trang hồ sơ Shopee theo market, lấy Username (Shopee ID) ghi vào cột Shopee ID; chưa login/captcha thì mở sẵn cửa sổ để xử lý">Get ID</button>
       <button class="secondary" onclick="getCookiesSelected(this)" title="Với từng dòng đang tích: mở trang chủ Shopee theo market, lấy toàn bộ cookie đăng nhập ghi vào cột Cookie; luôn đóng trình duyệt lại sau khi xong (thành công hoặc thất bại)">Get Cookie</button>
@@ -995,15 +1107,17 @@
     </div>
     <!-- Hang 3: thao tac chung (khong phu thuoc tich chon) -->
     <div class="row" style="flex-wrap:wrap; margin-top:8px;">
+      <button onclick="openAddMailModal()" title="Cấu hình dongvanfb API, Mua Email, Thêm Email thủ công - gộp chung 1 popup (xem yêu cầu người dùng 2026-09-11)">+ Add mail</button>
       <button class="secondary" onclick="syncMailAccountsGpm(this)" title="Lấy tên profile / nhóm / proxy mới nhất từ GPM & GemLogin ghi đè vào bảng (theo engine từng dòng); ID không còn tồn tại sẽ bị xóa">⟳ Đồng bộ</button>
       <button class="secondary" onclick="document.getElementById('mailacc-import-file').click()">Import</button>
       <input type="file" id="mailacc-import-file" accept=".xlsx" style="display:none;" onchange="importMailAccountsXlsx(this)">
       <button class="danger" onclick="clearMailAccounts()">Xóa tất cả</button>
     </div>
     <div class="muted" style="margin-bottom:10px;" id="mailacc-count"></div>
+  </div>
     <datalist id="gpm-group-names"></datalist>
     <datalist id="gem-group-names"></datalist>
-    <div class="table-wrap"><table>
+    <div class="table-wrap" id="mailacc-table-wrap"><table>
       <thead>
         <tr id="mailacc-thead-row">
           <th style="width:36px;"><input type="checkbox" id="mailacc-sel-all" onclick="mailAccToggleAll(this)" title="Chọn / bỏ chọn tất cả dòng đang hiển thị"></th>
@@ -1392,13 +1506,11 @@ function switchTab(name) {
   if (name === 'products') loadItems();
   if (name === 'video') { loadVideoMachines(); loadVideoStats(); loadVideoPushLog(true); }
   if (name === 'mailacc') {
-    document.getElementById('mailacc-apikey').value = (currentSettings && currentSettings.dongvanfb_api_key) || '';
-    loadMailAccountTypes();
-    loadMailBalance();
     loadMailAccounts();
     loadAllEngineGroups(); // load ten nhom cua ca GPM va GemLogin (cho o goi y GROUP GPM/GEM)
     loadMailAccountGroups(); // load danh sach nhom GPM DANG CO trong DB (cho dropdown loc)
     syncMailAccountsGpm(null, true); // tu dong dong bo GPM -> bang moi lan mo tab (khong hien popup)
+    mailAccUpdateStickyOffset(); // do lai chieu cao toolbar (sticky) - xem yeu cau nguoi dung 2026-09-11
   }
   if (name === 'videosrc') loadVideoSources();
   if (name === 'postvideo') loadPostVideoSources();
@@ -2405,6 +2517,7 @@ let mailAccSort = { field: null, dir: 1 };
 const MAILACC_COLS_STORAGE_KEY = 'dsh_mailacc_hidden_cols_v1';
 // Cac cot nguoi dung co the tick/tat (loai tru cot checkbox + Thao tac luon hien).
 const MAILACC_COL_SETTINGS = [
+  { field: 'engine', label: 'Engine' },
   { field: 'full_info', label: 'Thông tin đầy đủ' },
   { field: 'email', label: 'Email' },
   { field: 'password', label: 'Mật khẩu Mail' },
@@ -2442,11 +2555,100 @@ function mailAccSaveHiddenCols() {
   try { localStorage.setItem(MAILACC_COLS_STORAGE_KEY, JSON.stringify([...mailAccHiddenCols])); } catch (e) { /* bo qua */ }
 }
 
+// ---- Keo tha doi vi tri cot (nut "⚙ Cột" chi an/hien, con day la THU TU hien thi) - luu
+// theo trinh duyet (localStorage), xem yeu cau nguoi dung 2026-09-11 "tự do kéo vị trí các
+// cột". Cot checkbox ('_sel') LUON co dinh dau tien (khong keo duoc) de de chon dong. ----
+const MAILACC_COLORDER_STORAGE_KEY = 'dsh_mailacc_col_order_v1';
+
+function mailAccNaturalColumnOrder() {
+  return MAILACC_COLUMNS.map(c => c.field === null ? 'actions' : c.field);
+}
+
+// Doc thu tu da luu, LOC bo cot khong con ton tai + THEM vao cuoi cac cot MOI phat sinh sau
+// nay (vd cot vua them trong 1 ban cap nhat sau) de khong bi "mat" cot khoi danh sach.
+function mailAccLoadColumnOrder() {
+  const natural = mailAccNaturalColumnOrder();
+  try {
+    const raw = localStorage.getItem(MAILACC_COLORDER_STORAGE_KEY);
+    if (!raw) return natural;
+    const saved = JSON.parse(raw);
+    if (!Array.isArray(saved)) return natural;
+    const savedValid = saved.filter(f => natural.includes(f));
+    const missing = natural.filter(f => !savedValid.includes(f));
+    return [...savedValid, ...missing];
+  } catch (e) {
+    return natural;
+  }
+}
+let mailAccColumnOrder = mailAccLoadColumnOrder();
+
+function mailAccSaveColumnOrder() {
+  try { localStorage.setItem(MAILACC_COLORDER_STORAGE_KEY, JSON.stringify(mailAccColumnOrder)); } catch (e) { /* bo qua */ }
+}
+
+// Sap xep lai DOM (ca hang tieu de + moi hang du lieu dang hien) theo dung mailAccColumnOrder -
+// dung appendChild() lien tiep tren cac phan tu DA CO SAN (khong tao moi) de "day" tung o ve
+// cuoi theo dung thu tu mong muon, dat duoc hieu ung sap xep lai hoan toan ma khong can render
+// lai noi dung tung o (giu nguyen input/button/listener dang co).
+function mailAccApplyColumnOrder() {
+  const theadRow = document.getElementById('mailacc-thead-row');
+  const rows = [theadRow, ...document.querySelectorAll('#mailacc-tbody tr')];
+  rows.forEach(row => {
+    if (!row || !row.children || !row.children.length) return;
+    const cellByCol = {};
+    Array.from(row.children).forEach(cell => { if (cell.dataset && cell.dataset.col) cellByCol[cell.dataset.col] = cell; });
+    mailAccColumnOrder.forEach(col => {
+      const cell = cellByCol[col];
+      if (cell) row.appendChild(cell);
+    });
+  });
+}
+
+let mailAccDragField = null;
+
+// Gan drag-and-drop cho tung <th> (tru '_sel' - cot checkbox luon co dinh dau tien). Goi lai
+// MOI LAN renderMailAccHeader() chay (noi dung thead bi ghi de moi hoan toan moi lan render).
+function mailAccWireColumnDrag() {
+  const tr = document.getElementById('mailacc-thead-row');
+  if (!tr) return;
+  Array.from(tr.children).forEach(th => {
+    const field = th.dataset.col;
+    if (!field || field === '_sel') return;
+    th.draggable = true;
+    th.classList.add('col-draggable');
+    th.ondragstart = (e) => {
+      mailAccDragField = field;
+      e.dataTransfer.effectAllowed = 'move';
+      th.classList.add('dragging');
+    };
+    th.ondragend = () => { th.classList.remove('dragging'); };
+    th.ondragover = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; };
+    th.ondrop = (e) => {
+      e.preventDefault();
+      const targetField = th.dataset.col;
+      if (!mailAccDragField || mailAccDragField === targetField) return;
+      mailAccReorderColumn(mailAccDragField, targetField);
+      mailAccDragField = null;
+    };
+  });
+}
+
+// Dat truong dragField len TRUOC vi tri targetField trong thu tu hien tai, luu lai, ap dung
+// ngay (khong can nap lai du lieu).
+function mailAccReorderColumn(dragField, targetField) {
+  const order = mailAccColumnOrder.filter(f => f !== dragField);
+  const idx = order.indexOf(targetField);
+  order.splice(idx < 0 ? order.length : idx, 0, dragField);
+  mailAccColumnOrder = order;
+  mailAccSaveColumnOrder();
+  mailAccApplyColumnOrder();
+}
+
 // So cot DANG hien (cho dong "chua co Email" can colspan dung).
 function mailAccVisibleColCount() {
   return MAILACC_COLUMNS.filter(c => {
     const k = c.field === null ? 'actions' : c.field;
-    return k === '_sel' || k === 'actions' || k === 'engine' || !mailAccHiddenCols.has(k);
+    return k === '_sel' || k === 'actions' || !mailAccHiddenCols.has(k);
   }).length;
 }
 
@@ -2465,7 +2667,7 @@ function mailAccTagCols() {
 function mailAccApplyVisibility() {
   document.querySelectorAll('#mailacc-thead-row th[data-col], #mailacc-tbody td[data-col]').forEach(el => {
     const col = el.dataset.col;
-    const locked = col === '_sel' || col === 'actions' || col === 'engine';
+    const locked = col === '_sel' || col === 'actions';
     el.style.display = (locked || !mailAccHiddenCols.has(col)) ? '' : 'none';
   });
 }
@@ -2493,6 +2695,11 @@ function resetMailAccCols() {
   mailAccSaveHiddenCols();
   mailAccBuildColPopList();
   mailAccApplyVisibility();
+  // "Đặt lại" cung dua thu tu cot ve mac dinh (khong chi an/hien) - xem yeu cau nguoi dung
+  // 2026-09-11.
+  mailAccColumnOrder = mailAccNaturalColumnOrder();
+  mailAccSaveColumnOrder();
+  mailAccApplyColumnOrder();
 }
 
 function toggleMailAccColPop(e) {
@@ -2646,6 +2853,42 @@ async function addMailAccountsManual(btn) {
   });
 }
 
+// ---- Popup "Add mail" (gop Cau hinh dongvanfb API / Mua Email / Them Email thu cong - xem
+// yeu cau nguoi dung 2026-09-11). KHONG dung Promise nhu cac popup xac nhan khac - day la 1
+// "bang thao tac" don gian, mo/dong tu do, khong can tra ve gia tri gi. ----
+// Do chieu cao THAT SU (co the doi khi man hinh hep lam cac nut toolbar xuong dong) cua khoi
+// sticky toolbar (#mailacc-sticky-toolbar) roi ghi vao CSS custom property de header cot cua
+// bang (#mailacc-thead-row th, sticky rieng) biet dan ngay duoi no, khong che len nhau va
+// khong de ho trong - xem yeu cau nguoi dung 2026-09-11 "cố định khi cuộn trang". Goi lai moi
+// khi vao tab mailacc + khi resize cua so (chi khi tab mailacc dang active, tranh do vo ich).
+function mailAccUpdateStickyOffset() {
+  const toolbar = document.getElementById('mailacc-sticky-toolbar');
+  if (!toolbar) return;
+  const h = toolbar.getBoundingClientRect().height;
+  if (h > 0) document.documentElement.style.setProperty('--mailacc-toolbar-h', h + 'px');
+}
+window.addEventListener('resize', () => {
+  if (document.getElementById('tab-mailacc') && document.getElementById('tab-mailacc').classList.contains('active')) {
+    mailAccUpdateStickyOffset();
+  }
+});
+
+function openAddMailModal() {
+  const overlay = document.getElementById('addmail-modal-overlay');
+  document.getElementById('mailacc-apikey').value = (currentSettings && currentSettings.dongvanfb_api_key) || '';
+  loadMailAccountTypes();
+  loadMailBalance();
+  const close = () => {
+    overlay.classList.remove('show');
+    document.removeEventListener('keydown', onKeydown);
+  };
+  const onKeydown = (e) => { if (e.key === 'Escape') close(); };
+  document.getElementById('addmail-close-btn').onclick = close;
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+  document.addEventListener('keydown', onKeydown);
+  overlay.classList.add('show');
+}
+
 async function loadMailAccounts() {
   const params = new URLSearchParams();
   const market = document.getElementById('mailacc-filter-market').value;
@@ -2711,6 +2954,21 @@ function mailAccLoginStatusBadge(a) {
   return `<span class="badge ${cls}" title="${title.replace(/"/g, '&quot;')}">${label}</span>`;
 }
 
+// Cot 'Cookie' CHI hien TRANG THAI (LIVE/DIE/FAIL/NULL), AN chuoi cookie that (van co the lay
+// qua nut "Sao chép" - doc tu lastMailAccountsList, khong phai tu DOM) - xem yeu cau nguoi
+// dung 2026-09-11. cookie_status ('alive'/'dead') duoc ghi lai moi lan he thong kiem tra
+// (check_cookie) hoac moi lan "Get Cookie" lay duoc cookie MOI thanh cong; NULL (chua tung
+// kiem tra rieng) -> mac dinh coi la LIVE (lac quan, vi da co gia tri cookie that trong DB).
+function mailAccCookieStatusBadge(a, idx) {
+  const cookie = (a.cookie || '').trim();
+  if (!cookie) return '<span class="badge idle">NULL</span>';
+  if (cookie === 'FAIL') return '<span class="badge fail" title="Lần lấy Cookie gần nhất thất bại - cookie cũ (nếu có) đã bị xóa để tránh nhầm là còn dùng được">FAIL</span>';
+  const dead = a.cookie_status === 'dead';
+  const title = a.cookie_status_checked_at ? `Lần kiểm tra gần nhất: ${a.cookie_status_checked_at}` : '';
+  const badge = `<span class="badge ${dead ? 'fail' : 'done'}" title="${title.replace(/"/g, '&quot;')}">${dead ? 'DIE' : 'LIVE'}</span>`;
+  return `${badge} <button class="secondary" onclick="copyMailField(${idx}, 'cookie')">Sao chép</button>`;
+}
+
 function renderMailAccounts() {
   renderMailAccHeader();
   if (mailAccSort.field) {
@@ -2748,9 +3006,7 @@ function renderMailAccounts() {
         <button class="secondary" onclick="toggleMaskedField(this, 'mailacc-shopeepass-${a.id}')" title="Hiện/ẩn mật khẩu">👁</button>
         ${a.shopee_password ? `<button class="secondary" onclick="copyMailField(${idx}, 'shopee_password')">Sao chép</button>` : ''}</td>
       <td>${mailAccLoginStatusBadge(a)}</td>
-      <td>${a.cookie === 'FAIL' ? '<span class="badge fail" title="Lần lấy Cookie gần nhất thất bại - cookie cũ (nếu có) đã bị xóa để tránh nhầm là còn dùng được">FAIL</span>'
-        : a.cookie ? `<span class="ellipsis" style="max-width:140px;" title="${a.cookie.replace(/"/g, '&quot;')}">${a.cookie}</span>
-        <button class="secondary" onclick="copyMailField(${idx}, 'cookie')">Sao chép</button>` : '<span class="muted">Chưa có</span>'}</td>
+      <td>${mailAccCookieStatusBadge(a, idx)}</td>
       <td><input type="text" value="${(a.device || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'device', this.value)" placeholder="Tên thiết bị" style="min-width:160px; width:100%;"></td>
       <td><input type="text" data-field="profile" value="${(a.profile || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'profile', this.value)" placeholder="Profile" style="min-width:160px; width:100%;"></td>
       <td><input type="text" data-field="group_gpm" list="${(a.engine || 'gpm') === 'gem' ? 'gem-group-names' : 'gpm-group-names'}" value="${(a.group_gpm || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'group_gpm', this.value)" placeholder="Group GPM/GEM" title="Tên nhóm muốn tạo profile (gợi ý theo engine của dòng)" style="min-width:150px; width:100%;"></td>
@@ -2781,6 +3037,8 @@ function renderMailAccounts() {
   `).join('') || `<tr><td colspan="${mailAccVisibleColCount()}" class="muted">Chưa có Email nào.</td></tr>`;
   refreshMailAccSelUI();
   mailAccTagCols();
+  mailAccApplyColumnOrder();
+  mailAccWireColumnDrag();
   mailAccApplyVisibility();
 }
 
@@ -3388,6 +3646,123 @@ async function bulkImportGpmIds(btn) {
   });
 }
 
+// ---- "Set-proxy" hang loat: popup rieng (#proxy-import-modal-overlay) - dropdown chon loai
+// proxy (HTTP/SOCKS5) + textarea dan nhieu proxy (moi dong 1 proxy), gan LAN LUOT tu tren
+// xuong cho cac dong dang tich chon theo dung thu tu hien thi. Bam "Đồng ý"/"Xoá proxy" deu
+// GOI LEN GPM/GEM cap nhat/xoa proxy TRUC TIEP tren profile that TRUOC, roi moi dong bo
+// (syncMailAccountsGpm) xuong DB local - xem /api/mail_accounts/proxy/import_bulk,
+// /api/mail_accounts/proxy/clear_bulk va yeu cau nguoi dung 2026-09-11. ----
+
+// Tra ve { action: 'set', protocol, text } khi bam "Đồng ý", { action: 'clear' } khi bam "Xoá
+// proxy", null khi Huy/Escape/click ra ngoai.
+function _showProxyImportModal(count) {
+  return new Promise(resolve => {
+    const overlay = document.getElementById('proxy-import-modal-overlay');
+    document.getElementById('proxy-import-modal-count').textContent = count;
+    const textarea = document.getElementById('proxy-import-textarea');
+    textarea.value = '';
+
+    const onKeydown = (e) => { if (e.key === 'Escape') close(null); };
+    const close = (result) => {
+      overlay.classList.remove('show');
+      document.removeEventListener('keydown', onKeydown);
+      resolve(result);
+    };
+    document.getElementById('proxy-import-ok-btn').onclick = () => close({ action: 'set', text: textarea.value });
+    document.getElementById('proxy-import-clear-btn').onclick = () => close({ action: 'clear' });
+    document.getElementById('proxy-import-cancel-btn').onclick = () => close(null);
+    overlay.onclick = (e) => { if (e.target === overlay) close(null); };
+    document.addEventListener('keydown', onKeydown);
+
+    overlay.classList.add('show');
+    textarea.focus();
+  });
+}
+
+// In ket qua {id, ok, error} hang loat theo 1 khuon chung (dung cho ca "Đặt Proxy" va "Xoá
+// proxy") - actionLabel vd 'gán Proxy'/'xoá Proxy'.
+async function _reportProxyBulkResult(res, total, actionLabel) {
+  const fails = (res.results || []).filter(r => !r.ok);
+  const parts = [`Đã ${actionLabel} cho ${res.updated}/${total} dòng.`];
+  if (fails.length) {
+    parts.push(`${fails.length} dòng lỗi:`);
+    fails.slice(0, 6).forEach(f => parts.push(`- #${f.id ?? '?'}: ${f.error || 'Lỗi không rõ'}`));
+    if (fails.length > 6) parts.push(`... và ${fails.length - 6} lỗi khác.`);
+  }
+  await customAlert(parts.join('\n'), { danger: fails.length > 0 });
+}
+
+async function bulkSetProxy(btn) {
+  const ids = mailAccSelectedIds();
+  if (!ids.length) {
+    await customAlert('Chưa chọn dòng nào — hãy tích chọn các dòng cần đặt Proxy trước.', { danger: true });
+    return;
+  }
+  const result = await _showProxyImportModal(ids.length);
+  if (result === null) return; // bam Huy
+
+  if (result.action === 'clear') {
+    if (!(await customConfirm(
+      `Xoá Proxy cho ${ids.length} dòng đang tích chọn?\n\n` +
+      `Sẽ gọi lên GPM/GEM xoá TRỰC TIẾP trên từng profile thật rồi đồng bộ lại xuống đây - dòng chưa có GPM/GEM ID sẽ bị bỏ qua.`,
+      { danger: true }
+    ))) return;
+    await withBusy(btn, async () => {
+      try {
+        const res = await api('POST', '/api/mail_accounts/proxy/clear_bulk', { ids }, 60000);
+        await syncMailAccountsGpm(null, true); // dong bo lai dung gia tri that tu GPM/GEM xuong DB
+        await _reportProxyBulkResult(res, ids.length, 'xoá Proxy');
+      } catch (e) {
+        await customAlert('Lỗi xoá Proxy hàng loạt: ' + e.message, { danger: true });
+      }
+    });
+    return;
+  }
+
+  // action === 'set'
+  const proxyLines = result.text.split('\n').map(s => s.trim()).filter(s => s);
+  if (!proxyLines.length) {
+    await customAlert('Chưa nhập Proxy nào.', { danger: true });
+    return;
+  }
+  const n = Math.min(ids.length, proxyLines.length);
+  if (proxyLines.length !== ids.length) {
+    if (!(await customConfirm(
+      `Bạn đang tích chọn ${ids.length} dòng nhưng nhập ${proxyLines.length} Proxy.\n\n` +
+      `Sẽ chỉ gán cho ${n} dòng ĐẦU TIÊN (theo đúng thứ tự hiển thị). Tiếp tục?`,
+      { danger: true }
+    ))) return;
+  }
+  const items = ids.slice(0, n).map((id, i) => ({ id, proxy_raw: proxyLines[i] }));
+
+  // Canh bao truoc khi GHI DE cac dong DA CO san Proxy (cung mo hinh voi Import GPM ID/Tạo tên
+  // profile - xem yeu cau nguoi dung 2026-09-11).
+  const accountById = new Map(lastMailAccountsList.map(a => [a.id, a]));
+  const overwrites = items.filter(it => ((accountById.get(it.id) || {}).proxy || '').trim());
+  if (overwrites.length) {
+    const preview = overwrites.slice(0, 10).map(it => {
+      const a = accountById.get(it.id) || {};
+      const label = a.profile || a.email || a.shopee_id || ('#' + it.id);
+      return `- ${label}: "${a.proxy}" → "${it.proxy_raw}"`;
+    }).join('\n');
+    const more = overwrites.length > 10 ? `\n... và ${overwrites.length - 10} dòng khác.` : '';
+    if (!(await customConfirm(
+      `${overwrites.length}/${items.length} dòng đang tích chọn ĐÃ CÓ SẴN Proxy - sẽ bị GHI ĐÈ:\n\n${preview}${more}\n\nSẽ gọi lên GPM/GEM cập nhật TRỰC TIẾP trên từng profile thật. Tiếp tục?`,
+      { danger: true }
+    ))) return;
+  }
+
+  await withBusy(btn, async () => {
+    try {
+      const res = await api('POST', '/api/mail_accounts/proxy/import_bulk', { items }, 60000);
+      await syncMailAccountsGpm(null, true); // dong bo lai dung gia tri that tu GPM/GEM xuong DB
+      await _reportProxyBulkResult(res, items.length, 'gán Proxy');
+    } catch (e) {
+      await customAlert('Lỗi đặt Proxy hàng loạt: ' + e.message, { danger: true });
+    }
+  });
+}
+
 // ---- "Tạo tên profile" hang loat: Tien to CO DINH + hau to SO TU NHIEN tang dan 1 don vi
 // theo dung thu tu cac dong dang tich chon (vd 'PH-' + '00001' -> PH-00001, PH-00002, ...) -
 // xem yeu cau nguoi dung 2026-09-10. Do rong hau to -> mac dinh '00001' (5 chu so). ----
@@ -3576,6 +3951,59 @@ async function bulkAssignGroup(btn) {
       await customAlert(`Đã gom ${res.updated}/${ids.length} dòng vào nhóm "${groupName}".`);
     } catch (e) {
       await customAlert('Lỗi gom nhóm hàng loạt: ' + e.message, { danger: true });
+    }
+  });
+}
+
+// ---- "Add-market" hang loat: popup rieng (#market-assign-modal-overlay, cung mo hinh voi
+// "Gom nhóm") - dropdown TINH (MAIL_MARKET_OPTIONS, khong can goi API) chon 1 thi truong ap
+// dung cho TAT CA dong dang tich chon - xem /api/mail_accounts/market/set_bulk va yeu cau
+// nguoi dung 2026-09-11. ----
+
+// Tra ve ma thi truong (string) khi bam "Đồng ý", null khi Huy/Escape/click ra ngoai.
+function _showMarketAssignModal(count) {
+  return new Promise(resolve => {
+    const overlay = document.getElementById('market-assign-modal-overlay');
+    document.getElementById('market-assign-modal-count').textContent = count;
+    const select = document.getElementById('market-assign-select');
+    select.innerHTML = '<option value="">-- Chọn thị trường --</option>' +
+      MAIL_MARKET_OPTIONS.map(m => `<option value="${m}">${m}</option>`).join('');
+
+    const onKeydown = (e) => { if (e.key === 'Escape') close(null); };
+    const close = (result) => {
+      overlay.classList.remove('show');
+      document.removeEventListener('keydown', onKeydown);
+      resolve(result);
+    };
+    document.getElementById('market-assign-ok-btn').onclick = () => close(select.value);
+    document.getElementById('market-assign-cancel-btn').onclick = () => close(null);
+    overlay.onclick = (e) => { if (e.target === overlay) close(null); };
+    document.addEventListener('keydown', onKeydown);
+
+    overlay.classList.add('show');
+    select.focus();
+  });
+}
+
+async function bulkAssignMarket(btn) {
+  const ids = mailAccSelectedIds();
+  if (!ids.length) {
+    await customAlert('Chưa chọn dòng nào — hãy tích chọn các dòng cần đặt thị trường trước.', { danger: true });
+    return;
+  }
+  const market = await _showMarketAssignModal(ids.length);
+  if (market === null) return; // bam Huy
+  if (!market) {
+    await customAlert('Chưa chọn thị trường nào.', { danger: true });
+    return;
+  }
+  await withBusy(btn, async () => {
+    try {
+      const res = await api('POST', '/api/mail_accounts/market/set_bulk', { ids, market }, 30000);
+      await loadMailAccounts();
+      await customAlert(`Đã đặt thị trường "${market}" cho ${res.updated}/${ids.length} dòng.`);
+    } catch (e) {
+      await customAlert('Lỗi đặt thị trường hàng loạt: ' + e.message, { danger: true });
     }
   });
 }
@@ -4338,6 +4766,7 @@ function _showLoginShopeeRunner(accounts, skipped) {
     const titleEl = document.getElementById('login-shopee-modal-title');
     const setupEl = document.getElementById('login-shopee-setup');
     const threadsInput = document.getElementById('login-shopee-threads-input');
+    const timeoutInput = document.getElementById('login-shopee-timeout-input');
     const summaryEl = document.getElementById('login-shopee-summary');
     const tbody = document.getElementById('login-shopee-account-tbody');
     const logEl = document.getElementById('login-shopee-log');
@@ -4348,15 +4777,26 @@ function _showLoginShopeeRunner(accounts, skipped) {
 
     // Popup hien DANH SACH TAI KHOAN NGAY khi mo (khong doi bam "Bắt đầu" moi thay - yeu cau
     // nguoi dung 2026-09-11), chi phan "Nhật ký" con trong khi chay.
-    titleEl.textContent = `Đăng nhập Shopee cho ${accounts.length} dòng đang tích chọn`;
+    // NEU co dong bi bo qua (thieu GPM/GEM ID / Email / Shopee Password) thi PHAI hien ro
+    // NGAY tu dau (tieu de + dong tom tat) - truoc day chi ghi vao Nhat ky SAU KHI bam "Bắt
+    // đầu", khien nguoi dung tuong nham la bug "chi lay dong dau tien" khi tich chon nhieu
+    // dong nhung co dong thieu du lieu (xem yeu cau nguoi dung 2026-09-11).
+    const totalSelected = accounts.length + (skipped || 0);
+    titleEl.textContent = skipped
+      ? `Đăng nhập Shopee cho ${accounts.length}/${totalSelected} dòng đủ điều kiện`
+      : `Đăng nhập Shopee cho ${accounts.length} dòng đang tích chọn`;
     threadsInput.value = Math.min(2, accounts.length);
     threadsInput.disabled = false;
+    timeoutInput.value = 90;
+    timeoutInput.disabled = false;
     setupEl.style.display = '';
     cancelBtn.style.display = '';
     startBtn.style.display = '';
     stopBtn.style.display = 'none';
     closeBtn.style.display = 'none';
-    summaryEl.textContent = `${accounts.length} tài khoản đang chờ chạy.`;
+    summaryEl.textContent = skipped
+      ? `${accounts.length} tài khoản đang chờ chạy — đã bỏ qua ${skipped} dòng do thiếu GPM/GEM ID, Email hoặc Shopee Password.`
+      : `${accounts.length} tài khoản đang chờ chạy.`;
     logEl.textContent = '';
 
     tbody.innerHTML = '';
@@ -4418,7 +4858,15 @@ function _showLoginShopeeRunner(accounts, skipped) {
 
     startBtn.onclick = async () => {
       const threads = _clampThreads(threadsInput.value, Math.min(accounts.length, 6));
+      // Timeout tung buoc do nguoi dung dat (moi proxy toc do mang khac nhau - xem yeu cau
+      // nguoi dung 2026-09-11) - clamp 20-600s khop voi min/max cua input.
+      const timeoutSec = Math.max(20, Math.min(600, parseInt(timeoutInput.value, 10) || 90));
+      // Timeout phia client (cho fetch) phai DU LON hon tong thoi gian server co the can (2
+      // buoc login+activate, moi buoc toi da ~timeoutSec+50s, cong them ~30s doc mail) - tranh
+      // bao loi "Server không phản hồi" oan trong khi server van dang chay binh thuong.
+      const clientTimeoutMs = (timeoutSec * 2 + 150) * 1000;
       threadsInput.disabled = true;
+      timeoutInput.disabled = true;
       cancelBtn.style.display = 'none';
       startBtn.style.display = 'none';
       stopBtn.style.display = '';
@@ -4427,7 +4875,7 @@ function _showLoginShopeeRunner(accounts, skipped) {
       disableDismiss(); // "trong qua trinh chay popup se khong bi tat di" - khoa Escape/click ra ngoai
 
       if (skipped) log(`Bỏ qua ${skipped} dòng thiếu ID profile / Email / Shopee Password.`);
-      log(`Bắt đầu với ${threads} luồng song song cho ${accounts.length} tài khoản.`);
+      log(`Bắt đầu với ${threads} luồng song song, timeout ${timeoutSec}s/bước, cho ${accounts.length} tài khoản.`);
 
       let cursor = 0;
       const next = () => {
@@ -4446,12 +4894,17 @@ function _showLoginShopeeRunner(accounts, skipped) {
             log(`${acc.label}: ${step}${detail ? ' — ' + detail : ''}`);
           });
           try {
-            const r = await api('POST', `/api/mail_accounts/${acc.id}/login_shopee`, undefined, 260000);
+            const r = await api('POST', `/api/mail_accounts/${acc.id}/login_shopee`, { timeout_sec: timeoutSec }, clientTimeoutMs);
             results.push({ id: acc.id, ...r });
             const label = LOGIN_SHOPEE_STATUS_LABEL[r.status] || r.status;
-            setRowStatus(acc.id, label, r.detail || '');
+            // Dang nhap OK: lay luon cookie ngay trong cung phien (xem yeu cau nguoi dung
+            // 2026-09-11 "lấy luôn cookie nếu đã login thành công") - bao cho nguoi dung biet
+            // co lay duoc cookie khong.
+            let detailText = r.detail || '';
+            if (r.status === 'ok') detailText += r.cookie_saved ? ' (đã lấy cookie)' : ' (không lấy được cookie)';
+            setRowStatus(acc.id, label, detailText);
             counts[r.status] = (counts[r.status] || 0) + 1;
-            log(`${acc.label}: ${label}${r.detail ? ' — ' + r.detail : ''}`);
+            log(`${acc.label}: ${label}${detailText ? ' — ' + detailText : ''}`);
           } catch (e) {
             results.push({ id: acc.id, status: 'error', detail: e.message || 'Lỗi không rõ' });
             setRowStatus(acc.id, 'Lỗi', e.message || '');
@@ -4508,9 +4961,11 @@ async function loginShopeeSelected(btn) {
     await customAlert('Không có dòng nào đủ điều kiện (cần có GPM/GEM ID, Email và Shopee Password).', { danger: true });
     return;
   }
+  // Hien TEN PROFILE thay vi Email trong popup (nguoi dung lam viec truc tiep voi profile -
+  // xem yeu cau nguoi dung 2026-09-11), fallback ve email/shopee_id/id neu dong chua co profile.
   const accounts = valid.map(id => {
     const a = rowById.get(id);
-    return { id, label: a.email || a.shopee_id || a.profile || ('#' + id) };
+    return { id, label: a.profile || a.email || a.shopee_id || ('#' + id) };
   });
   await withBusy(btn, async () => {
     await _showLoginShopeeRunner(accounts, skipped);

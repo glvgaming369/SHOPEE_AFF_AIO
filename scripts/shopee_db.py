@@ -557,6 +557,19 @@ def init_db(db_path=DB_PATH_DEFAULT):
         conn.execute("alter table mail_accounts add column shopee_login_status text")
     if "shopee_login_checked_at" not in existing_mail_cols:
         conn.execute("alter table mail_accounts add column shopee_login_checked_at text")
+    # Cot 'cookie_status'/'cookie_status_checked_at' (them sau, 2026-09-11): ket qua LAN
+    # KIEM TRA GAN NHAT cookie con dang nhap duoc voi Shopee hay khong (qua
+    # _check_shopee_cookie_alive() - GET /api/v4/account/get_profile, KHONG mo browser) -
+    # gia tri 'alive'/'dead'. Dung de cot 'Cookie' tren UI hien trang thai (LIVE/DIE/FAIL/NULL)
+    # thay vi lo chuoi cookie tho ra man hinh (xem yeu cau nguoi dung 2026-09-11). Ghi de moi
+    # lan check_cookie() chay (ke ca chay ngam ben trong nut "Get Cookie") HOAC moi lan "Get
+    # Cookie" lay duoc cookie MOI thanh cong (coi nhu vua xac nhan con song). NULL = chua tung
+    # kiem tra - UI mac dinh coi la 'LIVE' neu cot cookie dang co gia tri that (lac quan, chi
+    # bao DIE khi DA THAT SU kiem tra va phat hien chet).
+    if "cookie_status" not in existing_mail_cols:
+        conn.execute("alter table mail_accounts add column cookie_status text")
+    if "cookie_status_checked_at" not in existing_mail_cols:
+        conn.execute("alter table mail_accounts add column cookie_status_checked_at text")
     conn.execute(
         "create index if not exists idx_mail_accounts_market on mail_accounts(market)"
     )
@@ -3216,6 +3229,26 @@ def bulk_set_group_gpm(db_path, ids, group_name):
         conn.close()
 
 
+def bulk_set_market(db_path, ids, market):
+    """Ap dung CUNG 1 thi truong cho NHIEU dong 1 luc (nut 'Add-market' - xem yeu cau nguoi
+    dung 2026-09-11). market luon UPPERCASE (khop dinh dang cot 'market' hien co, xem
+    MAIL_MARKET_OPTIONS o frontend). Tra ve so dong duoc cap nhat."""
+    ids = [int(i) for i in ids if str(i).strip().lstrip("-").isdigit()]
+    if not ids:
+        return 0
+    conn = _connect(db_path)
+    try:
+        placeholders = ",".join("?" for _ in ids)
+        cur = conn.execute(
+            f"update mail_accounts set market=? where id in ({placeholders})",
+            (market, *ids),
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
 def bulk_set_rate_limit_video(db_path, ids, rate_limit_video):
     """Ap dung CUNG 1 gia tri Rate limit video/ngày cho NHIEU dong 1 luc (nut 'Add rate-limit'
     - xem yeu cau nguoi dung 2026-09-10). rate_limit_video=None -> XOA gioi han (khong gioi
@@ -3279,6 +3312,20 @@ def set_mail_account_login_status(db_path, account_id, status):
     try:
         conn.execute(
             "update mail_accounts set shopee_login_status=?, shopee_login_checked_at=current_timestamp where id=?",
+            (status, account_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_mail_account_cookie_status(db_path, account_id, status):
+    """Ghi lai ket qua LAN KIEM TRA GAN NHAT cookie con dang nhap duoc hay khong ('alive'/
+    'dead') - xem cot 'cookie_status' trong init_db() va _check_shopee_cookie_alive()."""
+    conn = _connect(db_path)
+    try:
+        conn.execute(
+            "update mail_accounts set cookie_status=?, cookie_status_checked_at=current_timestamp where id=?",
             (status, account_id),
         )
         conn.commit()

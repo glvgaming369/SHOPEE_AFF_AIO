@@ -26,6 +26,12 @@
 // IN RA DUY NHAT 1 dong JSON len stdout de server doc; log loi ra stderr. exit 0 khi da phan
 // loai xong (ke ca that bai/timeout), exit !=0 khi loi fatal (khong start duoc profile/CDP).
 
+// Khi gap captcha/traffic (status 'captcha' tu pollLoginOutcome), tu dong goi module giai
+// captcha da xay dung san (re_work/captcha_re/) thay vi bo cuoc ngay - xem handleCaptchaIfNeeded()
+// / trySolveCaptcha() ben duoi (yeu cau nguoi dung 2026-09-11 "Nếu gặp captcha hãy gọi luôn logic
+// giải captcha chúng ta đã xây dựng luôn đi").
+import { solveShopeeCaptcha } from '../re_work/captcha_re/shopee_captcha_solver.mjs';
+
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : d; };
 const STEP = arg('--step', 'login');
 const ENGINE = arg('--engine', 'gpm');
@@ -40,6 +46,18 @@ const GPM_BASE = arg('--gpm-base', 'http://127.0.0.1:9495');
 const GEM_BASE = arg('--gem-base', 'http://127.0.0.1:1010');
 const TIMEOUT = parseInt(arg('--timeout', '90000'), 10) || 90000;
 const POLL = parseInt(arg('--poll', '900'), 10) || 900;
+
+// Suffix co dinh giong extension mau (popup.js: additionalCookies) - KHONG phai cookie thuc,
+// chi la thong tin app dinh kem theo dinh dang yeu cau - COPY nguyen tu cdp_get_cookie.mjs de
+// chuoi cookie lay duoc sau khi dang nhap thanh cong GIONG HET dinh dang nut "Get Cookie" dang
+// dung (pipeline dang video doc cot 'cookie' theo dinh dang nay).
+const FIXED_SUFFIX_PAIRS = [
+  ['language', 'en'],
+  ['SPC_RNBV', '6073008'],
+  ['shopee_app_version', '29627'],
+  ['shopee_rn_bundle_version', '6073008'],
+  ['shopee_rn_version', '1671807778'],
+];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ft = (u, opts = {}) => {
@@ -136,15 +154,38 @@ async function pickTab(port, fallbackUrl) {
   return await openTab(port, fallbackUrl);
 }
 
+// Dong hang tab qua CDP HTTP endpoint - dung sau khi xong tab kich hoat (tab1 trong
+// runActivate()) de no KHONG con nam trong /json/list, tranh shopee_captcha_solver.mjs's
+// findShopeeTab() (chi loc theo URL chua "shopee", khong biet tab id nao dang can giai captcha)
+// vo tinh gan nham vao tab1 thay vi tab0 dang thuc su can giai captcha.
+async function closeTab(port, tabId) {
+  for (const method of ['PUT', 'GET']) {
+    try {
+      const r = await ft(`http://127.0.0.1:${port}/json/close/${tabId}`, { method, ms: 5000 });
+      if (r.ok) return true;
+    } catch (e) {}
+  }
+  return false;
+}
+
 class Cdp {
-  constructor(wsUrl) { this.wsUrl = wsUrl; this.ws = null; this.id = 0; this.pending = new Map(); }
+  constructor(wsUrl) { this.wsUrl = wsUrl; this.ws = null; this.id = 0; this.pending = new Map(); this.eventHandlers = new Map(); }
   async connect() {
     this.ws = new WebSocket(this.wsUrl);
     this.ws.onmessage = (ev) => {
       let msg = null; try { msg = JSON.parse(String(ev.data)); } catch (e) {}
       if (!msg) return;
-      const p = this.pending.get(msg.id);
-      if (p) { this.pending.delete(msg.id); msg.error ? p.reject(new Error(JSON.stringify(msg.error))) : p.resolve(msg.result); }
+      if (msg.id !== undefined) {
+        const p = this.pending.get(msg.id);
+        if (p) { this.pending.delete(msg.id); msg.error ? p.reject(new Error(JSON.stringify(msg.error))) : p.resolve(msg.result); }
+        return;
+      }
+      // Message KHONG co id = 1 SU KIEN CDP (vd Page.loadEventFired) - bao cho tat ca
+      // handler dang dang ky cho dung method nay (xem on()/waitForEvent()).
+      if (msg.method) {
+        const handlers = this.eventHandlers.get(msg.method);
+        if (handlers) handlers.slice().forEach((h) => { try { h(msg.params); } catch (e) {} });
+      }
     };
     await new Promise((ok, no) => { this.ws.onopen = ok; this.ws.onerror = () => no(new Error('ws error')); });
   }
@@ -159,20 +200,70 @@ class Cdp {
     const r = await this.send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true });
     return (r && r.result && r.result.value !== undefined) ? r.result.value : null;
   }
+  on(method, handler) {
+    if (!this.eventHandlers.has(method)) this.eventHandlers.set(method, []);
+    this.eventHandlers.get(method).push(handler);
+  }
+  off(method, handler) {
+    const list = this.eventHandlers.get(method);
+    if (!list) return;
+    const i = list.indexOf(handler);
+    if (i >= 0) list.splice(i, 1);
+  }
+  // Doi 1 SU KIEN CDP THAT SU xay ra (vd 'Page.loadEventFired' - trang MOI da tai xong that
+  // su, KHONG phai doan bang sleep()) - tra ve true neu nhan duoc trong timeoutMs, false neu
+  // qua han (van tiep tuc chay binh thuong, khong throw - coi nhu "khong chac chan" thay vi loi
+  // fatal).
+  waitForEvent(method, timeoutMs) {
+    return new Promise((resolve) => {
+      let done = false;
+      const handler = () => { if (done) return; done = true; clearTimeout(timer); this.off(method, handler); resolve(true); };
+      const timer = setTimeout(() => { if (done) return; done = true; this.off(method, handler); resolve(false); }, timeoutMs);
+      this.on(method, handler);
+    });
+  }
   close() { try { this.ws && this.ws.close(); } catch (e) {} }
 }
 
 // ---- JS chay trong trang (qua cdp.evaluate) - tung IIFE doc lap, khong phu thuoc lan nhau ----
 
-// Chi bao "ok" khi: (a) KHONG con o URL /login hay /buyer/login, VA (b) form dang nhap
-// (input[name="loginKey"]) KHONG con trong DOM - 2 dieu kien nay chan false-positive tung
-// gap (URL/text co the tam thoi khop "profile"/"my profile" ngay sau Page.navigate, truoc khi
-// app client-side kip dieu huong sang trang dang nhap that su - xem bao loi nguoi dung
-// 2026-09-11: da bao 'ok' trong 5s trong khi man hinh van con popup chon ngon ngu + form login).
+// Chi bao "ok" khi CA 3 dieu kien deu dung: (a) KHONG con o URL /login hay /buyer/login, (b)
+// form dang nhap (input[name="loginKey"]) KHONG con trong DOM, (c) popup chon ngon ngu KHONG
+// con hien. 3 dieu kien nay chan false-positive tung gap (URL/text co the tam thoi khop
+// "profile"/"my profile" ngay sau Page.navigate, truoc khi app client-side kip dieu huong
+// sang trang dang nhap that su - xem bao loi nguoi dung 2026-09-11 LAN 2: du da co debounce
+// 2 lan lien tiep + cho 1200ms truoc do, van con bao 'ok' sau ~3s trong khi man hinh THAT SU
+// van con popup chon ngon ngu tieng Thai "เลือกภาษา" chua bam - chung to redirect cua Shopee
+// co the CHAM HON ca debounce cu, can them chan CUNG theo cau truc trang (khong chi theo thoi
+// gian) + keo dai debounce o pollLoginOutcome()).
+//
+// (c) LUC DAU chi kiem tra "co leaf node nao text dung 'English' khong" (bat ke o dau trong
+// trang) - da phat hien la SAI qua live test that 2026-09-11: trang /user/account/profile that
+// su (thi truong TH) co SAN 1 nut chuyen ngon ngu "English" thuong truc trong header/nav
+// (KHONG phai popup), khien SUCCESS_JS bao false MAI MAI du da dang nhap thanh cong that su
+// (url dung la /user/account/profile?is_from_login=true nhung van bi bao 'timeout' vi
+// successStreak khong bao gio dat). PHAI phan biet popup CHON NGON NGU (che kin man hinh,
+// backdrop lon) voi nut chuyen ngon ngu thuong truc (nho, nam trong header/nav): chi coi la
+// popup dang hien neu node "English" nam BEN TRONG 1 to tien co position fixed/absolute VA
+// kich thuoc phu it nhat nua chieu rong + 30% chieu cao khung nhin (dac trung modal/overlay
+// toan man hinh, mot header/nav thuong chi cao vai chuc px nen khong dat nguong chieu cao nay).
 const SUCCESS_JS = `(() => {
   const url = location.href;
   if (/\\/(buyer\\/)?login(\\?|$)/i.test(url)) return false;
   if (document.querySelector('input[name="loginKey"]')) return false;
+  const langNodes = Array.from(document.querySelectorAll('button, a, div, span, li'));
+  const engNode = langNodes.find(n => n.children.length === 0 && n.textContent.trim() === 'English');
+  if (engNode) {
+    let el = engNode, inModal = false;
+    for (let i = 0; i < 8 && el; i++, el = el.parentElement) {
+      const cs = getComputedStyle(el);
+      if (cs.position === 'fixed' || cs.position === 'absolute') {
+        const r = el.getBoundingClientRect();
+        if (r.width >= window.innerWidth * 0.5 && r.height >= window.innerHeight * 0.3) { inModal = true; break; }
+      }
+    }
+    if (inModal) return false;
+  }
   if (/\\/user\\/account\\/profile/i.test(url)) return true;
   const t = (document.body && document.body.innerText || '').toLowerCase();
   return t.includes('my profile');
@@ -238,10 +329,22 @@ function fillSubmitJs(loginKey, password) {
 // dung bao 2026-09-11). Thay vao do cu thu bam leaf node co dung text "English" (nut chon
 // ngon ngu luon ghi "English" bang chu La Tinh du trang o thi truong nao) - vo hai neu khong
 // tim thay (khong co popup nao dang hien).
+// CUNG dung guard modal/overlay nhu SUCCESS_JS (xem ghi chu o do) - tranh bam NHAM nut chuyen
+// ngon ngu THUONG TRUC trong header/nav (khong phai popup chon ngon ngu that su), thu duoc qua
+// live test 2026-09-11 tren trang /user/account/profile thi truong TH.
 const LANG_POPUP_CLICK_JS = `(() => {
   const nodes = Array.from(document.querySelectorAll('button, a, div, span, li'));
   const match = nodes.find(n => n.children.length === 0 && n.textContent.trim() === 'English');
   if (!match) return false;
+  let el = match, inModal = false;
+  for (let i = 0; i < 8 && el; i++, el = el.parentElement) {
+    const cs = getComputedStyle(el);
+    if (cs.position === 'fixed' || cs.position === 'absolute') {
+      const r = el.getBoundingClientRect();
+      if (r.width >= window.innerWidth * 0.5 && r.height >= window.innerHeight * 0.3) { inModal = true; break; }
+    }
+  }
+  if (!inModal) return false;
   match.click();
   return true;
 })()`;
@@ -271,13 +374,14 @@ async function pollLoginOutcome(cdp, deadline, dungFillSubmit) {
     let success = false;
     try { success = await cdp.evaluate(SUCCESS_JS); } catch (e) { dbg('iter', iter, 'SUCCESS_JS threw:', e.message); }
     // Ngay sau Page.navigate, browser co the DA COMMIT sang URL dich (vd /user/account/profile)
-    // TRUOC KHI SPA kip tu dieu huong sang trang dang nhap that su (bug nguoi dung bao
-    // 2026-09-11: "ok" sau 5s trong khi man hinh van con trang login) - bat buoc SUCCESS_JS
-    // phai dung 2 LAN LIEN TIEP (cach nhau 1 nhip POLL) moi cong nhan, tranh false-positive
-    // vao dung khoanh khac "cua so hep" do.
+    // TRUOC KHI SPA kip tu dieu huong sang trang dang nhap that su - bat buoc SUCCESS_JS phai
+    // dung NHIEU LAN LIEN TIEP (cach nhau 1 nhip POLL) moi cong nhan, tranh false-positive vao
+    // dung khoanh khac "cua so hep" do. Nang tu 2 len 3 lan (bao loi nguoi dung 2026-09-11 LAN
+    // 2: redirect that su cua Shopee co the CHAM HON 2 nhip debounce cu ~1.8s, van bao 'ok' du
+    // man hinh THAT SU van con popup chon ngon ngu - xem them guard cung trong SUCCESS_JS).
     successStreak = success ? successStreak + 1 : 0;
     dbg('iter', iter, 'success=', JSON.stringify(success), 'successStreak=', successStreak);
-    if (successStreak >= 2) return { status: 'ok', detail: 'Da dang nhap Shopee thanh cong.' };
+    if (successStreak >= 3) return { status: 'ok', detail: 'Da dang nhap Shopee thanh cong.' };
     if (success) { await sleep(POLL); continue; } // cho 1 nhip de xac nhan lai, KHONG fill/submit trong luc nay
     let invalid = false;
     try { invalid = await cdp.evaluate(INVALID_CRED_JS); } catch (e) {}
@@ -310,6 +414,112 @@ async function pollLoginOutcome(cdp, deadline, dungFillSubmit) {
   return { status: 'timeout', detail: 'current url: ' + (href || 'unknown') };
 }
 
+// Goi module giai captcha da xay dung san (shopee_captcha_solver.mjs) khi pollLoginOutcome()
+// tra ve status 'captcha'. QUAN TRONG: module do TU DOI HOI khong duoc goi CDP Runtime.enable
+// tren phien lam viec cua no (vector chong-detect automation da xac nhan qua thuc nghiem - xem
+// dau file shopee_captcha_solver.mjs, ghi chu #4) - nhung ket noi CDP CUA CHUNG TA (bien `cdp`
+// trong runLogin()/runActivate()) DA goi Runtime.enable truoc do (can cho cdp.evaluate() de
+// dien form/doc trang thai). Dong ket noi cua chung ta (va thu Runtime.disable truoc khi dong,
+// best-effort) roi de solver TU MO ket noi CDP RIENG cua no toi CUNG tab (qua port, khong dung
+// lai object `cdp` nay) - day la cach giam thieu xung dot ma KHONG can sua module dung chung
+// (module nay con duoc cac workflow khac tai su dung). Gioi han da biet: trang thai domain
+// Runtime tren 1 target CDP co the khong tay het ngay khi 1 WS session dong/disable - chua co
+// cach khac phuc trong pham vi hien tai.
+async function trySolveCaptcha(port, cdp) {
+  progress('Phát hiện captcha/traffic - đang gọi module tự động giải captcha...');
+  try { await cdp.send('Runtime.disable'); } catch (e) {}
+  try { cdp.close(); } catch (e) {}
+  let result = null;
+  try {
+    result = await solveShopeeCaptcha({
+      port,
+      url: '', // gan vao tab HIEN CO dang hien captcha, khong navigate di noi khac
+      maxAttempts: 6,
+      onLog: (msg) => progress('[captcha] ' + msg),
+    });
+  } catch (e) {
+    process.stderr.write('CAPTCHA_SOLVE_ERR: ' + (e && e.message) + '\n');
+    return { solved: false };
+  }
+  progress(result.pass
+    ? 'Đã giải captcha thành công, đang kiểm tra lại trạng thái đăng nhập...'
+    : 'Giải captcha thất bại sau nhiều lần thử.');
+  return { solved: result.pass };
+}
+
+// Bao ngoai pollLoginOutcome(): neu ket qua la 'captcha', thu giai roi POLL LAI (toi da
+// MAX_CAPTCHA_ROUNDS lan, tranh vong lap vo han neu Shopee cu lien tuc bat captcha moi). Tra ve
+// ket qua CUOI CUNG + ket noi CDP DANG CON SONG (co the la 1 object `cdp` MOI neu da phai giai
+// captcha it nhat 1 lan) de goi noi tiep dung cho extractCookieString().
+const MAX_CAPTCHA_ROUNDS = 2;
+async function handleCaptchaIfNeeded(cdp, port, tabId, deadline, dungFillSubmit) {
+  let res = await pollLoginOutcome(cdp, deadline, dungFillSubmit);
+  let rounds = 0;
+  while (res.status === 'captcha' && rounds < MAX_CAPTCHA_ROUNDS) {
+    rounds++;
+    const { solved } = await trySolveCaptcha(port, cdp);
+    if (!solved) return { res, cdp: null };
+    cdp = new Cdp(`ws://127.0.0.1:${port}/devtools/page/${tabId}`);
+    await cdp.connect();
+    await cdp.send('Page.enable').catch(() => {});
+    await cdp.send('Runtime.enable').catch(() => {});
+    const nextDeadline = Date.now() + Math.min(TIMEOUT, 60000);
+    res = await pollLoginOutcome(cdp, nextDeadline, dungFillSubmit);
+  }
+  return { res, cdp };
+}
+
+// Sau khi DA XAC NHAN dang nhap thanh cong (status 'ok'), TIEN LAY LUON COOKIE ngay trong
+// CUNG phien CDP nay (tab dang mo san, khong can dong roi mo browser rieng qua nut "Get
+// Cookie" nua) - xem yeu cau nguoi dung 2026-09-11 "lấy luôn cookie nếu đã login thành công,
+// tài khoản nào fail thì bỏ qua" (fail = khong goi ham nay, xem runLogin()/runActivate() chi
+// goi khi status==='ok'). Dung LAI dung ky thuat Network.getCookies + suffix co dinh nhu
+// cdp_get_cookie.mjs de chuoi cookie GIONG HET dinh dang nut "Get Cookie" hien co. Tra ve
+// chuoi cookie, hoac null neu khong lay duoc SPC_U hop le (hiem khi xay ra vi da xac nhan
+// dang nhap thanh cong ngay truoc do, nhung van phong ho).
+async function extractCookieString(cdp, currentUrl) {
+  await cdp.send('Network.enable').catch(() => {});
+  let cookies = [];
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    try {
+      const r = await cdp.send('Network.getCookies', { urls: [currentUrl] });
+      cookies = (r && r.cookies) || [];
+    } catch (e) { cookies = []; }
+    const spcU = cookies.find((c) => c.name === 'SPC_U');
+    if (spcU && spcU.value && spcU.value.trim() !== '' && spcU.value !== '-') break;
+    await sleep(700);
+  }
+  const spcU = cookies.find((c) => c.name === 'SPC_U');
+  if (!(spcU && spcU.value && spcU.value.trim() !== '' && spcU.value !== '-')) return null;
+  const existingNames = new Set(cookies.map((c) => c.name));
+  const suffix = FIXED_SUFFIX_PAIRS.filter(([n]) => !existingNames.has(n))
+    .map(([n, v]) => `${n}=${v}`).join('; ');
+  return cookies.map((c) => `${c.name}=${c.value}`).join('; ') + (suffix ? '; ' + suffix : '');
+}
+
+// Truoc khi lay cookie, DIEU HUONG VE TRANG CHU Shopee (khong lay ngay tren trang
+// /user/account/profile dang dung) - yeu cau nguoi dung 2026-09-11 sau khi thay 1 lan
+// "cookie_saved:false" du da dang nhap OK that su (TH-00008): trang chu la noi nut "Get Cookie"
+// hien co van dang dung on dinh, va viec dieu huong + doi Page.loadEventFired that su (thay vi
+// doc cookie ngay tren trang profile) cho SPC_U/cac cookie phien du thoi gian on dinh hoa hon.
+// Lay origin qua location.origin CUA CHINH TAB (khong dung bien module-level `URL` - o
+// --step activate bien do la CHUOI RONG vi Python khong truyen --url cho buoc nay, xem
+// mail_accounts_login_shopee() trong affiliate_scrape_server.py) nen hoat dong dung cho CA 2
+// step. LUU Y: bien module-level `URL` trong file nay LA 1 CHUOI (tu --url arg), che khuat
+// global class `URL` cua JS - KHONG dung duoc `new URL(...)` trong file nay.
+async function navigateHomeAndExtractCookie(cdp) {
+  let origin = '';
+  try { origin = String(await cdp.evaluate('location.origin') || ''); } catch (e) {}
+  const homeUrl = origin ? origin + '/' : URL;
+  progress('Đăng nhập thành công, đang chuyển về trang chủ Shopee để lấy cookie...');
+  const loadEventPromise = cdp.waitForEvent('Page.loadEventFired', 15000);
+  try { await cdp.send('Page.navigate', { url: homeUrl }); } catch (e) {}
+  const loaded = await loadEventPromise;
+  await sleep(loaded ? 800 : 2000);
+  return await extractCookieString(cdp, homeUrl);
+}
+
 async function runLogin() {
   if (!PROFILE || !URL || !LOGIN_KEY || !PASSWORD) { process.stderr.write('thieu --profile/--url/--login-key/--password\n'); process.exit(2); }
   progress('Đang mở trình duyệt profile (GPM/GEM)...');
@@ -325,15 +535,31 @@ async function runLogin() {
   await cdp.send('Page.enable').catch(() => {});
   await cdp.send('Runtime.enable').catch(() => {});
   progress('Đang tải trang đăng nhập...');
+  // Dang ky doi SU KIEN TAI TRANG THAT SU (Page.loadEventFired) TRUOC KHI goi Page.navigate
+  // (tranh race - neu dang ky sau, load co the da fire truoc khi kip lang nghe). Day la fix
+  // cho bug nguoi dung bao 2026-09-11 LAN 3: da bao 'ok' chi sau ~7s, KHONG HE dien form (log
+  // khong co dong "Đã điền Email/Shopee Password...") - nguyen nhan THAT SU: tab dang dung lai
+  // (pickTab() uu tien tab co san) co the con giu NOI DUNG CU tu 1 lan chay TRUOC DO (vd dang
+  // dung o /user/account/profile that su tu phien truoc), va Page.navigate KHONG dam bao
+  // location.href/DOM cap nhat NGAY khi no resolve - resolve chi co nghia "da yeu cau dieu
+  // huong", KHONG phai "da tai xong tai lieu moi". Doc SUCCESS_JS qua som se an nham vao NOI
+  // DUNG CU do. Cho load event that su (hoac toi da 20s) truoc khi tin bat ky gia tri nao.
+  const loadEventPromise = cdp.waitForEvent('Page.loadEventFired', Math.min(TIMEOUT, 20000));
   try { await cdp.send('Page.navigate', { url: URL }); } catch (e) { process.stderr.write('NAV loi: ' + (e && e.message) + '\n'); process.exit(7); }
-  // Doi 1 nhip truoc khi check gi ca - ngay sau Page.navigate resolve app SPA co the chua kip
-  // client-side redirect/hydrate xong (URL/DOM tam thoi con o trang thai cu), tranh false-
-  // positive nhu bug nguoi dung bao 2026-09-11.
-  await sleep(1200);
+  const loaded = await loadEventPromise;
+  dbg('Page.loadEventFired nhan duoc trong han:', loaded);
+  // Du da co load event that su, van giu 1 khoang settle nho SAU DO (SPA con can hydrate/tu
+  // dieu huong client-side rieng, KHONG tinh trong load event cua trinh duyet) - ngan hon neu
+  // DA xac nhan load event that (1200ms), dai hon neu KHONG nhan duoc load event trong han
+  // (3500ms, phong ho truong hop hiem load event khong ban duoc vi ly do nao do).
+  await sleep(loaded ? 1200 : 3500);
 
-  const res = await pollLoginOutcome(cdp, Date.now() + TIMEOUT, true);
+  const { res, cdp: liveCdp } = await handleCaptchaIfNeeded(cdp, st.port, tab.id, Date.now() + TIMEOUT, true);
   if (res.status === 'verify_email_link') {
     out({ status: res.status, detail: res.detail, url: URL, port: st.port, tab_id: tab.id });
+  } else if (res.status === 'ok') {
+    const cookie = await navigateHomeAndExtractCookie(liveCdp);
+    out({ status: res.status, detail: res.detail, url: URL, cookie });
   } else {
     out({ status: res.status, detail: res.detail, url: URL });
   }
@@ -364,6 +590,9 @@ async function runActivate() {
     process.stderr.write('Tab kich hoat loi: ' + (e && e.message) + '\n');
   } finally {
     cdp1.close();
+    // Dong han tab kich hoat (khong chi dong ket noi CDP) - tranh solveShopeeCaptcha's
+    // findShopeeTab() sau nay (neu tab0 gap captcha) tim/gan nham vao tab nay thay vi tab0.
+    await closeTab(PORT, tab1.id).catch(() => {});
   }
   progress(approved ? 'Email đã được duyệt, đang quay lại tab đăng nhập để kiểm tra kết quả...'
                      : 'Chưa thấy xác nhận duyệt email, vẫn quay lại tab đăng nhập để kiểm tra...');
@@ -377,8 +606,13 @@ async function runActivate() {
   await cdp0.send('Runtime.enable').catch(() => {});
   try { await cdp0.send('Page.bringToFront'); } catch (e) {}
 
-  const res = await pollLoginOutcome(cdp0, Date.now() + TIMEOUT, false);
-  out({ status: res.status, detail: res.detail, url: URL, approved });
+  const { res, cdp: liveCdp } = await handleCaptchaIfNeeded(cdp0, PORT, TAB0_ID, Date.now() + TIMEOUT, false);
+  if (res.status === 'ok') {
+    const cookie = await navigateHomeAndExtractCookie(liveCdp);
+    out({ status: res.status, detail: res.detail, url: URL, approved, cookie });
+  } else {
+    out({ status: res.status, detail: res.detail, url: URL, approved });
+  }
   process.exit(0);
 }
 
