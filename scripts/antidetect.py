@@ -274,3 +274,36 @@ def update_profile_proxy(engine, base=None, profile_id="", raw_proxy=""):
         msg = str(payload.get("message") or payload.get("error") or f"{engine_label} cap nhat proxy that bai")
         raise AntidetectError(f"{engine_label} cap nhat proxy that bai: {msg}")
     return True
+
+
+def update_profile_group(engine, base=None, profile_id="", group_id=""):
+    """Chuyen 1 profile DA TON TAI sang nhom KHAC (id nhom THAT lay tu list_groups(), KHONG
+    phai ten) - dung cho nut 'Gom nhóm' (xem yeu cau nguoi dung 2026-09-11: goi len GPM/GEM
+    truoc, dong bo xuong web SAU, cung mo hinh voi update_profile_proxy()/'Set-proxy').
+    Dung CHUNG dang endpoint POST .../profiles/update/{id} nhu update_profile_proxy() (partial
+    update - chi field gui len moi bi doi) voi body {"group_id": group_id}.
+    XAC MINH TRUC TIEP tren GPM THAT (2026-09-11, khong chi dua vao docs): goi field 'group_id'
+    len dung endpoint nay THAT SU doi duoc nhom cua 1 profile that (kiem lai qua GET
+    /api/v1/profiles/{id} thay group_id doi dung nhu gui len), roi doi nguoc lai thanh cong -
+    xac nhan day la 1 API "partial update" thuc su (chi sua field duoc gui, giu nguyen moi thu
+    khac), khop voi cach update_profile_proxy() da hoat dong voi field 'raw_proxy'. group_id=""
+    se LOI (GPM tra SQLite FOREIGN KEY constraint - profile luon phai thuoc 1 nhom THAT, ke ca
+    nhom "khong nhom" cung la 1 row nhom that su, xem UNGROUPED_LABEL/ungrouped_label()) - caller
+    muon "bo nhom" phai truyen id CUA nhom ungrouped (goi list_groups() de lay id nhom co ten
+    dung UNGROUPED_LABEL[engine]), KHONG truyen chuoi rong.
+    GEM: CHUA live-test duoc (app GemLogin khong chay luc code nay duoc viet) - suy ra field
+    'group_id' cung dung duoc qua doi chieu list_profiles() (o tren) da doc field 'group_id'
+    GIONG HET cho CA 2 engine sau khi xac minh thuc te ca 2 (xem header comment file nay), va
+    update_profile_group dung CHUNG 1 dang endpoint/pattern voi update_profile_proxy() (da xac
+    minh dung cho CA 2 engine). Neu GEM that su khac (vd can 'group_name' thay vi 'group_id'),
+    can sua lai ham nay khi co GEM that de kiem chung."""
+    engine = normalize_engine(engine)
+    base = base or engine_base_url(engine)
+    pid = urllib.parse.quote(str(profile_id))
+    path = f"/api/v1/profiles/update/{pid}" if engine == ENGINE_GPM else f"/api/profiles/update/{pid}"
+    payload = _request(engine, "POST", path, base, body={"group_id": group_id}, timeout=30)
+    if not payload.get("success"):
+        engine_label = "GPM" if engine == ENGINE_GPM else "GemLogin"
+        msg = str(payload.get("message") or payload.get("error") or f"{engine_label} doi nhom that bai")
+        raise AntidetectError(f"{engine_label} doi nhom that bai: {msg}")
+    return True

@@ -231,17 +231,40 @@
     position: sticky; top: 44px; z-index: 30;
     background: var(--surface);
   }
+  /* Thu hep khoang cach giua khoi "Danh sách Email / Tài khoản Shopee" va header chinh phia
+     tren (yeu cau nguoi dung 2026-09-11) - CHI ap dung rieng cho section dau tien cua tab nay
+     (khong dung chung .card-section chung, tranh anh huong cac tab khac). main{padding-top:20px}
+     + section{padding:22px 26px} mac dinh cong lai ra ~42px khoang trong phia tren - giam
+     xuong con ~14px bang cach vua giam padding-top cua CHINH section nay, vua keo no len bang
+     margin-top am. */
+  #tab-mailacc > section:first-of-type {
+    padding-top: 8px;
+    margin-top: -14px;
+  }
   #mailacc-table-wrap {
     /* Mo rong toi da xuong duoi (yeu cau nguoi dung 2026-09-11) - chi tru phan chac chan can:
-       header chinh (44px) + chieu cao toolbar do bang JS + khoang dem toi thieu cho padding
-       duoi cua section (22px) + 1 chut le an toan. */
-    max-height: calc(100vh - 44px - var(--mailacc-toolbar-h, 190px) - 30px);
+       header chinh (44px) + chieu cao toolbar do bang JS + chieu cao thanh phan trang
+       (#mailacc-pager, cung do bang JS - THEM 2026-09-11 sau khi nguoi dung bao phai cuon
+       xuong moi thay phan trang: thanh phan trang nam NGOAI/DUOI vung scroll nay nen truoc do
+       KHONG duoc tru vao chieu cao, lam tong noi dung vuot qua 100vh) + khoang dem toi thieu
+       cho padding duoi cua section + 1 chut le an toan. */
+    max-height: calc(100vh - 44px - var(--mailacc-toolbar-h, 190px) - var(--mailacc-pager-h, 46px) - 70px);
     min-height: 240px;
     overflow-y: auto;
   }
   #mailacc-thead-row th {
     position: sticky; top: 0; z-index: 20;
   }
+  /* Thanh dieu huong trang (xem yeu cau nguoi dung 2026-09-11 "phân trang dạng này" kem anh
+     tham khao giao dien GPM: ‹/› + "trang X/Y" + so dong/trang + tổng số). */
+  .mailacc-pager {
+    display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+    margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);
+    font-size: 13px; color: var(--ink-soft);
+  }
+  .mailacc-pager button { padding: 5px 11px; }
+  .mailacc-pager button:disabled { opacity: 0.4; cursor: default; }
+  .mailacc-pager select { padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong); }
   th.sortable:hover { color: var(--accent-dark); background: var(--border); }
 
   /* Keo tha doi vi tri cot (xem yeu cau nguoi dung 2026-09-11 "tự do kéo vị trí các cột") */
@@ -378,6 +401,68 @@
     white-space: pre-wrap; line-height: 1.6; border: 1px solid #1e293b;
     box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
   }
+
+  /* Tab "Đăng video": nhieu PHIEN doc lap hien thi dang tab kieu trinh duyet (Chrome) - xem
+     yeu cau nguoi dung 2026-09-11 "nút thêm phiên upload và giao diện xuất ... như mở tab
+     chrome, chọn phiên nào thì màn hình hiện thị vùng làm việc của tab phiên đó". Tab dang
+     ACTIVE "noi lien" vao vung noi dung ben duoi (cung mau nen, nhich len tren + bo goc duoi)
+     giong browser tab that; tab KHONG active lui xuong + nen xam nhe de tao chieu sau. Moi
+     phien van la 1 <section> RIENG trong DOM (khong bi huy khi doi tab) - chi CSS display:none
+     cho phien khong active, giu nguyen toan bo state/DOM (bang tai khoan da nap, log da chay...)
+     giong dung cach browser that giu nguyen 1 tab ngam khi ban chuyen sang tab khac. */
+  .postvideo-tabstrip {
+    display: flex; align-items: flex-end; gap: 4px;
+    border-bottom: 2px solid var(--border-strong);
+    padding: 0 4px; overflow-x: auto; scrollbar-width: thin;
+  }
+  .postvideo-tab {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 10px 9px 16px;
+    background: var(--surface-2); color: var(--ink-soft);
+    border: 1px solid var(--border-strong); border-bottom: none;
+    border-radius: 10px 10px 0 0;
+    cursor: pointer; user-select: none;
+    font-size: 13px; font-weight: 600;
+    white-space: nowrap; max-width: 220px;
+    position: relative; top: 2px;
+    transition: background 0.15s ease, color 0.15s ease, top 0.1s ease;
+  }
+  .postvideo-tab:hover { background: var(--surface); color: var(--ink); }
+  .postvideo-tab.active {
+    background: var(--surface); color: var(--ink);
+    top: 0; padding-top: 12px; padding-bottom: 11px;
+    box-shadow: 0 -2px 6px rgba(15, 23, 42, 0.05);
+    z-index: 2;
+  }
+  .postvideo-tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .postvideo-tab-dot {
+    width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+    background: var(--success); box-shadow: 0 0 0 3px var(--success-bg);
+    animation: postvideoPulse 1.4s ease-in-out infinite;
+  }
+  @keyframes postvideoPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .postvideo-tab-close {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0;
+    color: var(--ink-faint); font-size: 13px; line-height: 1;
+    transition: background 0.15s, color 0.15s;
+  }
+  .postvideo-tab-close:hover { background: var(--danger-bg); color: var(--danger-text); }
+  .postvideo-tab-add {
+    display: flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; margin-bottom: 4px; flex-shrink: 0;
+    border-radius: 50%; border: 1px dashed var(--border-strong);
+    background: none; color: var(--ink-soft); font-size: 17px; cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .postvideo-tab-add:hover { background: var(--accent-soft); color: var(--accent-dark); border-color: var(--accent); }
+  #postvideo-sessions-container {
+    background: var(--surface); border: 1px solid var(--border-strong); border-top: none;
+    border-radius: 0 0 var(--radius) var(--radius); padding: 20px; box-shadow: var(--shadow-sm);
+  }
+  .postvideo-session-card { display: none; }
+  .postvideo-session-card.active { display: block; animation: fadeIn 0.2s ease-out; }
+  .postvideo-tabstrip-empty { padding: 14px 4px; color: var(--ink-faint); font-size: 13px; }
 
   /* Modal popup (thay the alert()/confirm() mac dinh cua trinh duyet) */
   .modal-overlay {
@@ -741,6 +826,10 @@
     <button class="tab-btn" id="tabbtn-postvideo" onclick="switchTab('postvideo')">
       <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg></span>
       <span class="tab-label">Đăng video</span>
+    </button>
+    <button class="tab-btn" id="tabbtn-postvideolog" onclick="switchTab('postvideolog')">
+      <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg></span>
+      <span class="tab-label">Log-upload</span>
     </button>
     <button class="tab-btn" id="tabbtn-sheets" onclick="switchTab('sheets')">
       <span class="tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="9" x2="9" y2="21"/></svg></span>
@@ -1120,7 +1209,7 @@
     <div class="table-wrap" id="mailacc-table-wrap"><table>
       <thead>
         <tr id="mailacc-thead-row">
-          <th style="width:36px;"><input type="checkbox" id="mailacc-sel-all" onclick="mailAccToggleAll(this)" title="Chọn / bỏ chọn tất cả dòng đang hiển thị"></th>
+          <th style="width:36px;"><input type="checkbox" id="mailacc-sel-all" onclick="mailAccToggleAll(this)" title="Chọn / bỏ chọn tất cả dòng của TRANG ĐANG HIỆN"></th>
           <th style="width:64px;">Engine</th>
           <th>Thông tin đầy đủ</th><th>Email</th><th>Mật khẩu Mail</th><th>Shopee ID</th><th>Shopee Password</th><th>Cookie</th>
           <th>Thiết bị</th><th>Profile</th><th>GROUP GPM</th><th>GPM ID</th><th>Proxy</th><th>Device Fingerprint (Android)</th><th>Rate limit video/ngày</th><th>Slot</th><th>Thị trường</th><th>Mã Shopee</th><th>Thao tác</th><th>Thời gian tạo</th>
@@ -1128,6 +1217,7 @@
       </thead>
       <tbody id="mailacc-tbody"></tbody>
     </table></div>
+    <div id="mailacc-pager" class="mailacc-pager"></div>
   </section>
 
 </div>
@@ -1186,18 +1276,49 @@
   <section>
     <div class="row" style="align-items:center;justify-content:space-between;">
       <h2 style="margin:0;">Đăng video</h2>
-      <button onclick="addPostVideoSession()">+ Tạo phiên đăng mới</button>
     </div>
-    <div class="muted" style="margin-bottom:10px;">
-      Mỗi <b>phiên</b> độc lập hoàn toàn: tự chọn nguồn + nhóm tài khoản/thị trường riêng, chạy song song
-      không cần dừng phiên khác (server đã đảm bảo 2 phiên không bao giờ đăng trùng 1 video, kể cả khi
-      cùng chọn 1 nguồn). Mỗi lượt lấy video <b>pending</b> đầu tiên (theo thứ tự trong xlsx), xoay vòng qua
-      các tài khoản đã tích chọn trong phiên đó - tự bỏ qua tài khoản thiếu Cookie hoặc đã đạt "Rate limit
-      video/ngày" (xem tab "Quản lý account Shopee"). Mỗi request chỉ đăng ĐÚNG 1 video rồi trả kết quả ngay
-      (tránh timeout) - trình duyệt tự lặp lại tới khi hết video/đủ số lượng/bạn bấm Dừng, nên PHẢI giữ tab
-      trình duyệt mở trong lúc chạy.
-    </div>
+    <div id="postvideo-tabstrip" class="postvideo-tabstrip"></div>
     <div id="postvideo-sessions-container"></div>
+  </section>
+
+</div>
+
+<!-- Tab: Log-upload - lich su dang video CROSS-SOURCE, tach rieng khoi tung phien cua tab
+     "Đăng video" (yeu cau nguoi dung 2026-09-11: "Lịch sử đăng nên phát triển thành 1 tab
+     riêng 'Log-upload'") - dung route /api/video_post_log. -->
+<div id="tab-postvideolog" class="tab-panel">
+
+  <section>
+    <h2>Log-upload</h2>
+    <div class="row" style="margin-bottom:10px;">
+      <label style="white-space:nowrap;font-weight:500;">Market:</label>
+      <select id="postvideo-log-filter-market" onchange="postVideoLogRefresh()" style="min-width:110px;">
+        <option value="">-- Tất cả --</option>
+        <option value="PH">PH</option>
+        <option value="TH">TH</option>
+        <option value="MY">MY</option>
+        <option value="ID">ID</option>
+        <option value="VN">VN</option>
+        <option value="SG">SG</option>
+      </select>
+      <label style="white-space:nowrap;font-weight:500;">Nguồn:</label>
+      <select id="postvideo-log-filter-source" onchange="postVideoLogRefresh()" style="min-width:220px;">
+        <option value="">-- Tất cả nguồn --</option>
+      </select>
+      <label style="white-space:nowrap;font-weight:500;">Kết quả:</label>
+      <select id="postvideo-log-filter-result" onchange="postVideoLogRefresh()" style="min-width:130px;">
+        <option value="">-- Tất cả --</option>
+        <option value="1">Thành công</option>
+        <option value="0">Lỗi</option>
+      </select>
+      <button class="secondary" onclick="postVideoLogRefresh()">⟳ Làm mới</button>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th>Cập nhật</th><th>Market</th><th>Nguồn</th><th>SP ID</th><th>Sản phẩm</th><th>Tài khoản</th><th>Kết quả</th><th>Post ID / Lỗi</th>
+      </tr></thead>
+      <tbody id="postvideo-log-tbody"><tr><td colspan="8" class="muted">Đang tải...</td></tr></tbody>
+    </table></div>
   </section>
 
 </div>
@@ -1514,6 +1635,7 @@ function switchTab(name) {
   }
   if (name === 'videosrc') loadVideoSources();
   if (name === 'postvideo') loadPostVideoSources();
+  if (name === 'postvideolog') loadPostVideoLogTab();
   if (name === 'sheets') { loadSheetsConfig(); loadSheetsAccounts(); }
   if (name === 'gpm') { loadGpmGroupsAndProfiles(); }
   if (name === 'kw') { kwLoadCategories(true); kwReload(); loadKwAuto(); }
@@ -2747,10 +2869,16 @@ function renderMailAccHeader() {
 }
 
 // ---- Tich chon dong (checkbox) ----
+// mailAccSelected (Set id) la NGUON SU THAT DUY NHAT cho lua chon, GIU NGUYEN qua nhieu trang
+// (yeu cau nguoi dung 2026-09-11: co the tich chon dan qua nhieu trang roi moi bam 1 nut hang
+// loat, KHONG bi mat lua chon khi chuyen trang) - KHAC voi checkbox header "chọn tất cả" CHI
+// ap dung cho TRANG DANG HIEN (xem mailAccToggleAll()/mailAccPageIds()).
+//
+// mailAccVisibleIds(): TOAN BO id dang khop bo loc hien tai QUA MOI TRANG (dung de: (a) don
+// dep lua chon "chon ngam" khi doi bo loc trong renderMailAccounts(), (b) mailAccSelectedIds()
+// cho cac nut hang loat - phai loai tru id da bi loc/xoa nhung KHONG duoc gioi han chi 1 trang).
 function mailAccVisibleIds() {
-  return Array.from(document.querySelectorAll('#mailacc-tbody input.mailacc-sel'))
-    .map(el => parseInt(el.dataset.id, 10))
-    .filter(n => Number.isFinite(n));
+  return lastMailAccountsList.map(a => a.id);
 }
 
 function mailAccSelChanged(input) {
@@ -2760,32 +2888,106 @@ function mailAccSelChanged(input) {
   refreshMailAccSelUI();
 }
 
+// ---- "Quét chọn" (keo chuot) + Shift+Click chon theo khoang - yeu cau nguoi dung 2026-09-11
+// "thêm option chế độ tích chọn/quét chọn profile". Luon bat san (khong can bat/tat rieng) -
+// AN TOAN vi chi kich hoat khi thao tac BAT DAU dung tren 1 checkbox (input.mailacc-sel), khong
+// anh huong click/keo o cho khac trong bang. Ca 2 CHI hoat dong trong pham vi TRANG dang hien
+// (khong keo/chon khoang xuyen qua trang khac duoc - gioi han tu nhien cua phan trang). ----
+let mailAccLastClickedId = null; // id checkbox CLICK THUONG gan nhat - moc cho Shift+Click
+let mailAccDragSelecting = false;
+let mailAccDragSelectValue = null; // true/false - trang thai dang "quet" ap cho cac o di qua, null = chua xac dinh
+
+function mailAccSyncMountedCheckboxes() {
+  document.querySelectorAll('#mailacc-tbody input.mailacc-sel').forEach(el => {
+    el.checked = mailAccSelected.has(parseInt(el.dataset.id, 10));
+  });
+}
+
+function mailAccApplyRangeSelect(fromId, toId, checked) {
+  const ids = Array.from(document.querySelectorAll('#mailacc-tbody input.mailacc-sel')).map(el => parseInt(el.dataset.id, 10));
+  const i1 = ids.indexOf(fromId), i2 = ids.indexOf(toId);
+  if (i1 < 0 || i2 < 0) return;
+  const [lo, hi] = i1 < i2 ? [i1, i2] : [i2, i1];
+  for (let i = lo; i <= hi; i++) {
+    if (checked) mailAccSelected.add(ids[i]); else mailAccSelected.delete(ids[i]);
+  }
+}
+
+(function mailAccWireDragSelect() {
+  const tbody = document.getElementById('mailacc-tbody');
+  if (!tbody) return;
+
+  // Shift+Click: chon CA KHOANG giua lan click thuong gan nhat va dong dang click (giong
+  // Gmail/File Explorer) - huy toggle mac dinh cua checkbox nay (se tu quyet dinh theo khoang).
+  tbody.addEventListener('click', (e) => {
+    const cb = e.target.closest('input.mailacc-sel');
+    if (!cb) return;
+    const id = parseInt(cb.dataset.id, 10);
+    if (e.shiftKey && mailAccLastClickedId != null && mailAccLastClickedId !== id) {
+      e.preventDefault();
+      mailAccApplyRangeSelect(mailAccLastClickedId, id, true);
+      mailAccSyncMountedCheckboxes();
+      refreshMailAccSelUI();
+      return;
+    }
+    mailAccLastClickedId = id;
+  });
+
+  // Keo chuot ("quét chọn"): nhan giu tren 1 checkbox roi keo qua cac dong khac - cac o di
+  // qua duoc dat VE DUNG trang thai MOI cua checkbox dau tien (bat dau keo tu 1 o dang tat ->
+  // "quet" bat, va nguoc lai). Doc gia tri MOI qua setTimeout(0) - luc mousedown checkbox CHUA
+  // kip tu toggle (toggle that su xay ra o su kien click, sau mouseup), doi 1 tick de chac chan
+  // da co gia tri that.
+  tbody.addEventListener('mousedown', (e) => {
+    const cb = e.target.closest('input.mailacc-sel');
+    if (!cb || e.shiftKey) return;
+    mailAccDragSelecting = true;
+    mailAccDragSelectValue = null;
+    setTimeout(() => { mailAccDragSelectValue = cb.checked; }, 0);
+  });
+  tbody.addEventListener('mouseover', (e) => {
+    if (!mailAccDragSelecting || mailAccDragSelectValue === null) return;
+    const cb = e.target.closest('input.mailacc-sel');
+    if (!cb || cb.checked === mailAccDragSelectValue) return;
+    cb.checked = mailAccDragSelectValue;
+    mailAccSelChanged(cb);
+  });
+  document.addEventListener('mouseup', () => {
+    mailAccDragSelecting = false;
+    mailAccDragSelectValue = null;
+  });
+})();
+
+// Checkbox header "chọn tất cả" - CHI ap dung cho cac dong cua TRANG DANG HIEN (yeu cau nguoi
+// dung 2026-09-11: "checkbox 'chọn tất cả' chỉ chọn toàn bộ profile trang hiện tại"), KHONG
+// dong cham lua chon cua cac trang khac (van giu nguyen trong mailAccSelected).
 function mailAccToggleAll(header) {
-  const visible = mailAccVisibleIds();
-  if (header.checked) visible.forEach(id => mailAccSelected.add(id));
-  else visible.forEach(id => mailAccSelected.delete(id));
+  const pageIds = mailAccPageIds();
+  if (header.checked) pageIds.forEach(id => mailAccSelected.add(id));
+  else pageIds.forEach(id => mailAccSelected.delete(id));
   document.querySelectorAll('#mailacc-tbody input.mailacc-sel').forEach(el => { el.checked = header.checked; });
   refreshMailAccSelUI();
 }
 
 function mailAccSelectedIds() {
-  // id dang duoc chon, gioi han trong cac dong DANG HIEN THI (de khong "chon nham" dong
-  // da bi bo loc / da xoa).
+  // Ap dung nut hang loat cho MOI id da tich chon QUA MOI TRANG (nguoi dung co the tich chon
+  // dan roi moi bam 1 nut hang loat 1 lan) - chi loai tru id KHONG CON khop bo loc hien tai
+  // (da bi loc bo/xoa), khong gioi han chi trang dang xem.
   return mailAccVisibleIds().filter(id => mailAccSelected.has(id));
 }
 
 function refreshMailAccSelUI() {
   const header = document.getElementById('mailacc-sel-all');
-  const visible = mailAccVisibleIds();
-  const selInVisible = visible.filter(id => mailAccSelected.has(id)).length;
+  const pageIds = mailAccPageIds();
+  const selInPage = pageIds.filter(id => mailAccSelected.has(id)).length;
   if (header) {
-    header.checked = visible.length > 0 && selInVisible === visible.length;
-    header.indeterminate = selInVisible > 0 && selInVisible < visible.length;
+    header.checked = pageIds.length > 0 && selInPage === pageIds.length;
+    header.indeterminate = selInPage > 0 && selInPage < pageIds.length;
   }
   const countEl = document.getElementById('mailacc-count');
   if (countEl) {
     countEl.textContent =
-      `Hiển thị ${visible.length} dòng (tối đa 300 - Lọc thêm để thu hẹp) — Đã chọn ${mailAccSelected.size}.`;
+      `Khớp bộ lọc ${lastMailAccountsList.length} dòng (tối đa 300 - Lọc thêm để thu hẹp) — Đã chọn ${mailAccSelected.size}.`;
   }
 }
 
@@ -2859,13 +3061,23 @@ async function addMailAccountsManual(btn) {
 // Do chieu cao THAT SU (co the doi khi man hinh hep lam cac nut toolbar xuong dong) cua khoi
 // sticky toolbar (#mailacc-sticky-toolbar) roi ghi vao CSS custom property de header cot cua
 // bang (#mailacc-thead-row th, sticky rieng) biet dan ngay duoi no, khong che len nhau va
-// khong de ho trong - xem yeu cau nguoi dung 2026-09-11 "cố định khi cuộn trang". Goi lai moi
-// khi vao tab mailacc + khi resize cua so (chi khi tab mailacc dang active, tranh do vo ich).
+// khong de ho trong - xem yeu cau nguoi dung 2026-09-11 "cố định khi cuộn trang". CUNG do
+// chieu cao thanh phan trang (#mailacc-pager, THEM 2026-09-11 sau khi nguoi dung bao "phải
+// cuộn xuống dưới" moi thay - thanh nay nam NGOAI vung scroll cua bang nen phai duoc TRU vao
+// max-height cua #mailacc-table-wrap, xem CSS, neu khong tong noi dung se vuot qua 100vh).
+// Goi lai moi khi vao tab mailacc, resize cua so, VA moi lan render lai trang (mailAccRenderPage())
+// vi noi dung pager doi (vd "Trang 1/6" -> "Trang 12/243" dai ra) co the anh huong chieu cao.
 function mailAccUpdateStickyOffset() {
   const toolbar = document.getElementById('mailacc-sticky-toolbar');
-  if (!toolbar) return;
-  const h = toolbar.getBoundingClientRect().height;
-  if (h > 0) document.documentElement.style.setProperty('--mailacc-toolbar-h', h + 'px');
+  if (toolbar) {
+    const h = toolbar.getBoundingClientRect().height;
+    if (h > 0) document.documentElement.style.setProperty('--mailacc-toolbar-h', h + 'px');
+  }
+  const pager = document.getElementById('mailacc-pager');
+  if (pager) {
+    const ph = pager.getBoundingClientRect().height;
+    if (ph > 0) document.documentElement.style.setProperty('--mailacc-pager-h', ph + 'px');
+  }
 }
 window.addEventListener('resize', () => {
   if (document.getElementById('tab-mailacc') && document.getElementById('tab-mailacc').classList.contains('active')) {
@@ -2946,6 +3158,15 @@ function mailAccHasUsableCookie(row) {
   return c !== '' && c !== 'FAIL';
 }
 
+// "Cookie dang LIVE" - dung KHOP CHINH XAC voi logic hien badge LIVE/DIE cua
+// mailAccCookieStatusBadge() (cookie hop le VA cookie_status khac 'dead' - mac dinh lac quan
+// khi chua tung check qua "check_cookie") - dung cho checkbox loc "Chỉ Cookie LIVE" o tab
+// "Đăng video" (yeu cau nguoi dung 2026-09-11: "chỉ lấy những tài khoản có trạng thái cookie
+// đang live"), tranh dinh nghia LIVE khac nhau giua 2 noi gay nham lan.
+function mailAccCookieIsLive(row) {
+  return mailAccHasUsableCookie(row) && (row && row.cookie_status) !== 'dead';
+}
+
 function mailAccLoginStatusBadge(a) {
   const status = a.shopee_login_status;
   if (!status) return '<span class="badge idle">Chưa kiểm tra</span>';
@@ -2969,24 +3190,10 @@ function mailAccCookieStatusBadge(a, idx) {
   return `${badge} <button class="secondary" onclick="copyMailField(${idx}, 'cookie')">Sao chép</button>`;
 }
 
-function renderMailAccounts() {
-  renderMailAccHeader();
-  if (mailAccSort.field) {
-    lastMailAccountsList.sort((a, b) => mailAccSort.dir * compareMailAccVal(a[mailAccSort.field], b[mailAccSort.field]));
-  }
-  const accounts = lastMailAccountsList;
-  // Bo cac id dang duoc chon nhung khong con nam trong danh sach dang hien thi (da xoa dong
-  // hoac doi bo loc) - tranh "chon ngam" cac dong da bien mat.
-  if (accounts.length) {
-    const present = new Set(accounts.map(a => a.id));
-    for (const id of Array.from(mailAccSelected)) {
-      if (!present.has(id)) mailAccSelected.delete(id);
-    }
-  } else {
-    mailAccSelected.clear();
-  }
-  const tbody = document.getElementById('mailacc-tbody');
-  tbody.innerHTML = accounts.map((a, idx) => `
+// 1 hang du lieu (idx = vi tri THAT trong lastMailAccountsList, khong phai vi tri trong trang -
+// dung cho copyMailField() luon tra dung dong du dang o trang nao, xem mailAccRenderPage()).
+function mailAccRowHtml(a, idx) {
+  return `
     <tr>
       <td class="sel-cell"><input type="checkbox" class="mailacc-sel" data-id="${a.id}" ${mailAccSelected.has(a.id) ? 'checked' : ''} onchange="mailAccSelChanged(this)" title="Tích chọn dòng này"></td>
       <td style="white-space:nowrap;">
@@ -3033,13 +3240,118 @@ function renderMailAccounts() {
         <button class="secondary" onclick="deleteMailAccount(${a.id})">Xóa</button>
       </td>
       <td class="muted" style="white-space:nowrap;">${a.created_at || '-'}</td>
-    </tr>
-  `).join('') || `<tr><td colspan="${mailAccVisibleColCount()}" class="muted">Chưa có Email nào.</td></tr>`;
-  refreshMailAccSelUI();
+    </tr>`;
+}
+
+// ---- Phan trang (yeu cau nguoi dung 2026-09-11: "Tôi muốn làm phân trang dạng này" kem anh
+// tham khao giao dien GPM - thay the virtual scrolling truoc do) - CHI render dung 1 "trang"
+// (mailAccPageSize dong) cua lastMailAccountsList vao tbody, kem thanh dieu huong trang
+// (#mailacc-pager) o duoi bang giong GPM: nut ‹/› + "trang X/Y" + dropdown so dong/trang +
+// "Tổng số N". Luu lai so dong/trang nguoi dung chon (localStorage), cung mo hinh voi
+// mailAccColumnOrder/mailAccHiddenCols. ----
+const MAILACC_PAGESIZE_STORAGE_KEY = 'mailacc_page_size_v1';
+const MAILACC_PAGE_SIZES = [25, 50, 100, 200, 500];
+function mailAccLoadPageSize() {
+  try {
+    const n = parseInt(localStorage.getItem(MAILACC_PAGESIZE_STORAGE_KEY), 10);
+    return MAILACC_PAGE_SIZES.includes(n) ? n : 50;
+  } catch (e) { return 50; }
+}
+let mailAccPageSize = mailAccLoadPageSize();
+let mailAccCurrentPage = 1;
+
+function mailAccTotalPages() {
+  return Math.max(1, Math.ceil(lastMailAccountsList.length / mailAccPageSize));
+}
+
+// ids cua CHINH TRANG DANG HIEN (dung cho hanh vi checkbox header "chọn tất cả" - yeu cau
+// nguoi dung 2026-09-11: "checkbox 'chọn tất cả' chỉ chọn toàn bộ profile trang hiện tại",
+// KHAC voi mailAccVisibleIds() la TOAN BO dong khop bo loc qua moi trang - dung cho cac nut
+// hang loat, vi nguoi dung co the tich chon dan qua nhieu trang roi moi bam nut hang loat).
+function mailAccPageIds() {
+  const start = (mailAccCurrentPage - 1) * mailAccPageSize;
+  return lastMailAccountsList.slice(start, start + mailAccPageSize).map(a => a.id);
+}
+
+// Render lai CHI phan tbody (1 trang) + thanh dieu huong trang - goi khi: render toan bo
+// (loc/sort/nap moi), doi trang, doi so dong/trang. KHONG dong cham thead/toolbar.
+function mailAccRenderPage() {
+  const tbody = document.getElementById('mailacc-tbody');
+  if (!tbody) return;
+  const accounts = lastMailAccountsList;
+  if (!accounts.length) {
+    tbody.innerHTML = `<tr><td colspan="${mailAccVisibleColCount()}" class="muted">Chưa có Email nào.</td></tr>`;
+  } else {
+    const totalPages = mailAccTotalPages();
+    if (mailAccCurrentPage > totalPages) mailAccCurrentPage = totalPages;
+    const start = (mailAccCurrentPage - 1) * mailAccPageSize;
+    const end = Math.min(accounts.length, start + mailAccPageSize);
+    tbody.innerHTML = accounts.slice(start, end).map((a, i) => mailAccRowHtml(a, start + i)).join('');
+  }
   mailAccTagCols();
   mailAccApplyColumnOrder();
-  mailAccWireColumnDrag();
   mailAccApplyVisibility();
+  mailAccRenderPager();
+  // Chieu cao pager co the doi (noi dung "Trang X/Y" dai/ngan khac nhau) - do lai ngay de
+  // #mailacc-table-wrap luon tru dung chieu cao, khong bao gio de pager bi day khuat duoi man
+  // hinh (yeu cau nguoi dung 2026-09-11).
+  mailAccUpdateStickyOffset();
+  // Header checkbox "chọn tất cả" phan anh dung TRANG VUA CHUYEN TOI (khong phai trang cu) -
+  // thieu dong nay se giu nguyen trang thai checked/indeterminate CU tu truoc khi doi trang.
+  refreshMailAccSelUI();
+  const wrap = document.getElementById('mailacc-table-wrap');
+  if (wrap) wrap.scrollTop = 0;
+}
+
+function mailAccRenderPager() {
+  const el = document.getElementById('mailacc-pager');
+  if (!el) return;
+  const total = lastMailAccountsList.length;
+  const totalPages = mailAccTotalPages();
+  el.innerHTML = `
+    <button class="secondary" onclick="mailAccGoPage(${mailAccCurrentPage - 1})" ${mailAccCurrentPage <= 1 ? 'disabled' : ''} title="Trang trước">‹</button>
+    <span>Trang ${mailAccCurrentPage} / ${totalPages}</span>
+    <button class="secondary" onclick="mailAccGoPage(${mailAccCurrentPage + 1})" ${mailAccCurrentPage >= totalPages ? 'disabled' : ''} title="Trang sau">›</button>
+    <label style="white-space:nowrap;margin-left:16px;">Số dòng/trang:
+      <select onchange="mailAccChangePageSize(this)">
+        ${MAILACC_PAGE_SIZES.map(n => `<option value="${n}" ${n === mailAccPageSize ? 'selected' : ''}>${n}</option>`).join('')}
+      </select>
+    </label>
+    <span class="muted" style="margin-left:16px;">Tổng số ${total}</span>`;
+}
+
+function mailAccGoPage(p) {
+  mailAccCurrentPage = Math.max(1, Math.min(mailAccTotalPages(), p));
+  mailAccRenderPage();
+}
+
+function mailAccChangePageSize(sel) {
+  mailAccPageSize = parseInt(sel.value, 10) || 50;
+  try { localStorage.setItem(MAILACC_PAGESIZE_STORAGE_KEY, String(mailAccPageSize)); } catch (e) {}
+  mailAccCurrentPage = 1;
+  mailAccRenderPage();
+}
+
+function renderMailAccounts() {
+  renderMailAccHeader();
+  if (mailAccSort.field) {
+    lastMailAccountsList.sort((a, b) => mailAccSort.dir * compareMailAccVal(a[mailAccSort.field], b[mailAccSort.field]));
+  }
+  const accounts = lastMailAccountsList;
+  // Bo cac id dang duoc chon nhung khong con nam trong danh sach dang hien thi (da xoa dong
+  // hoac doi bo loc) - tranh "chon ngam" cac dong da bien mat.
+  if (accounts.length) {
+    const present = new Set(accounts.map(a => a.id));
+    for (const id of Array.from(mailAccSelected)) {
+      if (!present.has(id)) mailAccSelected.delete(id);
+    }
+  } else {
+    mailAccSelected.clear();
+  }
+  // Loc/sap xep lai xong -> ve trang dau (vi tri cu khong con y nghia voi danh sach moi).
+  mailAccCurrentPage = 1;
+  mailAccRenderPage(); // da tu goi refreshMailAccSelUI() ben trong
+  mailAccWireColumnDrag();
 }
 
 function copyMailField(idx, field) {
@@ -3883,15 +4195,17 @@ async function bulkGenerateProfileNames(btn) {
 // voi filter "Nhóm GPM"), gan CUNG 1 nhom do cho MOI dong dang tich chon - xem yeu cau nguoi
 // dung 2026-09-10. ----
 
-// Popup rieng (#group-assign-modal-overlay) - tra ve ten nhom (string, co the rong neu nguoi
-// dung khong chon) khi bam "Đồng ý", null khi Huy/Escape/click ra ngoai.
+// Popup rieng (#group-assign-modal-overlay) - tra ve id NHOM THAT (string, id lay tu chinh
+// GPM/GEM - xem yeu cau nguoi dung 2026-09-11 'gọi lên thay đổi nhóm trên gpm rồi mới đồng bộ
+// xuống': can id THAT de goi update_profile_group(), khong the dung ten vi GPM/GEM API doi nhom
+// qua group_id chu khong phai ten) khi bam "Đồng ý", null khi Huy/Escape/click ra ngoai.
 function _showGroupAssignModal(count, groups) {
   return new Promise(resolve => {
     const overlay = document.getElementById('group-assign-modal-overlay');
     document.getElementById('group-assign-modal-count').textContent = count;
     const select = document.getElementById('group-assign-select');
     select.innerHTML = '<option value="">-- Chọn nhóm GPM --</option>' +
-      (groups || []).map(g => `<option value="${g.replace(/"/g, '&quot;')}">${g}</option>`).join('');
+      (groups || []).map(g => `<option value="${String(g.id).replace(/"/g, '&quot;')}">${g.name}</option>`).join('');
 
     const onKeydown = (e) => { if (e.key === 'Escape') close(null); };
     const close = (result) => {
@@ -3929,7 +4243,7 @@ async function bulkAssignGroup(btn) {
   let groups = [];
   try {
     const res = await api('GET', '/api/engines/groups?engine=' + engine);
-    groups = (res.groups || []).map(g => g.name).filter(n => n);
+    groups = (res.groups || []).filter(g => g && g.id && g.name);
   } catch (e) {
     await customAlert(`Lỗi tải danh sách nhóm ${engine.toUpperCase()} thật: ${e.message} (kiểm tra ứng dụng ${engine === 'gem' ? 'GemLogin' : 'GPM'} đang chạy).`, { danger: true });
     return;
@@ -3938,17 +4252,23 @@ async function bulkAssignGroup(btn) {
     await customAlert(`Chưa có nhóm ${engine.toUpperCase()} nào — hãy tạo nhóm trong ứng dụng ${engine === 'gem' ? 'GemLogin' : 'GPM'} trước.`, { danger: true });
     return;
   }
-  const groupName = await _showGroupAssignModal(ids.length, groups);
-  if (groupName === null) return; // bam Huy
-  if (!groupName) {
+  const groupId = await _showGroupAssignModal(ids.length, groups);
+  if (groupId === null) return; // bam Huy
+  if (!groupId) {
     await customAlert('Chưa chọn nhóm nào.', { danger: true });
     return;
   }
+  const groupLabel = (groups.find(g => String(g.id) === String(groupId)) || {}).name || groupId;
+  if (!(await customConfirm(
+    `Gom nhóm "${groupLabel}" cho ${ids.length} dòng đang tích chọn?\n\n` +
+    `Sẽ gọi lên ${engine.toUpperCase()} đổi nhóm TRỰC TIẾP trên từng profile thật rồi đồng bộ lại xuống đây - dòng chưa có GPM/GEM ID sẽ bị bỏ qua.`,
+    { danger: true }
+  ))) return;
   await withBusy(btn, async () => {
     try {
-      const res = await api('POST', '/api/mail_accounts/group_gpm/set_bulk', { ids, group_gpm: groupName }, 30000);
-      await loadMailAccounts();
-      await customAlert(`Đã gom ${res.updated}/${ids.length} dòng vào nhóm "${groupName}".`);
+      const res = await api('POST', '/api/mail_accounts/group_gpm/set_bulk', { ids, group_id: groupId }, 60000);
+      await syncMailAccountsGpm(null, true); // dong bo lai dung gia tri that tu GPM/GEM xuong DB
+      await _reportProxyBulkResult(res, ids.length, `gom nhóm "${groupLabel}"`);
     } catch (e) {
       await customAlert('Lỗi gom nhóm hàng loạt: ' + e.message, { danger: true });
     }
@@ -4199,8 +4519,9 @@ async function resetVideoSourcesDb(btn) {
 // ============================================================================================
 
 let lastPostVideoSources = [];
-let postVideoSessions = new Map(); // sessionId -> { id, accounts, running, stopRequested }
+let postVideoSessions = new Map(); // sessionId -> { id, accounts, running, stopRequested, label }
 let postVideoNextSessionId = 1;
+let postVideoActiveSessionId = null; // sid dang HIEN THI (dang tab kieu Chrome - xem yeu cau nguoi dung 2026-09-11)
 
 function sleepMs(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -4212,65 +4533,103 @@ function postVideoLog(sid, msg) {
   box.textContent = `[${new Date().toLocaleTimeString('vi-VN')}] ${msg}\n` + box.textContent;
 }
 
+// Bo cuc lai 2026-09-11 (yeu cau nguoi dung): uu tien khong gian cho BANG TAI KHOAN (khong
+// gian lon nhat trong the), "Cấu hình đăng" don gian/gon lai va dua len GAN vung loc tai
+// khoan (thay vi nam duoi bang xa), THEM checkbox "Chỉ Cookie LIVE" vao dieu kien loc, va BO
+// han khoi "Lịch sử đăng" ra khoi the (da chuyen thanh 1 TAB RIENG "Log-upload" - xem
+// loadPostVideoLogTab()/tab-postvideo-log). Bang tai khoan them cot "Trạng thái phiên" cap
+// nhat REAL-TIME tung dong khi dang chay (xem postVideoSetAccountStatus()).
 function postVideoSessionCardHtml(sid) {
   return `
-    <section id="postvideo-session-${sid}" class="postvideo-session-card" style="border:1px solid var(--border-color,#3334); border-radius:8px; padding:14px; margin-bottom:16px;">
-      <div class="row" style="align-items:center;justify-content:space-between;margin-bottom:8px;">
-        <h3 style="margin:0;">Phiên đăng #${sid}</h3>
-        <button class="secondary" id="postvideo-remove-btn-${sid}" onclick="removePostVideoSession(${sid})" title="Xóa phiên này (chỉ khi không đang chạy)">✕ Xóa phiên</button>
-      </div>
+    <div id="postvideo-session-${sid}" class="postvideo-session-card">
       <div class="row" style="margin-bottom:10px;">
         <label style="white-space:nowrap;font-weight:500;">Nguồn:</label>
         <select id="postvideo-source-sel-${sid}" style="min-width:340px;" onchange="onPostVideoSourceChange(${sid})"></select>
         <span class="muted" id="postvideo-source-info-${sid}"></span>
       </div>
-      <div class="row" style="margin-bottom:10px;">
+      <div class="row" style="margin-bottom:8px;flex-wrap:wrap;">
         <label style="white-space:nowrap;font-weight:500;">Lọc tài khoản:</label>
         <span class="muted" id="postvideo-market-label-${sid}">(chọn nguồn trước)</span>
         <select id="postvideo-filter-group-${sid}" style="max-width:200px;">
           <option value="">-- Nhóm GPM: Tất cả --</option>
         </select>
+        <label style="white-space:nowrap;font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;" title="Chỉ nạp tài khoản có trạng thái Cookie đang LIVE (bỏ qua DIE/FAIL/chưa có Cookie) - xem cột Cookie ở tab &quot;Quản lý account Shopee&quot;">
+          <input type="checkbox" id="postvideo-filter-live-${sid}" checked> Chỉ Cookie LIVE
+        </label>
         <button class="secondary" onclick="loadPostVideoAccounts(${sid})">Nạp tài khoản theo lọc</button>
         <span class="muted" id="postvideo-accounts-info-${sid}"></span>
       </div>
-      <div class="table-wrap" style="max-height:220px;overflow-y:auto;"><table>
-        <thead><tr>
-          <th style="width:36px;"><input type="checkbox" id="postvideo-sel-all-${sid}" onclick="postVideoToggleAll(${sid}, this)" title="Chọn/bỏ chọn tất cả tài khoản đang nạp"></th>
-          <th>Tài khoản</th><th>Cookie</th><th>Proxy</th><th style="text-align:center;">Rate limit/ngày</th><th style="text-align:center;">Đã đăng hôm nay</th>
-        </tr></thead>
-        <tbody id="postvideo-accounts-tbody-${sid}"><tr><td colspan="6" class="muted">Chưa nạp tài khoản - chọn nguồn rồi bấm "Nạp tài khoản theo lọc".</td></tr></tbody>
-      </table></div>
-      <div class="row" style="margin-top:10px;">
-        <label style="white-space:nowrap;font-weight:500;">Số lượng muốn đăng:</label>
-        <input type="number" id="postvideo-target-${sid}" min="1" value="50" style="max-width:90px;" title="Dừng lại sau khi đăng đủ số lượng này (hoặc sớm hơn nếu hết video pending / hết Rate limit các tài khoản đã chọn)">
-        <label style="white-space:nowrap;font-weight:500;">Số luồng song song:</label>
-        <input type="number" id="postvideo-threads-${sid}" min="1" max="1000" value="3" style="max-width:80px;" title="Mỗi luồng = 1 nhóm tài khoản đăng video độc lập cùng lúc - giới hạn thực tế phụ thuộc BĂNG THÔNG UPLOAD + RAM của máy này (mỗi luồng đang upload 1 video thật cùng lúc), KHÔNG có trần cứng đặt sẵn - hãy tự tăng dần và theo dõi log lỗi (timeout/mất kết nối) để tìm mức phù hợp với máy bạn. Vượt số tài khoản đã chọn cũng vô ích (luồng dư sẽ rảnh rỗi). Lưu ý: server ký bên ngoài (license Chill 68) từng ghi nhận giới hạn ~20 luồng đồng thời cho market PH (field 'phConcurrency', xem CHILL68_VIDEO_UPLOAD_RE.md) - vượt mốc này CÓ THỂ gặp lỗi ký/timeout dù máy vẫn còn khả năng. Nhiều luồng hơn cũng đồng nghĩa nhiều request cùng lúc từ CÙNG 1 IP máy - nên dùng kèm Proxy riêng cho từng tài khoản khi chạy nhiều luồng.">
-        <label style="white-space:nowrap;font-weight:500;">Nghỉ giữa video (giây):</label>
-        <input type="number" id="postvideo-min-delay-${sid}" min="0" value="8" style="max-width:70px;">
+      <div class="row" style="margin-bottom:6px;flex-wrap:wrap;">
+        <label style="white-space:nowrap;font-weight:500;">Số lượng:</label>
+        <input type="number" id="postvideo-target-${sid}" min="1" value="50" style="max-width:80px;" title="Số lượng muốn đăng - dừng lại sau khi đăng đủ số lượng này CHO MỖI TÀI KHOẢN (hoặc sớm hơn nếu hết video pending / hết Rate limit)">
+        <label style="white-space:nowrap;font-weight:500;">Luồng:</label>
+        <input type="number" id="postvideo-threads-${sid}" min="1" max="1000" value="3" style="max-width:64px;" title="Số luồng song song - mỗi luồng = 1 nhóm tài khoản đăng video độc lập cùng lúc, giới hạn thực tế phụ thuộc BĂNG THÔNG UPLOAD + RAM của máy này, KHÔNG có trần cứng đặt sẵn - hãy tự tăng dần và theo dõi log lỗi (timeout/mất kết nối) để tìm mức phù hợp. Lưu ý: server ký bên ngoài (license Chill 68) từng ghi nhận giới hạn ~20 luồng đồng thời cho market PH (field 'phConcurrency', xem CHILL68_VIDEO_UPLOAD_RE.md).">
+        <label style="white-space:nowrap;font-weight:500;">Nghỉ (s):</label>
+        <input type="number" id="postvideo-min-delay-${sid}" min="0" value="8" style="max-width:56px;" title="Nghỉ giữa video (giây) - khoảng ngẫu nhiên từ min đến max">
         <span>–</span>
-        <input type="number" id="postvideo-max-delay-${sid}" min="0" value="20" style="max-width:70px;">
+        <input type="number" id="postvideo-max-delay-${sid}" min="0" value="20" style="max-width:56px;">
         <button id="postvideo-start-btn-${sid}" onclick="startPostVideoRun(${sid})">▶ Bắt đầu đăng</button>
         <button id="postvideo-stop-btn-${sid}" class="secondary" onclick="stopPostVideoRun(${sid})" disabled>■ Dừng</button>
       </div>
-      <div class="muted" id="postvideo-capacity-info-${sid}" style="margin-top:6px;"></div>
-      <pre id="postvideo-log-${sid}" class="console-log" style="max-height:220px;"></pre>
-      <div class="row" style="align-items:center;justify-content:space-between;margin-top:10px;">
-        <h4 style="margin:0;">Lịch sử đăng (nguồn đang chọn)</h4>
-        <button class="secondary" onclick="loadPostVideoHistory(${sid})">Làm mới</button>
-      </div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Cập nhật</th><th>SP ID</th><th>Sản phẩm</th><th>Tài khoản</th><th>Kết quả</th><th>Post ID / Lỗi</th></tr></thead>
-        <tbody id="postvideo-history-tbody-${sid}"><tr><td colspan="6" class="muted">Chọn nguồn để xem lịch sử.</td></tr></tbody>
+      <div class="muted" id="postvideo-capacity-info-${sid}" style="margin-bottom:10px;"></div>
+      <div class="table-wrap" style="max-height:480px;overflow-y:auto;"><table>
+        <thead><tr>
+          <th style="width:36px;"><input type="checkbox" id="postvideo-sel-all-${sid}" onclick="postVideoToggleAll(${sid}, this)" title="Chọn/bỏ chọn tất cả tài khoản đang nạp"></th>
+          <th>Tài khoản</th><th>Cookie</th><th>Proxy</th><th style="text-align:center;">Rate limit/ngày</th><th style="text-align:center;">Đã đăng hôm nay</th><th style="min-width:200px;">Trạng thái phiên</th>
+        </tr></thead>
+        <tbody id="postvideo-accounts-tbody-${sid}"><tr><td colspan="7" class="muted">Chưa nạp tài khoản - chọn nguồn rồi bấm "Nạp tài khoản theo lọc".</td></tr></tbody>
       </table></div>
-    </section>`;
+      <pre id="postvideo-log-${sid}" class="console-log" style="max-height:150px;"></pre>
+    </div>`;
+}
+
+// Ve lai TOAN BO tab-strip (dang tab kieu trinh duyet) tu state hien tai cua postVideoSessions
+// - goi lai moi khi: tao/xoa phien, doi tab active, doi nguon (cap nhat "tieu de tab" giong
+// browser doi title trang), bat dau/dung chay (cham/tat cham xanh + disable nut xoa trong luc
+// chay, giong Chrome khoa nut dong tab khi dang co viec dang xu ly).
+function renderPostVideoTabStrip() {
+  const strip = document.getElementById('postvideo-tabstrip');
+  if (!strip) return;
+  const addBtn = `<button class="postvideo-tab-add" onclick="addPostVideoSession()" title="Tạo phiên đăng mới">+</button>`;
+  if (!postVideoSessions.size) {
+    strip.innerHTML = `<div class="postvideo-tabstrip-empty">Chưa có phiên nào — bấm "+" để tạo phiên đăng đầu tiên.</div>` + addBtn;
+    return;
+  }
+  const tabs = Array.from(postVideoSessions.values()).map(session => {
+    const active = session.id === postVideoActiveSessionId;
+    const label = session.label || `Phiên #${session.id}`;
+    const dot = session.running ? '<span class="postvideo-tab-dot" title="Đang chạy"></span>' : '';
+    const closeStyle = session.running ? 'opacity:.3;pointer-events:none;' : '';
+    const closeTitle = session.running ? 'Đang chạy - bấm Dừng trước khi xóa' : 'Xóa phiên này';
+    return `
+      <div class="postvideo-tab${active ? ' active' : ''}" onclick="switchPostVideoSession(${session.id})" title="${label.replace(/"/g, '&quot;')}">
+        ${dot}
+        <span class="postvideo-tab-title">${label}</span>
+        <span class="postvideo-tab-close" style="${closeStyle}" onclick="event.stopPropagation(); removePostVideoSession(${session.id})" title="${closeTitle}">✕</span>
+      </div>`;
+  }).join('');
+  strip.innerHTML = tabs + addBtn;
+}
+
+// Chuyen "tab" dang hien thi - CHI doi CSS display (khong huy/tao lai DOM) nen phien khac VAN
+// chay ngam binh thuong o nen, dung y "giống mở tab chrome ... chọn phiên nào thì màn hình
+// hiện thị vùng làm việc của tab phiên đó" (yeu cau nguoi dung 2026-09-11).
+function switchPostVideoSession(sid) {
+  if (!postVideoSessions.has(sid)) return;
+  postVideoActiveSessionId = sid;
+  document.querySelectorAll('.postvideo-session-card').forEach(el => {
+    el.classList.toggle('active', el.id === 'postvideo-session-' + sid);
+  });
+  renderPostVideoTabStrip();
 }
 
 function addPostVideoSession() {
   const sid = postVideoNextSessionId++;
-  postVideoSessions.set(sid, { id: sid, accounts: [], running: false, stopRequested: false });
+  postVideoSessions.set(sid, { id: sid, accounts: [], running: false, stopRequested: false, label: '' });
   document.getElementById('postvideo-sessions-container').insertAdjacentHTML('beforeend', postVideoSessionCardHtml(sid));
   populatePostVideoSourceSelect(sid);
   loadMailAccountGroupsInto('postvideo-filter-group-' + sid);
+  switchPostVideoSession(sid); // tab MOI tu dong thanh tab active, giong Chrome mo new tab
   return sid;
 }
 
@@ -4280,9 +4639,24 @@ async function removePostVideoSession(sid) {
     await customAlert('Phiên đang chạy - bấm Dừng trước khi xóa.', { danger: true });
     return;
   }
+  const orderedIds = Array.from(postVideoSessions.keys());
+  const idx = orderedIds.indexOf(sid);
   postVideoSessions.delete(sid);
   const el = document.getElementById('postvideo-session-' + sid);
   if (el) el.remove();
+  if (postVideoActiveSessionId === sid) {
+    // Giong Chrome dong 1 tab: chuyen sang tab o CUNG vi tri do (thuong la tab ben phai, hoac
+    // tab cuoi cung neu vua xoa tab cuoi) - KHONG can nho "tab truoc do da mo" phuc tap.
+    const remaining = Array.from(postVideoSessions.keys());
+    const nextSid = remaining.length ? remaining[Math.min(idx, remaining.length - 1)] : null;
+    postVideoActiveSessionId = nextSid;
+    if (nextSid != null) {
+      document.querySelectorAll('.postvideo-session-card').forEach(elc => {
+        elc.classList.toggle('active', elc.id === 'postvideo-session-' + nextSid);
+      });
+    }
+  }
+  renderPostVideoTabStrip();
 }
 
 // Nap danh sach nguon (DUNG CHUNG cho moi phien) roi cap nhat lai TUNG dropdown nguon cua
@@ -4335,11 +4709,15 @@ function onPostVideoSourceChange(sid) {
     ? `Tổng ${s.total_count ?? '?'} | Đã đăng ${s.success_count ?? '?'} | Lỗi ${s.error_count ?? '?'} | Pending ${s.pending_count ?? '?'}`
     : '';
   document.getElementById('postvideo-market-label-' + sid).textContent = s ? `Market: ${s.market.toUpperCase()}` : '(chọn nguồn trước)';
-  document.getElementById('postvideo-accounts-tbody-' + sid).innerHTML = '<tr><td colspan="6" class="muted">Chưa nạp tài khoản - bấm "Nạp tài khoản theo lọc".</td></tr>';
+  document.getElementById('postvideo-accounts-tbody-' + sid).innerHTML = '<tr><td colspan="7" class="muted">Chưa nạp tài khoản - bấm "Nạp tài khoản theo lọc".</td></tr>';
   const session = postVideoSessions.get(sid);
-  if (session) session.accounts = [];
+  if (session) {
+    session.accounts = [];
+    // Nhan tab cap nhat theo nguon da chon, giong browser doi tieu de tab theo trang dang mo.
+    session.label = s ? `#${sid} · ${s.folder}` : '';
+    renderPostVideoTabStrip();
+  }
   document.getElementById('postvideo-capacity-info-' + sid).textContent = '';
-  loadPostVideoHistory(sid);
 }
 
 async function loadPostVideoAccounts(sid) {
@@ -4358,12 +4736,20 @@ async function loadPostVideoAccounts(sid) {
   if (groupGpm) params.set('group_gpm', groupGpm);
   infoEl.textContent = 'Đang nạp...';
   const session = postVideoSessions.get(sid);
+  const onlyLive = document.getElementById('postvideo-filter-live-' + sid).checked;
   try {
-    const { accounts } = await api('GET', '/api/mail_accounts/list?' + params.toString());
-    if (session) session.accounts = accounts || [];
+    const { accounts: allAccounts } = await api('GET', '/api/mail_accounts/list?' + params.toString());
+    // Loc "Chỉ Cookie LIVE" (client-side) - yeu cau nguoi dung 2026-09-11: "thêm vào điều kiện
+    // chỉ lấy những tài khoản có trạng thái cookie đang live" - KHOP CHINH XAC dinh nghia LIVE
+    // cua mailAccCookieStatusBadge() qua mailAccCookieIsLive() (khong chi "co cookie" ma con
+    // phai khong bi 'dead').
+    const accounts = onlyLive ? (allAccounts || []).filter(a => mailAccCookieIsLive(a)) : (allAccounts || []);
+    if (session) session.accounts = accounts;
     renderPostVideoAccountsTable(sid);
-    const withCookie = (accounts || []).filter(a => mailAccHasUsableCookie(a)).length;
-    infoEl.textContent = `Đã nạp ${(accounts || []).length} tài khoản (${withCookie} có Cookie).`;
+    const liveCount = (allAccounts || []).filter(a => mailAccCookieIsLive(a)).length;
+    infoEl.textContent = onlyLive
+      ? `Đã nạp ${accounts.length}/${(allAccounts || []).length} tài khoản (đã lọc Cookie LIVE).`
+      : `Đã nạp ${accounts.length} tài khoản (${liveCount} Cookie LIVE).`;
   } catch (e) {
     infoEl.textContent = 'Lỗi: ' + e.message;
   }
@@ -4374,22 +4760,42 @@ function renderPostVideoAccountsTable(sid) {
   const tbody = document.getElementById('postvideo-accounts-tbody-' + sid);
   const accounts = (session && session.accounts) || [];
   tbody.innerHTML = accounts.map(a => {
-    const hasCookie = mailAccHasUsableCookie(a);
+    const isLive = mailAccCookieIsLive(a);
+    const hasCookieAtAll = mailAccHasUsableCookie(a);
     const limit = a.rate_limit_video;
     const today = a.posted_today || 0;
     const atLimit = limit != null && today >= limit;
-    const disabled = !hasCookie || atLimit;
+    const disabled = !isLive || atLimit;
+    const cookieCell = isLive
+      ? '<span style="color:var(--success-text);">✓ LIVE</span>'
+      : hasCookieAtAll
+        ? '<span style="color:var(--danger-text);">✗ DIE</span>'
+        : '<span style="color:var(--danger-text);">✗ Thiếu</span>';
     return `
       <tr style="${disabled ? 'opacity:.5;' : ''}">
-        <td class="sel-cell"><input type="checkbox" class="postvideo-acc-sel-${sid}" data-id="${a.id}" onchange="updatePostVideoCapacityInfo(${sid})" ${hasCookie && !atLimit ? 'checked' : ''} ${disabled ? 'disabled' : ''}></td>
+        <td class="sel-cell"><input type="checkbox" class="postvideo-acc-sel-${sid}" data-id="${a.id}" onchange="updatePostVideoCapacityInfo(${sid})" ${!disabled ? 'checked' : ''} ${disabled ? 'disabled' : ''}></td>
         <td>${a.profile || a.email || a.shopee_id || ('#' + a.id)}</td>
-        <td>${hasCookie ? '<span style="color:var(--success-text);">✓</span>' : '<span style="color:var(--danger-text);">✗ Thiếu</span>'}</td>
+        <td>${cookieCell}</td>
         <td>${(a.proxy || '').trim() ? '✓' : '-'}</td>
         <td style="text-align:center;">${limit != null ? limit : '∞'}</td>
         <td style="text-align:center;${atLimit ? 'color:var(--danger-text);font-weight:600;' : ''}">${today}${atLimit ? ' (đủ)' : ''}</td>
+        <td class="muted" id="postvideo-acc-status-${sid}-${a.id}">—</td>
       </tr>`;
-  }).join('') || '<tr><td colspan="6" class="muted">Không có tài khoản nào khớp bộ lọc.</td></tr>';
+  }).join('') || '<tr><td colspan="7" class="muted">Không có tài khoản nào khớp bộ lọc.</td></tr>';
   updatePostVideoCapacityInfo(sid);
+}
+
+// Cap nhat REAL-TIME 1 dong tai khoan trong bang (cot "Trạng thái phiên") - xem yeu cau nguoi
+// dung 2026-09-11 "Thiết kế dạng real-time cho danh sách tài khoản đã chọn được đăng". Goi tu
+// postVideoWorkerLoop() ngay khi co ket qua CHO DUNG account_id do (KHONG doan truoc luc dang
+// goi API - server moi la noi QUYET DINH tai khoan nao thuc su duoc dung trong 1 lan goi
+// post_next() vi 1 loi goi gui nhieu account_id ung vien - xem _claim_next_pending()).
+function postVideoSetAccountStatus(sid, accountId, html, colorVar) {
+  const cell = document.getElementById(`postvideo-acc-status-${sid}-${accountId}`);
+  if (!cell) return;
+  cell.className = '';
+  cell.style.color = colorVar ? `var(${colorVar})` : '';
+  cell.innerHTML = html;
 }
 
 function postVideoToggleAll(sid, cb) {
@@ -4467,7 +4873,12 @@ async function postVideoWorkerLoop(sid, sourceId, workerAccountIds, perAccountTa
     if (res.account_id != null && postedByAccount.has(res.account_id)) postedByAccount.set(res.account_id, postedByAccount.get(res.account_id) + 1);
     const acctDone = res.account_id != null ? (postedByAccount.get(res.account_id) ?? '?') : '?';
     postVideoLog(sid, `${res.success ? '✓' : '✗'} ${res.sp_id} (${res.account_label}: ${acctDone}/${perAccountTarget}) - ${res.success ? (res.video_link || 'post_id=' + res.post_id) : 'LỖI: ' + res.error} | còn ${res.pending_remaining} pending`);
-    if (stats.posted % 5 === 0) { loadPostVideoSources(); loadPostVideoHistory(sid); } // cap nhat dinh ky, khong phai moi video (tranh spam request tu nhieu worker cung luc)
+    if (res.account_id != null) {
+      postVideoSetAccountStatus(sid, res.account_id,
+        res.success ? `✓ ${acctDone}/${perAccountTarget}` : `✗ ${acctDone}/${perAccountTarget} - Lỗi: ${String(res.error || '').slice(0, 60)}`,
+        res.success ? '--success-text' : '--danger-text');
+    }
+    if (stats.posted % 5 === 0) loadPostVideoSources(); // cap nhat dinh ky, khong phai moi video (tranh spam request tu nhieu worker cung luc)
     if (session.stopRequested) break;
     const delayMs = 1000 * (minDelay + Math.random() * (maxDelay - minDelay));
     if (delayMs > 0) await sleepMs(delayMs);
@@ -4498,7 +4909,7 @@ async function startPostVideoRun(sid) {
   session.stopRequested = false;
   document.getElementById('postvideo-start-btn-' + sid).disabled = true;
   document.getElementById('postvideo-stop-btn-' + sid).disabled = false;
-  document.getElementById('postvideo-remove-btn-' + sid).disabled = true;
+  renderPostVideoTabStrip();
   postVideoLog(sid, `Bắt đầu đăng - nguồn "${s.folder}" (${s.market.toUpperCase()}), ${accountIds.length} tài khoản chia ${buckets.length} luồng song song, MỖI tài khoản đăng tối đa ${perAccountTarget} video.`);
 
   // postedByAccount: dem so lan da THU dang (thanh cong lan that bai deu tinh) CUA TUNG tai
@@ -4515,10 +4926,9 @@ async function startPostVideoRun(sid) {
     session.running = false;
     document.getElementById('postvideo-start-btn-' + sid).disabled = false;
     document.getElementById('postvideo-stop-btn-' + sid).disabled = true;
-    document.getElementById('postvideo-remove-btn-' + sid).disabled = false;
+    renderPostVideoTabStrip();
     postVideoLog(sid, `Đã dừng. Tổng kết phiên: ${stats.posted} video (${stats.ok} thành công, ${stats.fail} lỗi) trên ${accountIds.length} tài khoản, ${buckets.length} luồng.`);
     loadPostVideoSources();
-    loadPostVideoHistory(sid);
   }
 }
 
@@ -4529,15 +4939,48 @@ function stopPostVideoRun(sid) {
   postVideoLog(sid, 'Đã yêu cầu dừng - sẽ dừng sau video đang xử lý.');
 }
 
-async function loadPostVideoHistory(sid) {
-  const s = currentPostVideoSource(sid);
-  const tbody = document.getElementById('postvideo-history-tbody-' + sid);
-  if (!s) { tbody.innerHTML = '<tr><td colspan="6" class="muted">Chọn nguồn để xem lịch sử.</td></tr>'; return; }
+// ---- Tab "Log-upload" - lich su dang video CROSS-SOURCE (tach ra khoi the phien "Đăng
+// video", xem yeu cau nguoi dung 2026-09-11: "Lịch sử đăng nên phát triển thành 1 tab riêng
+// 'Log-upload'"). Dung route /api/video_post_log (khac /api/video_sources/<id>/log chi loc
+// duoc 1 nguon) - loc theo Market/Nguồn/Kết quả (deu optional). ----
+let lastPostVideoLogSources = [];
+
+async function loadPostVideoLogTab() {
+  await postVideoLogPopulateSourceFilter();
+  await postVideoLogRefresh();
+}
+
+async function postVideoLogPopulateSourceFilter() {
   try {
-    const { logs } = await api('GET', `/api/video_sources/${s.id}/log?limit=100`);
+    const { sources } = await api('GET', '/api/video_sources');
+    lastPostVideoLogSources = sources || [];
+  } catch (e) {
+    lastPostVideoLogSources = [];
+  }
+  const sel = document.getElementById('postvideo-log-filter-source');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">-- Tất cả nguồn --</option>' +
+    lastPostVideoLogSources.map(s => `<option value="${s.folder.replace(/"/g, '&quot;')}">${s.folder} (${(s.market || '').toUpperCase()})</option>`).join('');
+  if (current) sel.value = current;
+}
+
+async function postVideoLogRefresh() {
+  const tbody = document.getElementById('postvideo-log-tbody');
+  const market = document.getElementById('postvideo-log-filter-market').value;
+  const folder = document.getElementById('postvideo-log-filter-source').value;
+  const successSel = document.getElementById('postvideo-log-filter-result').value;
+  const params = new URLSearchParams({ limit: '200' });
+  if (market) params.set('market', market);
+  if (folder) params.set('folder', folder);
+  if (successSel) params.set('success', successSel);
+  tbody.innerHTML = '<tr><td colspan="8" class="muted">Đang tải...</td></tr>';
+  try {
+    const { logs } = await api('GET', '/api/video_post_log?' + params.toString());
     tbody.innerHTML = (logs || []).map(r => `
       <tr>
         <td class="muted" style="white-space:nowrap;">${fmtLogTime(r.updated_at)}</td>
+        <td>${(r.market || '').toUpperCase()}</td>
+        <td><span class="ellipsis" style="max-width:160px;" title="${(r.folder || '').replace(/"/g, '&quot;')}">${r.folder || '-'}</span></td>
         <td>${r.sp_id}</td>
         <td><span class="ellipsis" style="max-width:200px;" title="${(r.product_name || '').replace(/"/g, '&quot;')}">${r.product_name || '-'}</span></td>
         <td>${r.account_label || '<span class="muted">-</span>'}</td>
@@ -4546,9 +4989,9 @@ async function loadPostVideoHistory(sid) {
             ? (r.video_link ? `<a href="${r.video_link}" target="_blank" rel="noopener">${r.video_link}</a>` : (r.post_id || '-'))
             : `<span class="ellipsis" style="max-width:260px;" title="${(r.error || '').replace(/"/g, '&quot;')}">${r.error || '-'}</span>`}</td>
       </tr>
-    `).join('') || '<tr><td colspan="6" class="muted">Chưa có lịch sử đăng cho nguồn này.</td></tr>';
+    `).join('') || '<tr><td colspan="8" class="muted">Không có lịch sử đăng nào khớp bộ lọc.</td></tr>';
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="6" class="muted">Lỗi tải lịch sử: ${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="muted">Lỗi tải lịch sử: ${e.message}</td></tr>`;
   }
 }
 

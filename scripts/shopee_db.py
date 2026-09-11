@@ -3206,27 +3206,6 @@ def bulk_set_shopee_password(db_path, ids, password):
         conn.close()
 
 
-def bulk_set_group_gpm(db_path, ids, group_name):
-    """Ap dung CUNG 1 ten nhom GPM cho NHIEU dong 1 luc (nut 'Gom nhóm' - xem yeu cau nguoi
-    dung 2026-09-10) - CHI ghi cot group_gpm (nhan noi bo, dung khi TAO profile moi qua nut
-    'Tạo profile'). LUU Y: dong DA CO id_gpm (profile that da ton tai trong GPM) se bi
-    'Đồng bộ GPM' ghi DE LAI ve dung nhom that ngay lan sync ke tiep - nut nay chu yeu huu ich
-    cho dong CHUA co id_gpm (dang gom nhom truoc khi tao profile that). Tra ve so dong duoc
-    cap nhat."""
-    ids = [int(i) for i in ids if str(i).strip().lstrip("-").isdigit()]
-    if not ids:
-        return 0
-    conn = _connect(db_path)
-    try:
-        placeholders = ",".join("?" for _ in ids)
-        cur = conn.execute(
-            f"update mail_accounts set group_gpm=? where id in ({placeholders})",
-            (group_name, *ids),
-        )
-        conn.commit()
-        return cur.rowcount
-    finally:
-        conn.close()
 
 
 def bulk_set_market(db_path, ids, market):

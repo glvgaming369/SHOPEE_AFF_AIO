@@ -1481,25 +1481,49 @@ def video_sources_post_next(source_id):
         _release_claim(folder, target_row.sp_id)
 
 
-@app.route("/api/video_sources/<int:source_id>/log", methods=["GET"])
-def video_sources_log(source_id):
-    """Lich su dang cua 1 nguon (video_post_log loc theo dung market+folder cua nguon) - dung
-    cho bang 'Lịch sử đăng' o tab 'Đăng video'. Kem 'account_label' (uu tien ten Profile GPM,
-    xem yeu cau nguoi dung 2026-09-10 - de biet dung PROFILE nao dang, khong phai chi email)
-    tra tu mail_accounts theo account_id - dong log cu/tao qua CLI khong co account_id se
-    hien 'account_label: null' (khong loi)."""
-    row = shopee_db.get_video_source(DB_PATH, source_id)
-    if not row:
-        return _bad_request(f"khong tim thay nguon id={source_id}")
-    limit = request.args.get("limit", 100, type=int)
-    logs = shopee_db.list_video_post_log(DB_PATH, market=row["market"], folder=row["folder"], limit=limit)
+def _enrich_video_post_log(logs):
+    """Kem 'account_label' (uu tien ten Profile GPM, xem yeu cau nguoi dung 2026-09-10 - de
+    biet dung PROFILE nao dang, khong phai chi email) + 'video_link' vao tung dong log doc
+    tu video_post_log - dung chung cho video_sources_log() (1 nguon) va video_post_log_all()
+    (nhieu nguon, tab 'Log-upload'). Dong log cu/tao qua CLI khong co account_id se hien
+    'account_label: null' (khong loi)."""
     account_ids = {r["account_id"] for r in logs if r.get("account_id")}
     accounts = {a["id"]: a for a in shopee_db.list_mail_accounts_by_ids(DB_PATH, list(account_ids))} if account_ids else {}
     for r in logs:
         acc = accounts.get(r.get("account_id"))
         r["account_label"] = (acc.get("profile") or acc.get("email") or acc.get("shopee_id")) if acc else None
-        r["video_link"] = _video_share_link(row["market"], r["post_id"]) if r.get("success") else None
-    return jsonify({"logs": logs})
+        r["video_link"] = _video_share_link(r.get("market"), r["post_id"]) if r.get("success") else None
+    return logs
+
+
+@app.route("/api/video_sources/<int:source_id>/log", methods=["GET"])
+def video_sources_log(source_id):
+    """Lich su dang cua 1 nguon (video_post_log loc theo dung market+folder cua nguon) - dung
+    cho bang 'Lịch sử đăng' truoc day o tab 'Đăng video' (nay chi con dung noi bo, UI da
+    chuyen sang goi /api/video_post_log qua tab 'Log-upload' - xem yeu cau nguoi dung
+    2026-09-11)."""
+    row = shopee_db.get_video_source(DB_PATH, source_id)
+    if not row:
+        return _bad_request(f"khong tim thay nguon id={source_id}")
+    limit = request.args.get("limit", 100, type=int)
+    logs = shopee_db.list_video_post_log(DB_PATH, market=row["market"], folder=row["folder"], limit=limit)
+    return jsonify({"logs": _enrich_video_post_log(logs)})
+
+
+@app.route("/api/video_post_log", methods=["GET"])
+def video_post_log_all():
+    """Lich su dang video CROSS-SOURCE (khong bat buoc chon 1 nguon cu the) - dung cho tab
+    'Log-upload' (yeu cau nguoi dung 2026-09-11: 'Lịch sử đăng nên phát triển thành 1 tab
+    riêng "Log-upload"', tach ra khoi tung phien cua tab 'Đăng video' de KHONG chiem nhieu
+    khong gian cua khu vuc chinh - bang tai khoan). Filter deu OPTIONAL qua query string:
+    market, folder (ten nguon), success ('1'/'0')."""
+    market = request.args.get("market") or None
+    folder = request.args.get("folder") or None
+    success_raw = request.args.get("success")
+    success = None if success_raw in (None, "") else success_raw == "1"
+    limit = request.args.get("limit", 200, type=int)
+    logs = shopee_db.list_video_post_log(DB_PATH, market=market, folder=folder, success=success, limit=limit)
+    return jsonify({"logs": _enrich_video_post_log(logs)})
 
 
 @app.route("/api/mail_accounts/export.xlsx", methods=["GET"])
@@ -1645,17 +1669,47 @@ def mail_accounts_shopee_password_set_bulk():
 
 @app.route("/api/mail_accounts/group_gpm/set_bulk", methods=["POST"])
 def mail_accounts_group_gpm_set_bulk():
-    """Nut 'Gom nhóm': ghi DUNG 1 ten nhom GPM (chon tu dropdown - nhom DANG CO trong DB) cho
-    MOI dong dang TICH CHON - xem shopee_db.bulk_set_group_gpm()."""
+    """Nut 'Gom nhóm': GOI LEN GPM/GEM de CHUYEN NHOM TRUC TIEP tren PROFILE THAT truoc (qua
+    _ad.update_profile_group() - antidetect.py), CUNG 1 group_id (id nhom THAT, lay tu dropdown
+    frontend da doi sang gui id thay vi ten - xem yeu cau nguoi dung 2026-09-11 'khi xac nhan
+    thi hay goi len thay doi nhom tren gpm roi moi dong bo xuong') cho MOI dong dang tich chon.
+    KHONG ghi thang vao DB local o day - client TU goi /gpm/sync NGAY SAU KHI route nay tra ve
+    thanh cong de dong bo lai dung gia tri THAT tu GPM/GEM xuong DB, cung mo hinh voi
+    proxy/import_bulk ('Set-proxy'). Dong chua co GPM/GEM ID (chua 'Tạo profile') se bi bo qua -
+    khong the doi nhom tren 1 profile chua ton tai. CAC DONG PHAI CUNG 1 ENGINE (frontend da tu
+    kiem tra truoc khi mo popup, vi group_id chi co y nghia trong PHAM VI 1 engine)."""
     body = request.get_json(force=True, silent=True) or {}
     ids = body.get("ids")
-    group_name = body.get("group_gpm")
+    group_id = str(body.get("group_id") or "").strip()
     if not isinstance(ids, list) or not ids:
         return _bad_request("thieu 'ids'")
-    if not group_name:
-        return _bad_request("thieu 'group_gpm'")
-    updated = shopee_db.bulk_set_group_gpm(DB_PATH, ids, group_name)
-    return jsonify({"ok": True, "updated": updated})
+    if not group_id:
+        return _bad_request("thieu 'group_id'")
+    updated = 0
+    results = []
+    for raw_id in ids:
+        try:
+            aid = int(str(raw_id).strip())
+        except (TypeError, ValueError):
+            results.append({"id": None, "ok": False, "error": "id khong hop le."})
+            continue
+        row = shopee_db.get_mail_account(DB_PATH, aid)
+        if not row:
+            results.append({"id": aid, "ok": False, "error": f"khong tim thay mail id={aid}"})
+            continue
+        profile_id = (row.get("id_gpm") or "").strip()
+        if not profile_id:
+            results.append({"id": aid, "ok": False, "error": "Chua co GPM/GEM ID - hay 'Tạo profile' truoc khi gom nhóm."})
+            continue
+        engine = _row_engine(row)
+        try:
+            _ad.update_profile_group(engine, profile_id=profile_id, group_id=group_id)
+        except _ad.AntidetectError as e:
+            results.append({"id": aid, "ok": False, "error": str(e)})
+            continue
+        updated += 1
+        results.append({"id": aid, "ok": True})
+    return jsonify({"ok": True, "updated": updated, "results": results})
 
 
 # Danh sach thi truong hop le - khop CHINH XAC MAIL_MARKET_OPTIONS o frontend (dropdown cot
