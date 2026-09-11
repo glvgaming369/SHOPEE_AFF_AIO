@@ -26,8 +26,10 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -53,6 +55,16 @@ VIDEO_PORT = None  # gan trong main() - port RIENG cho traffic dang video, xem i
 VIDEO_PORTS = []  # gan trong main() (nhanh process cha) - TOAN BO port cua cac video-worker
 # process con (>= 1 phan tu, xem --video-workers trong main()) - dashboard round-robin qua day
 # de rai deu request post_next() len NHIEU process (nhieu loi CPU that su), xem index().
+MAIN_PORT = None  # gan trong main() - port cua CHINH process nay, dung lam mainOrigin fallback
+# cho node_pool khi VIDEO_PORTS rong (xem video_sources_node_pool_start()).
+_KILL_ON_CLOSE_JOB = None  # gan trong main() - Windows Job Object kill-on-close, xem
+# _create_kill_on_close_job()/_assign_process_to_job() - dung chung cho ca video-worker process
+# con (main()) LAN process Node cua node_pool (route ben duoi) de tranh mo côi ca 2 loai.
+_NODE_POOL_RUNS = {}  # run_id (str) -> {"proc", "status_path", "stop_path", "log_file",
+# "source_id"} - theo doi cac phien dang video chay qua Node.js (xem khoi route
+# /api/video_sources/<id>/node_pool/* ben duoi, yeu cau nguoi dung 2026-09-12 "chạy qua node
+# js" - Node goi post_next() truc tiep, khong qua vong lap fetch() trong trinh duyet, tranh
+# duoc van de "Initial connection" bi ket da xac nhan qua thuc nghiem chi xay ra qua Chrome).
 LAUNCH_URL_DEFAULT = "https://affiliate.shopee.ph/offer/product_offer"
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 USERSCRIPTS_DIR = os.path.join(SCRIPTS_DIR, "userscripts")
@@ -1526,6 +1538,112 @@ def video_sources_post_next(source_id):
         })
     finally:
         shopee_db.release_video_claim(DB_PATH, folder, target_row.sp_id)
+
+
+# ---- Chay pool dang video qua Node.js thay vi vong lap fetch() trong trinh duyet - yeu cau
+# nguoi dung 2026-09-12 "chạy qua node js" sau khi do thuc te (PowerShell, khong qua Chrome)
+# xac nhan 50 request post_next() dong thoi hoan toan on (0 timeout), trong khi CUNG luong do
+# qua tab Chrome that bi ket o buoc thiet lap ket noi TCP ("Initial connection" 2 phut tren
+# DevTools Timing) - nghi van do Chrome chia se lop mang voi ~43 process Chrome GPM automation
+# khac dang chay cung may. Node dung client HTTP rieng, tach biet hoan toan khoi Chrome.
+#
+# Kien truc: dashboard (browser) POST /node_pool/start voi accountIds + cau hinh -> route nay
+# ghi 1 file config JSON roi spawn `node post_video_node_worker.js <config>` (subprocess.Popen,
+# KHONG cho) - script Node do TU GOI post_next() lien tuc (port nguyen logic
+# postVideoClaimReadyAccount()/postVideoPoolWorker() tu templates/index.html, xem file .js) va
+# GHI trang thai ra 1 file JSON rieng (statusFilePath). Dashboard POLL /node_pool/status moi
+# vai giay de hien thi gan real-time - khac voi mo hinh cu (JS trinh duyet tu goi truc tiep +
+# cap nhat DOM callback), o day KHONG CO ket noi truc tiep nao giua dashboard va process Node,
+# chi qua 2 file JSON (status doc, stop ghi) - don gian, khong can WebSocket/SSE.
+@app.route("/api/video_sources/<int:source_id>/node_pool/start", methods=["POST"])
+def video_sources_node_pool_start(source_id):
+    row = shopee_db.get_video_source(DB_PATH, source_id)
+    if not row:
+        return _bad_request(f"khong tim thay nguon id={source_id}")
+
+    body = request.get_json(force=True, silent=True) or {}
+    account_ids = body.get("account_ids")
+    if not isinstance(account_ids, list) or not account_ids:
+        return _bad_request("thieu 'account_ids' (danh sach id tai khoan dung de xoay vong)")
+    try:
+        account_ids = [int(a) for a in account_ids]
+        threads = max(1, min(int(body.get("threads") or 1), len(account_ids)))
+        per_account_target = max(1, int(body.get("per_account_target") or 1))
+        min_delay = max(0.0, float(body.get("min_delay") or 0))
+        max_delay = max(min_delay, float(body.get("max_delay") or min_delay))
+    except (TypeError, ValueError):
+        return _bad_request("account_ids/threads/per_account_target/min_delay/max_delay khong hop le")
+
+    run_id = uuid.uuid4().hex[:12]
+    run_dir = Path(tempfile.gettempdir()) / "shopee_node_pool"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    config_path = run_dir / f"{run_id}.config.json"
+    status_path = run_dir / f"{run_id}.status.json"
+    stop_path = run_dir / f"{run_id}.stop"
+    log_path = run_dir / f"{run_id}.log"
+
+    config = {
+        "mainOrigin": f"http://127.0.0.1:{MAIN_PORT}",
+        "videoPorts": VIDEO_PORTS,
+        "sourceId": source_id,
+        "accountIds": account_ids,
+        "threads": threads,
+        "perAccountTarget": per_account_target,
+        "minDelay": min_delay,
+        "maxDelay": max_delay,
+        "statusFilePath": str(status_path),
+        "stopFilePath": str(stop_path),
+    }
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    node_script = os.path.join(SCRIPTS_DIR, "post_video_node_worker.js")
+    log_file = open(log_path, "w", encoding="utf-8")
+    try:
+        proc = subprocess.Popen(["node", node_script, str(config_path)], stdout=log_file, stderr=subprocess.STDOUT)
+    except FileNotFoundError:
+        log_file.close()
+        return _bad_request("Khong tim thay lenh 'node' - can cai Node.js (https://nodejs.org/) tren may nay de dung che do chay qua Node.")
+    _assign_process_to_job(_KILL_ON_CLOSE_JOB, proc.pid)
+    _NODE_POOL_RUNS[run_id] = {
+        "proc": proc, "status_path": status_path, "stop_path": stop_path,
+        "log_file": log_file, "source_id": source_id,
+    }
+    return jsonify({"ok": True, "run_id": run_id})
+
+
+@app.route("/api/video_sources/<int:source_id>/node_pool/status", methods=["GET"])
+def video_sources_node_pool_status(source_id):
+    run_id = request.args.get("run_id", "")
+    run = _NODE_POOL_RUNS.get(run_id)
+    if not run:
+        return _bad_request(f"khong tim thay phien Node id={run_id!r}")
+    try:
+        data = json.loads(run["status_path"].read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        # File chua kip ghi lan dau (Node vua spawn, chua toi dong writeStatusNow() dau tien) -
+        # KHONG phai loi, tra ve trang thai rong hop le de dashboard tiep tuc poll binh thuong.
+        data = {"running": True, "stats": {"posted": 0, "ok": 0, "fail": 0}, "accounts": {}, "log": []}
+    proc_alive = run["proc"].poll() is None
+    data["proc_alive"] = proc_alive
+    if not proc_alive and run["log_file"] and not run["log_file"].closed:
+        # Dong file handle NGAY khi phat hien process da thoat (lazy, kiem tra moi lan status
+        # duoc poll) - tranh giu handle mo vo thoi han cho 1 process da chet tu lau.
+        run["log_file"].close()
+    return jsonify(data)
+
+
+@app.route("/api/video_sources/<int:source_id>/node_pool/stop", methods=["POST"])
+def video_sources_node_pool_stop(source_id):
+    body = request.get_json(force=True, silent=True) or {}
+    run_id = body.get("run_id", "")
+    run = _NODE_POOL_RUNS.get(run_id)
+    if not run:
+        return _bad_request(f"khong tim thay phien Node id={run_id!r}")
+    try:
+        run["stop_path"].touch()
+    except OSError:
+        pass
+    return jsonify({"ok": True})
 
 
 def _enrich_video_post_log(logs):
@@ -3817,7 +3935,7 @@ def _ensure_port_free(host, port):
 
 
 def main():
-    global DB_PATH, VIDEO_PORT, VIDEO_PORTS
+    global DB_PATH, VIDEO_PORT, VIDEO_PORTS, MAIN_PORT, _KILL_ON_CLOSE_JOB
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8877)
     ap.add_argument(
@@ -3885,6 +4003,7 @@ def main():
     video_workers = max(1, video_workers)
     video_ports = [VIDEO_PORT + i for i in range(video_workers)]
     VIDEO_PORTS = video_ports
+    MAIN_PORT = args.port
 
     _ensure_port_free("127.0.0.1", args.port)
     for p in video_ports:
@@ -3919,7 +4038,7 @@ def main():
     # xac nhan qua kiem thu thuc te la 1 van de THAT (atexit/try-finally KHONG du, chi chay
     # duoc khi thoat "binh thuong"). None neu khong phai Windows - _assign_process_to_job() se
     # im lang bo qua, chap nhan mat luoi an toan nay tren nen tang khac.
-    _kill_on_close_job = _create_kill_on_close_job()
+    _KILL_ON_CLOSE_JOB = _create_kill_on_close_job()
 
     child_procs = []
     for p in video_ports:
@@ -3927,7 +4046,7 @@ def main():
             [sys.executable, os.path.abspath(__file__), "--serve-only-port", str(p), "--db-path", DB_PATH],
         )
         child_procs.append(proc)
-        _assign_process_to_job(_kill_on_close_job, proc.pid)
+        _assign_process_to_job(_KILL_ON_CLOSE_JOB, proc.pid)
 
     def _terminate_children():
         for proc in child_procs:

@@ -4556,14 +4556,21 @@ function sleepMs(ms) {
 // han chi phi moi lan ghi (khong con tang vo han theo thoi gian chay), vua tranh chiem qua
 // nhieu bo nho trinh duyet cho 1 phien chay dai.
 const POSTVIDEO_LOG_MAX_LINES = 300;
-function postVideoLog(sid, msg) {
+// Chen 1 dong (DA CO san timestamp, khong them nua) vao dau khung log - tach rieng khoi
+// postVideoLog() de che do Node (xem runPostVideoNodeMode()) dung LAI DUOC ham nay cho cac dong
+// da duoc chinh tien trinh Node dong dau timestamp cua no, tranh dong dau 2 lan (1 cua Node,
+// 1 cua trinh duyet luc poll - 2 moc thoi gian nay lech nhau do do tre poll).
+function postVideoLogLine(sid, line) {
   const box = document.getElementById('postvideo-log-' + sid);
   if (!box) return;
-  const line = `[${new Date().toLocaleTimeString('vi-VN')}] ${msg}`;
   const lines = box.textContent ? box.textContent.split('\n') : [];
   lines.unshift(line);
   if (lines.length > POSTVIDEO_LOG_MAX_LINES) lines.length = POSTVIDEO_LOG_MAX_LINES;
   box.textContent = lines.join('\n');
+}
+
+function postVideoLog(sid, msg) {
+  postVideoLogLine(sid, `[${new Date().toLocaleTimeString('vi-VN')}] ${msg}`);
 }
 
 // Bo cuc lai 2026-09-11 (yeu cau nguoi dung): uu tien khong gian cho BANG TAI KHOAN (khong
@@ -4604,6 +4611,9 @@ function postVideoSessionCardHtml(sid) {
         <input type="number" id="postvideo-max-delay-${sid}" min="0" value="20" style="max-width:56px;">
         <label style="white-space:nowrap;font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer;" title="Bật: LUÔN nghỉ đúng 1 mốc giá trị cố định (ô bên trái) giữa 2 video cùng tài khoản, không random. Tắt: nghỉ ngẫu nhiên trong khoảng min-max như cũ.">
           <input type="checkbox" id="postvideo-delay-fixed-${sid}" onchange="postVideoToggleDelayMode(${sid})"> Cố định
+        </label>
+        <label style="white-space:nowrap;font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer;" title="Chạy vòng lặp gọi post_next() bằng 1 tiến trình Node.js riêng thay vì JS trong tab trình duyệt này - thử nghiệm (2026-09-12): đo thực tế xác nhận gọi thẳng server KHÔNG qua Chrome tránh được hiện tượng 'Initial connection' bị kẹt hàng phút khi máy chạy nhiều Chrome/tiện ích mạng khác cùng lúc. Cần cài Node.js trên máy chạy server. Trạng thái vẫn hiện gần real-time qua polling, không mất khả năng theo dõi.">
+          <input type="checkbox" id="postvideo-use-node-${sid}"> Chạy qua Node.js
         </label>
         <button id="postvideo-start-btn-${sid}" onclick="startPostVideoRun(${sid})">▶ Bắt đầu đăng</button>
         <button id="postvideo-stop-btn-${sid}" class="secondary" onclick="stopPostVideoRun(${sid})" disabled>■ Dừng</button>
@@ -5282,7 +5292,11 @@ async function postVideoPoolWorker(sid, sourceId, accountIds, accountState, perA
       const postNextUrl = videoApiPort
         ? `http://${location.hostname}:${videoApiPort}/api/video_sources/${sourceId}/post_next`
         : `/api/video_sources/${sourceId}/post_next`; // fallback neu server cu chua co video_ports
-      res = await api('POST', postNextUrl, { account_ids: [accountId] }, 120000);
+      // Timeout 200s (truoc la 120s) - do thuc te 2026-09-12 (50 request dong thoi goi thang
+      // server, KHONG qua trinh duyet): 44/50 thanh cong that nhung co request mat toi 125.3s -
+      // 120s la QUA SAT, huy oan cac request van dang xu ly binh thuong chi vi cham chut it duoi
+      // tai dong thoi cao. 200s de du bien an toan tren muc da do thuc te.
+      res = await api('POST', postNextUrl, { account_ids: [accountId] }, 200000);
     } catch (e) {
       postVideoLog(sid, `✗ LỖI GỌI SERVER (tài khoản ${accountId}): ${e.message} - 1 luồng dừng.`);
       st.active = false;
@@ -5409,10 +5423,17 @@ async function startPostVideoRun(sid) {
 
   session.running = true;
   session.stopRequested = false;
+  session.nodeRunId = null;
+  session._nodeStopSent = false;
   document.getElementById('postvideo-start-btn-' + sid).disabled = true;
   document.getElementById('postvideo-stop-btn-' + sid).disabled = false;
   renderPostVideoTabStrip();
-  postVideoLog(sid, `Bắt đầu đăng - nguồn "${s.folder}" (${s.market.toUpperCase()}), ${accountIds.length} tài khoản dùng chung pool ${effectiveThreads} luồng song song (luồng rảnh tự chọn tài khoản sẵn sàng bất kỳ, không cố định), MỖI tài khoản đăng tối đa ${perAccountTarget} video, nghỉ ${delayFixed ? 'cố định ' + minDelay + 's' : minDelay + '-' + maxDelay + 's'} giữa 2 video cùng tài khoản.`);
+  // "Chạy qua Node.js" (yeu cau nguoi dung 2026-09-12) - xem runPostVideoNodeMode(): dung 1
+  // tien trinh Node.js rieng goi post_next() thay vi vong lap fetch() ngay trong tab nay, tranh
+  // van de "Initial connection" bi ket da xac nhan thuc nghiem CHI xay ra qua Chrome (nghi do
+  // Chrome chia se lop mang voi nhieu Chrome GPM automation khac dang chay cung may).
+  const useNode = document.getElementById('postvideo-use-node-' + sid).checked;
+  postVideoLog(sid, `Bắt đầu đăng${useNode ? ' (qua Node.js)' : ''} - nguồn "${s.folder}" (${s.market.toUpperCase()}), ${accountIds.length} tài khoản dùng chung pool ${effectiveThreads} luồng song song (luồng rảnh tự chọn tài khoản sẵn sàng bất kỳ, không cố định), MỖI tài khoản đăng tối đa ${perAccountTarget} video, nghỉ ${delayFixed ? 'cố định ' + minDelay + 's' : minDelay + '-' + maxDelay + 's'} giữa 2 video cùng tài khoản.`);
 
   // accountState: 1 dong ho rieng (done/nextAt/active) CHO TUNG tai khoan, DUNG CHUNG giua tat
   // ca cac worker cua pool (xem postVideoPoolWorker()/postVideoClaimReadyAccount()) - day la
@@ -5420,19 +5441,23 @@ async function startPostVideoRun(sid) {
   const accountState = new Map(accountIds.map(id => [id, { done: 0, nextAt: 0, active: false, stopped: false }]));
   const stats = { posted: 0, ok: 0, fail: 0 };
   try {
-    // Rai deu THOI DIEM BAT DAU cua tung luong trong 1 cua so ngan (POSTVIDEO_RAMP_WINDOW_MS)
-    // thay vi bat het effectiveThreads luong cung mo ket noi moi trong CUNG 1 khoanh khac - yeu
-    // cau nguoi dung 2026-09-12 "tránh dồn nghẽn request khi ấn nút bắt đầu, tool từ từ gọi
-    // từng request" (sau khi phat hien DevTools Timing bao "Initial connection: 2 phut" - nghi
-    // van do dong loat mo qua nhieu ket noi TCP moi cung luc dung do resource he thong/driver
-    // mang, xem lich su hoi thoai). Luong #0 bat dau ngay (khong doi), cac luong sau rai deu
-    // theo ti le vi tri trong tong so luong - CHI anh huong LAN CLAIM DAU TIEN cua moi luong,
-    // khong anh huong toc do sau khi da chay on dinh (cac lan claim tiep theo van tu nhien theo
-    // cooldown/fairness nhu cu, xem postVideoClaimReadyAccount()).
-    await Promise.all(Array.from({ length: effectiveThreads }, (_, workerIdx) =>
-      postVideoPoolWorker(sid, s.id, accountIds, accountState, perAccountTarget, minDelay, maxDelay, stats, session,
-        Math.floor((workerIdx / effectiveThreads) * POSTVIDEO_RAMP_WINDOW_MS))
-    ));
+    if (useNode) {
+      await runPostVideoNodeMode(sid, s, accountIds, effectiveThreads, perAccountTarget, minDelay, maxDelay, session, stats);
+    } else {
+      // Rai deu THOI DIEM BAT DAU cua tung luong trong 1 cua so ngan (POSTVIDEO_RAMP_WINDOW_MS)
+      // thay vi bat het effectiveThreads luong cung mo ket noi moi trong CUNG 1 khoanh khac -
+      // yeu cau nguoi dung 2026-09-12 "tránh dồn nghẽn request khi ấn nút bắt đầu, tool từ từ
+      // gọi từng request" (sau khi phat hien DevTools Timing bao "Initial connection: 2 phut" -
+      // nghi van do dong loat mo qua nhieu ket noi TCP moi cung luc dung do resource he thong/
+      // driver mang, xem lich su hoi thoai). Luong #0 bat dau ngay (khong doi), cac luong sau
+      // rai deu theo ti le vi tri trong tong so luong - CHI anh huong LAN CLAIM DAU TIEN cua
+      // moi luong, khong anh huong toc do sau khi da chay on dinh (cac lan claim tiep theo van
+      // tu nhien theo cooldown/fairness nhu cu, xem postVideoClaimReadyAccount()).
+      await Promise.all(Array.from({ length: effectiveThreads }, (_, workerIdx) =>
+        postVideoPoolWorker(sid, s.id, accountIds, accountState, perAccountTarget, minDelay, maxDelay, stats, session,
+          Math.floor((workerIdx / effectiveThreads) * POSTVIDEO_RAMP_WINDOW_MS))
+      ));
+    }
   } finally {
     session.running = false;
     document.getElementById('postvideo-start-btn-' + sid).disabled = false;
@@ -5453,6 +5478,67 @@ function stopPostVideoRun(sid) {
   if (!session) return;
   session.stopRequested = true;
   postVideoLog(sid, 'Đã yêu cầu dừng - sẽ dừng sau video đang xử lý.');
+}
+
+// ---- Che do "Chạy qua Node.js" (yeu cau nguoi dung 2026-09-12) - xem post_video_node_worker.js
+// + khoi route /api/video_sources/<id>/node_pool/* trong affiliate_scrape_server.py. KHAC voi
+// che do trinh duyet (postVideoPoolWorker() tu goi fetch() truc tiep + cap nhat DOM ngay lap
+// tuc): o day dashboard chi POST 1 lan de KHOI DONG 1 tien trinh Node doc lap, roi POLL trang
+// thai cua no moi 2s (khong co ket noi truc tiep/callback nao giua 2 ben, chi qua 2 file JSON
+// server doc/ghi) - do do trang thai tren UI cham hon toi da ~2s so voi thuc te, chap nhan duoc
+// doi lay viec goi post_next() hoan toan tach biet khoi lop mang cua Chrome. ----
+async function runPostVideoNodeMode(sid, s, accountIds, effectiveThreads, perAccountTarget, minDelay, maxDelay, session, stats) {
+  let runId;
+  try {
+    const resp = await api('POST', `/api/video_sources/${s.id}/node_pool/start`, {
+      account_ids: accountIds, threads: effectiveThreads, per_account_target: perAccountTarget,
+      min_delay: minDelay, max_delay: maxDelay,
+    }, 30000);
+    runId = resp.run_id;
+  } catch (e) {
+    postVideoLog(sid, `✗ Không khởi động được tiến trình Node: ${e.message}`);
+    return;
+  }
+  session.nodeRunId = runId;
+  postVideoLog(sid, `Đã khởi động tiến trình Node (run_id=${runId}) - trạng thái cập nhật mỗi ~2s.`);
+
+  // Khu trung dong log (status.log tra ve toi da 50 dong GAN NHAT moi lan poll, chong lan qua
+  // nhieu lan poll lien tiep) - dua vao chinh NOI DUNG dong (da mang timestamp rieng tu Node,
+  // gan nhu chac chan khong trung) thay vi index, vi mang bi cat/day lien tuc phia Node.
+  const seenLogLines = new Set();
+  while (true) {
+    if (session.stopRequested && !session._nodeStopSent) {
+      session._nodeStopSent = true;
+      try { await api('POST', `/api/video_sources/${s.id}/node_pool/stop`, { run_id: runId }, 15000); }
+      catch (e) { postVideoLog(sid, `⚠ Lỗi gửi yêu cầu dừng tới Node: ${e.message}`); }
+    }
+    let status;
+    try {
+      status = await api('GET', `/api/video_sources/${s.id}/node_pool/status?run_id=${runId}`, undefined, 15000);
+    } catch (e) {
+      postVideoLog(sid, `⚠ Lỗi poll trạng thái Node: ${e.message}`);
+      await sleepMs(2000);
+      continue;
+    }
+    for (const [accIdStr, info] of Object.entries(status.accounts || {})) {
+      postVideoSetAccountStatus(sid, parseInt(accIdStr, 10), info.status, info.color);
+    }
+    stats.posted = status.stats.posted;
+    stats.ok = status.stats.ok;
+    stats.fail = status.stats.fail;
+    const newLines = (status.log || []).filter(line => !seenLogLines.has(line));
+    for (const line of newLines.reverse()) { // dao lai: cu truoc, moi sau (status.log moi nhat o dau mang)
+      seenLogLines.add(line);
+      postVideoLogLine(sid, line);
+    }
+    if (seenLogLines.size > 1000) { // gioi han bo nho khi phien chay rat lau
+      const keep = Array.from(seenLogLines).slice(-500);
+      seenLogLines.clear();
+      keep.forEach(l => seenLogLines.add(l));
+    }
+    if (!status.proc_alive) break;
+    await sleepMs(2000);
+  }
 }
 
 // ---- Tab "Log-upload" - lich su dang video CROSS-SOURCE (tach ra khoi the phien "Đăng
