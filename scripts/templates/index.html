@@ -5231,13 +5231,26 @@ function postVideoNextVideoPort() {
   return port;
 }
 
+// Cua so rai deu THOI DIEM BAT DAU cua cac luong trong pool - yeu cau nguoi dung 2026-09-12
+// "tránh dồn nghẽn request khi ấn nút bắt đầu, tool từ từ gọi từng request" - xem
+// startPostVideoRun() (noi tinh do tre rieng cho tung luong theo vi tri) + startDelayMs o
+// postVideoPoolWorker() ben duoi.
+const POSTVIDEO_RAMP_WINDOW_MS = 10000;
+
 // 1 "luong" (worker) trong POOL dung chung - lien tuc: tim + claim 1 tai khoan san sang (bat
 // ke tai khoan do "thuoc" luong nao truoc do, khac han mo hinh bucket tinh cu), goi post_next()
 // CHI VOI 1 account_id da chon san (khong can gui danh sach ung vien xoay vong nua - da tu
 // chon dung 1 cai o phia client), roi dat lai cooldown RIENG cho DUNG tai khoan do. Nhieu
 // worker CO THE goi post_next() gan nhu dong thoi tren CUNG 1 nguon, server da dam bao khong
 // trung sp_id (xem _claim_next_pending()).
-async function postVideoPoolWorker(sid, sourceId, accountIds, accountState, perAccountTarget, minDelay, maxDelay, stats, session) {
+//
+// startDelayMs: doi 1 lan DUY NHAT truoc claim DAU TIEN (xem POSTVIDEO_RAMP_WINDOW_MS) - CHI de
+// tranh effectiveThreads luong CUNG mo ket noi TCP moi trong CUNG 1 khoanh khac luc bat dau
+// phien (nghi van gay nghen "Initial connection" tren may co nhieu phan mem VPN/mang xung
+// dot cung chay - xem lich su hoi thoai 2026-09-12). KHONG anh huong toc do sau khi da chay on
+// dinh.
+async function postVideoPoolWorker(sid, sourceId, accountIds, accountState, perAccountTarget, minDelay, maxDelay, stats, session, startDelayMs = 0) {
+  if (startDelayMs > 0) await sleepMs(startDelayMs);
   while (!session.stopRequested) {
     const claim = postVideoClaimReadyAccount(accountIds, accountState, perAccountTarget);
     if (!claim.anyPending) break; // MOI tai khoan (trong pool cua CA phien) da du muc tieu
@@ -5407,8 +5420,18 @@ async function startPostVideoRun(sid) {
   const accountState = new Map(accountIds.map(id => [id, { done: 0, nextAt: 0, active: false, stopped: false }]));
   const stats = { posted: 0, ok: 0, fail: 0 };
   try {
-    await Promise.all(Array.from({ length: effectiveThreads }, () =>
-      postVideoPoolWorker(sid, s.id, accountIds, accountState, perAccountTarget, minDelay, maxDelay, stats, session)
+    // Rai deu THOI DIEM BAT DAU cua tung luong trong 1 cua so ngan (POSTVIDEO_RAMP_WINDOW_MS)
+    // thay vi bat het effectiveThreads luong cung mo ket noi moi trong CUNG 1 khoanh khac - yeu
+    // cau nguoi dung 2026-09-12 "tránh dồn nghẽn request khi ấn nút bắt đầu, tool từ từ gọi
+    // từng request" (sau khi phat hien DevTools Timing bao "Initial connection: 2 phut" - nghi
+    // van do dong loat mo qua nhieu ket noi TCP moi cung luc dung do resource he thong/driver
+    // mang, xem lich su hoi thoai). Luong #0 bat dau ngay (khong doi), cac luong sau rai deu
+    // theo ti le vi tri trong tong so luong - CHI anh huong LAN CLAIM DAU TIEN cua moi luong,
+    // khong anh huong toc do sau khi da chay on dinh (cac lan claim tiep theo van tu nhien theo
+    // cooldown/fairness nhu cu, xem postVideoClaimReadyAccount()).
+    await Promise.all(Array.from({ length: effectiveThreads }, (_, workerIdx) =>
+      postVideoPoolWorker(sid, s.id, accountIds, accountState, perAccountTarget, minDelay, maxDelay, stats, session,
+        Math.floor((workerIdx / effectiveThreads) * POSTVIDEO_RAMP_WINDOW_MS))
     ));
   } finally {
     session.running = false;
