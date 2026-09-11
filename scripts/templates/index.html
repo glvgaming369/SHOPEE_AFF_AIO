@@ -5185,7 +5185,10 @@ function postVideoClaimReadyAccount(accountIds, accountState, perAccountTarget) 
   let anyPending = false;
   for (const id of accountIds) {
     const st = accountState.get(id);
-    if (st.done >= perAccountTarget) continue;
+    // 'stopped' = tai khoan da gap loi KHONG THE khac phuc (vd cookie hong/het quota that -
+    // xem postVideoPoolWorker()) - loai hoan toan khoi pool cho phan con lai cua PHIEN nay,
+    // khac 'done >= target' (da dang DU so luong yeu cau, khong phai loi).
+    if (st.done >= perAccountTarget || st.stopped) continue;
     anyPending = true;
     if (st.active) continue;
     if (st.nextAt <= now) { st.active = true; return { id, anyPending: true }; }
@@ -5264,10 +5267,21 @@ async function postVideoPoolWorker(sid, sourceId, accountIds, accountState, perA
     // neu da san sang - day chinh la diem khac biet cot loi so voi mo hinh bucket cu.
     const delaySec = minDelay + Math.random() * (maxDelay - minDelay);
     st.nextAt = Date.now() + delaySec * 1000;
-    postVideoLog(sid, `${res.success ? '✓' : '✗'} ${res.sp_id} (${res.account_label}: ${st.done}/${perAccountTarget}) - ${res.success ? (res.video_link || 'post_id=' + res.post_id) : 'LỖI: ' + res.error} | còn ${res.pending_remaining} pending`);
-    postVideoSetAccountStatus(sid, accountId,
-      res.success ? `✓ ${st.done}/${perAccountTarget}` : `✗ ${st.done}/${perAccountTarget} - Lỗi: ${String(res.error || '').slice(0, 60)}`,
-      res.success ? '--success-text' : '--danger-text');
+    // unrecoverable (yeu cau nguoi dung 2026-09-12): loi nay chac chan LAP LAI Y HET o lan thu
+    // tiep theo (vd cookie hong cau truc, tai khoan het quota that code 400002 - xem
+    // is_unrecoverable_account_error() phia server) - DUNG HAN tai khoan nay cho CA phien thay
+    // vi lap du perAccountTarget lan roi moi bo (truoc day: log thuc te thay 10/10 lan loi
+    // GIONG HET nhau, lang phi request + de bi Shopee nghi ngo hon vi spam request loi lap lai).
+    if (!res.success && res.unrecoverable) {
+      st.stopped = true;
+      postVideoLog(sid, `⛔ DỪNG tài khoản ${res.account_label} - lỗi không thể khắc phục (sẽ KHÔNG thử lại tài khoản này nữa): ${res.error}`);
+      postVideoSetAccountStatus(sid, accountId, `⛔ Đã dừng - ${String(res.error || '').slice(0, 60)}`, '--danger-text');
+    } else {
+      postVideoLog(sid, `${res.success ? '✓' : '✗'} ${res.sp_id} (${res.account_label}: ${st.done}/${perAccountTarget}) - ${res.success ? (res.video_link || 'post_id=' + res.post_id) : 'LỖI: ' + res.error} | còn ${res.pending_remaining} pending`);
+      postVideoSetAccountStatus(sid, accountId,
+        res.success ? `✓ ${st.done}/${perAccountTarget}` : `✗ ${st.done}/${perAccountTarget} - Lỗi: ${String(res.error || '').slice(0, 60)}`,
+        res.success ? '--success-text' : '--danger-text');
+    }
     // Cap nhat dropdown/dong info "Tổng/Đã đăng/Lỗi/Pending" NGAY tu chinh ket qua vua nhan
     // (khong doi round-trip GET rieng) - xem postVideoPatchSourceStats(). Van giu 1 lan resync
     // day du dinh ky (thua hon nhieu - moi 25 video) lam luoi an toan cho cac field KHONG the
@@ -5279,17 +5293,28 @@ async function postVideoPoolWorker(sid, sourceId, accountIds, accountState, perA
 
 // Canh bao nhe khi dat so luong "Luồng" vuot qua nguong thuc te trinh duyet co the tan dung -
 // yeu cau nguoi dung 2026-09-11 "phân tích và đề xuất hướng giải quyết những điểm nghẽn":
-// Chrome gioi han ~6 KET NOI dong thoi/origin cho HTTP/1.1 (server nay chua noi HTTP/2), nen
-// dat qua nguong nay se khong tang thong luong THAT SU tu 1 tab trinh duyet (cac luong du se
-// chi cho o hang doi cua CHINH trinh duyet, khong phai loi cua trang) - CHI la thong tin tham
-// khao, KHONG chan nguoi dung dat cao hon (van co the huu ich neu server duoc nang cap sau nay).
-const POSTVIDEO_THREADS_SOFT_LIMIT = 6;
+// Chrome gioi han ~6 KET NOI dong thoi/origin cho HTTP/1.1 (server nay chua noi HTTP/2). NGUONG
+// NAY LA THEO TUNG ORIGIN, khong phai 1 con so co dinh cho CA TAB - postVideoNextVideoPort() da
+// round-robin request qua NHIEU port video-worker rieng (window.__VIDEO_API_PORTS__, moi port =
+// 1 origin khac nhau voi trinh duyet du cung host 127.0.0.1 - xem giai thich o
+// postVideoNextVideoPort()), nen tran that su la (so port) x 6, khong phai luon luon 6 (bug thuc
+// te 2026-09-11: canh bao cu hien SAI ngay tu 7 luong du server da chay san 4 video-worker
+// process, tran that su phai la 24). CHI la thong tin tham khao, KHONG chan nguoi dung dat cao
+// hon (van co the huu ich neu server duoc nang cap sau nay).
+const POSTVIDEO_CONN_PER_ORIGIN = 6;
+function postVideoEffectiveConnLimit() {
+  const ports = window.__VIDEO_API_PORTS__;
+  const numOrigins = Array.isArray(ports) && ports.length ? ports.length : 1;
+  return numOrigins * POSTVIDEO_CONN_PER_ORIGIN;
+}
 function postVideoThreadsHintUpdate(sid) {
   const el = document.getElementById('postvideo-threads-hint-' + sid);
   if (!el) return;
   const n = parseInt(document.getElementById('postvideo-threads-' + sid).value, 10) || 0;
-  el.textContent = n > POSTVIDEO_THREADS_SOFT_LIMIT
-    ? `⚠ Trình duyệt chỉ xử lý song song thật ~${POSTVIDEO_THREADS_SOFT_LIMIT} kết nối/tab (giới hạn HTTP/1.1) - luồng dư sẽ chờ ở hàng đợi của trình duyệt, không tăng thêm tốc độ thật.`
+  const limit = postVideoEffectiveConnLimit();
+  const numOrigins = limit / POSTVIDEO_CONN_PER_ORIGIN;
+  el.textContent = n > limit
+    ? `⚠ Trình duyệt chỉ xử lý song song thật ~${limit} kết nối (${numOrigins} process video-worker × ~${POSTVIDEO_CONN_PER_ORIGIN} kết nối/origin, giới hạn HTTP/1.1) - luồng dư sẽ chờ ở hàng đợi của trình duyệt, không tăng thêm tốc độ thật.`
     : '';
 }
 
@@ -5359,7 +5384,7 @@ async function startPostVideoRun(sid) {
   // accountState: 1 dong ho rieng (done/nextAt/active) CHO TUNG tai khoan, DUNG CHUNG giua tat
   // ca cac worker cua pool (xem postVideoPoolWorker()/postVideoClaimReadyAccount()) - day la
   // diem khac biet cot loi so voi mo hinh bucket cu: KHONG con "1 tai khoan chi thuoc 1 luong".
-  const accountState = new Map(accountIds.map(id => [id, { done: 0, nextAt: 0, active: false }]));
+  const accountState = new Map(accountIds.map(id => [id, { done: 0, nextAt: 0, active: false, stopped: false }]));
   const stats = { posted: 0, ok: 0, fail: 0 };
   try {
     await Promise.all(Array.from({ length: effectiveThreads }, () =>

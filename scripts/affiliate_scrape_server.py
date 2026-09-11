@@ -1515,6 +1515,11 @@ def video_sources_post_next(source_id):
         return jsonify({
             "ok": True, "done": False, "sp_id": target_row.sp_id, "success": result.success,
             "post_id": result.post_id, "error": result.error,
+            # unrecoverable: True neu loi nay chac chan LAP LAI Y HET o lan sau (vd cookie hong
+            # cau truc, tai khoan het quota that - code 400002) - client dung de NGUNG thu lai
+            # tai khoan nay ngay thay vi lap du perAccountTarget lan (yeu cau nguoi dung
+            # 2026-09-12, xem is_unrecoverable_account_error()).
+            "unrecoverable": (not result.success) and shopee_video_post.is_unrecoverable_account_error(result.error),
             "video_link": _video_share_link(market, result.post_id) if result.success else None,
             "account_id": chosen_account["id"], "account_label": chosen_account.get("profile") or chosen_account.get("email") or chosen_account.get("shopee_id") or f"#{chosen_account['id']}",
             "pending_remaining": pending_remaining,
@@ -3831,7 +3836,7 @@ def main():
             "Python khien nhieu THREAD trong CUNG 1 process KHONG chay song song duoc phan "
             "CPU-bound (chi phan cho I/O that su moi thuc su chay song song trong 1 process) - "
             "chi PROCESS RIENG moi co GIL rieng, he dieu hanh moi xep duoc len loi CPU khac "
-            "nhau THAT SU. Mac dinh min(4, so loi CPU logic cua may nay)."
+            "nhau THAT SU. Mac dinh min(24, so loi CPU logic cua may nay)."
         ),
     )
     ap.add_argument("--db-path", default=shopee_db.DB_PATH_DEFAULT)
@@ -3858,7 +3863,19 @@ def main():
         return
 
     VIDEO_PORT = args.video_port if args.video_port is not None else args.port + 1
-    video_workers = args.video_workers if args.video_workers is not None else min(4, os.cpu_count() or 4)
+    # Tran mac dinh: 4 (ban dau) -> 12 (2026-09-11) -> 24 (2026-09-12, yeu cau nguoi dung "tăng
+    # tối đa nhất có thể" SAU KHI da vá proxy theo tung tai khoan cho ca 6 buoc dang video, xem
+    # sign_request()/vod_preupload()/upload_video_wscloud()/report_upload_wscloud() trong
+    # shopee_video_post.py) - nut that GIA TAO (server ky theo IP nguon ~30/IP, do thuc te
+    # 2026-09-12) coi nhu da go vi MOI tai khoan gio ky/dang bang DUNG proxy rieng cua no thay
+    # vi dong het vao 1 IP may chu. 24 process (~144 ket noi trinh duyet thuc su, 24 x 6/origin,
+    # xem POSTVIDEO_CONN_PER_ORIGIN o templates/index.html) du cho vai tram luong dong thoi ma
+    # KHONG con la nut that local - may nay 56 loi CPU/64GB RAM du du (con lai ~32 loi cho
+    # dashboard/DB/cac tac vu khac). TRAN THAT CON LAI TU DAY LA BANG THONG UPLOAD VAT LY cua
+    # may + rate-limit RIENG cua TUNG tai khoan Shopee (cot Rate limit video/ngay) - 2 cai nay
+    # KHONG the tang bang cach them process/luong, phai tu tang dan luong that va theo doi ty le
+    # loi/timeout de tim muc phu hop voi duong truyen that.
+    video_workers = args.video_workers if args.video_workers is not None else min(24, os.cpu_count() or 4)
     video_workers = max(1, video_workers)
     video_ports = [VIDEO_PORT + i for i in range(video_workers)]
     VIDEO_PORTS = video_ports

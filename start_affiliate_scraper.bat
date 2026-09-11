@@ -5,6 +5,15 @@ cd /d "%~dp0"
 
 set PORT=8877
 set DBPATH=artifacts\db\shopee.db
+rem So process rieng xu ly dang video (moi process 1 port, tan dung nhieu loi CPU that su - xem
+rem --video-workers trong scripts\affiliate_scrape_server.py). 2026-09-12: da vá proxy theo
+rem TUNG tai khoan cho ca 6 buoc dang video (ky header + upload that), nen gioi han server ky
+rem theo IP nguon (~30 request dong thoi/IP, do thuc te) khong con la nut that chung nua - moi
+rem tai khoan gio dung dung proxy rieng cua no. May nay 56 loi CPU/64GB RAM nen dat cao (24) de
+rem trinh duyet/backend khong con la nut that GIA TAO - tran THAT SU con lai la BANG THONG
+rem UPLOAD VAT LY cua may + Rate limit rieng cua TUNG tai khoan Shopee (cot "Rate limit
+rem video/ngay"), 2 cai nay KHONG tang duoc bang cach them process/luong.
+set VIDEO_WORKERS=24
 
 echo ============================================
 echo   Shopee Affiliate Offer Scraper
@@ -48,7 +57,7 @@ echo    URL: http://127.0.0.1:%PORT%
 start "" cmd /c "timeout /t 2 >nul & start http://127.0.0.1:%PORT%"
 
 :run
-python scripts\affiliate_scrape_server.py --port %PORT% --db-path %DBPATH%
+python scripts\affiliate_scrape_server.py --port %PORT% --db-path %DBPATH% --video-workers %VIDEO_WORKERS%
 if %errorlevel%==42 (
     echo.
     echo [Cap nhat] Da tai code moi - khoi dong lai server...

@@ -173,6 +173,33 @@ class PostResult:
     raw_responses: dict = field(default_factory=dict)
 
 
+# Dau hieu loi KHONG THE khac phuc bang cach thu lai (tai khoan van se loi y het du dang lai
+# bao nhieu lan) - yeu cau nguoi dung 2026-09-12: "Thêm logic dừng tài khoản khi gặp các lỗi
+# không thể khắc phục tránh loop đủ số vòng cần đăng", sau khi thay log thuc te 1 tai khoan
+# loi GIONG HET ca 10/10 lan (perAccountTarget) truoc khi bi bo qua - lang phi request/thoi
+# gian, con co the khien Shopee nghi ngo hon (spam request that bai lap lai tren 1 session).
+#
+# '400002' = ma loi QUOTA THAT cua Shopee (khac 400003 - la tin hieu "app_version bi tu choi",
+# code gia lai NGAY voi bien the khac trong shopee_create_post(), KHONG phai loi vinh vien -
+# xem docstring shopee_precheck()/shopee_create_post()) - xac nhan lai tu chinh comment cu
+# trong module nay ("quota thật là code 400002, tool gốc check riêng"). Loi nay xuat hien
+# trong repr cua dict Python (dau nhay don 'code': 400002) vi ca 2 nguon loi (shopee_precheck()
+# RuntimeError va shopee_create_post() RuntimeError cuoi cung) deu dung f"...{data!r}".
+_UNRECOVERABLE_ERROR_MARKERS = (
+    "Cookie thiếu SPC_U hoặc csrftoken",  # cookie hong cau truc (thieu field bat buoc) - moi lan parse deu loi y het, khong lien quan mang/server
+    "'code': 400002",  # quota that (xem giai thich o tren) - tai khoan da het quota dang video hom nay/phien nay
+)
+
+
+def is_unrecoverable_account_error(error: str | None) -> bool:
+    """True neu loi nay chac chan se LAP LAI Y HET o lan thu tiep theo (khong phai loi mang/
+    server tam thoi) - dung de dung som viec thu lai tai khoan nay thay vi lap du so lan
+    (xem PostResult.error + _UNRECOVERABLE_ERROR_MARKERS)."""
+    if not error:
+        return False
+    return any(marker in error for marker in _UNRECOVERABLE_ERROR_MARKERS)
+
+
 def parse_cookie(cookie_str: str) -> dict[str, str]:
     """Chuỗi cookie dạng 'a=1; b=2; ...' (định dạng trong get_cookie/*.txt) -> dict.
     Không dùng http.cookies.SimpleCookie vì vài giá trị Shopee (SPC_ST, AC_CERT_D...) chứa
@@ -271,15 +298,27 @@ def file_md5(path: str) -> str:
     return h.hexdigest()
 
 
-def sign_request(signing: SigningConfig, target_url: str, body_str: str) -> dict[str, str]:
+def sign_request(signing: SigningConfig, target_url: str, body_str: str, proxy: str | None = None) -> dict[str, str]:
     """Gọi server ký chống anti-bot (server2Url/api/sign) - trả object header để merge
     trực tiếp vào request thật gửi Shopee. KHÔNG có logic tự tính ở local - xem docstring
     module. body_str PHẢI là chuỗi JSON đã stringify (không phải dict) - đúng như request
-    thật đã bắt được ({"url":..., "body": "<json string>"})."""
+    thật đã bắt được ({"url":..., "body": "<json string>"}).
+
+    proxy: URL đã parse qua parse_proxy() - đo thực tế (2026-09-12, xem yêu cầu người dùng
+    "test thử giới hạn server ký") xác nhận server2Url rate-limit theo IP NGUỒN (~30 request
+    đồng thời/IP trước khi bắt đầu trả 429), KHÔNG phải theo X-API-Key: gọi 90 request đồng
+    thời qua 23 IP proxy khác nhau (~4 request/IP) cho 0 lỗi 429, trong khi CÙNG SỐ ĐÓ đồng
+    thời từ 1 IP (không proxy) thất bại nặng. Trước đây hàm này LUÔN gọi thẳng từ IP máy chủ
+    (không proxy) dù mỗi tài khoản đã có proxy riêng cho phần _post_signed()/_tls_session() -
+    khiến MỌI request ký của MỌI tài khoản cộng dồn vào rate-limit của DUY NHẤT 1 IP đó. Truyền
+    proxy CỦA CHÍNH tài khoản đang đăng vào đây (xem _post_signed()) để rate-limit được tính
+    RIÊNG theo từng IP, không cộng dồn - đồng thời IP ký và IP đăng khớp nhau, tránh khả năng
+    Shopee đối chiếu lệch IP giữa 2 bước."""
     resp = requests.post(
         signing.server2_url,
         json={"url": target_url, "body": body_str},
         headers={"Content-Type": "application/json", "X-API-Key": signing.server2_api_key},
+        proxies={"http": proxy, "https": proxy} if proxy else None,
         timeout=_REQUEST_TIMEOUT_SECONDS,
     )
     resp.raise_for_status()
@@ -290,13 +329,16 @@ def sign_request(signing: SigningConfig, target_url: str, body_str: str) -> dict
     return headers
 
 
-def get_upload_token(signing: SigningConfig) -> str:
+def get_upload_token(signing: SigningConfig, proxy: str | None = None) -> str:
     """Token dạng Qiniu ('key:sign:policy_base64') dùng ngay cho upload_video_wscloud().
-    Body rỗng '{}' - chỉ cần đúng X-API-Key (đã xác nhận bằng capture thật)."""
+    Body rỗng '{}' - chỉ cần đúng X-API-Key (đã xác nhận bằng capture thật).
+
+    proxy: xem docstring sign_request() - cùng server ký, cùng rate-limit theo IP nguồn."""
     resp = requests.post(
         signing.token_url,
         json={},
         headers={"Content-Type": "application/json", "X-API-Key": signing.token_api_key},
+        proxies={"http": proxy, "https": proxy} if proxy else None,
         timeout=_REQUEST_TIMEOUT_SECONDS,
     )
     resp.raise_for_status()
@@ -363,9 +405,17 @@ def _base_headers(
 def vod_preupload(
     cookie_str: str, csrf_token: str, user_id: str, market_cfg: dict,
     fsize: int, md5: str, device: dict = DEFAULT_DEVICE,
-    device_id: str = "", client_request_id: str = "",
+    device_id: str = "", client_request_id: str = "", proxy: str | None = None,
 ) -> dict:
-    """Bước 1. Trả về dict từ field 'data' của response ({'vid': ..., 'services': [...]})."""
+    """Bước 1. Trả về dict từ field 'data' của response ({'vid': ..., 'services': [...]}).
+
+    proxy: URL đã parse qua parse_proxy() - trước đây hàm này (và upload_video_wscloud()/
+    report_upload_wscloud()) LUÔN gọi thẳng từ IP máy chủ dù đã có proxy riêng cho
+    precheck/create (_post_signed()) - nghĩa là bước upload file THẬT (nặng băng thông nhất)
+    của MỌI tài khoản đều dồn vào 1 IP, có thể tự nó đã là 1 nguồn nghẽn/rate-limit ẩn phía
+    Shopee (xem yêu cầu người dùng 2026-09-12 "test thử giới hạn server ký" + timeout 120s khi
+    chạy nhiều luồng). None = không dùng proxy (giữ nguyên hành vi cũ, dùng IP máy chủ) - dùng
+    khi tài khoản chưa gán proxy riêng."""
     headers = {
         **_base_headers(cookie_str, csrf_token, market_cfg, device, device_id, client_request_id),
         "Content-Type": "application/json",
@@ -386,7 +436,9 @@ def vod_preupload(
     }
     resp = requests.post(
         f"https://{market_cfg['api_mms']}/uploadapi/api/v1/vod/preupload",
-        json=body, headers=headers, timeout=_REQUEST_TIMEOUT_SECONDS,
+        json=body, headers=headers,
+        proxies={"http": proxy, "https": proxy} if proxy else None,
+        timeout=_REQUEST_TIMEOUT_SECONDS,
     )
     resp.raise_for_status()
     data = resp.json().get("data")
@@ -395,15 +447,19 @@ def vod_preupload(
     return data
 
 
-def upload_video_wscloud(market_cfg: dict, upload_token: str, vid: str, video_path: str) -> None:
+def upload_video_wscloud(market_cfg: dict, upload_token: str, vid: str, video_path: str, proxy: str | None = None) -> None:
     """Bước 2 - upload file thật lên WSCloud. Không dùng lại token cũ - luôn gọi
-    get_upload_token() ngay trước bước này (xem docstring module)."""
+    get_upload_token() ngay trước bước này (xem docstring module).
+
+    proxy: xem docstring vod_preupload() - đây là bước NẶNG BĂNG THÔNG NHẤT (upload nguyên
+    file video), dùng proxy tài khoản giúp không dồn tải upload của MỌI tài khoản vào 1 IP."""
     with open(video_path, "rb") as f:
         resp = requests.post(
             f"https://{market_cfg['wscloud']}/file/upload",
             files={"file": (f"{vid}.mp4", f, "video/mp4")},
             data={"token": upload_token, "key": f"{vid}.mp4"},
             headers={"User-Agent": "WCS-Android-SDK-1.6.8"},
+            proxies={"http": proxy, "https": proxy} if proxy else None,
             timeout=_UPLOAD_TIMEOUT_SECONDS,
         )
     resp.raise_for_status()
@@ -412,11 +468,13 @@ def upload_video_wscloud(market_cfg: dict, upload_token: str, vid: str, video_pa
 def report_upload_wscloud(
     cookie_str: str, csrf_token: str, market_cfg: dict, market_key: str,
     vid: str, fsize: int, video_meta: dict, device: dict = DEFAULT_DEVICE,
-    device_id: str = "", client_request_id: str = "",
+    device_id: str = "", client_request_id: str = "", proxy: str | None = None,
 ) -> dict:
     """Bước 3. cover_md5 dùng giá trị random (giống hành vi tool gốc ở nhánh WSCloud PH -
     không phải MD5 thật của cover, chỉ là placeholder Shopee chấp nhận nhờ
-    skip_cover_check=true ở các bước sau)."""
+    skip_cover_check=true ở các bước sau).
+
+    proxy: xem docstring vod_preupload()."""
     headers = {
         **_base_headers(cookie_str, csrf_token, market_cfg, device, device_id, client_request_id),
         "Content-Type": "application/json",
@@ -437,7 +495,9 @@ def report_upload_wscloud(
     }
     resp = requests.post(
         f"https://{market_cfg['api_mms']}/uploadapi/api/v1/vod/reportupload",
-        json=body, headers=headers, timeout=_REQUEST_TIMEOUT_SECONDS,
+        json=body, headers=headers,
+        proxies={"http": proxy, "https": proxy} if proxy else None,
+        timeout=_REQUEST_TIMEOUT_SECONDS,
     )
     resp.raise_for_status()
     return resp.json()
@@ -510,7 +570,7 @@ def _post_signed(
     body_str = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
     session = _tls_session(proxy)
     for attempt in range(_POST_ANTI_BOT_MAX_ATTEMPTS):
-        signed_headers = sign_request(signing, url, body_str)
+        signed_headers = sign_request(signing, url, body_str, proxy)
         headers = {
             **_base_headers(cookie_str, csrf_token, market_cfg, device, device_id, client_request_id),
             **signed_headers,
@@ -714,14 +774,14 @@ def post_video_to_shopee(
         md5 = file_md5(video_path)
         video_meta = get_video_metadata(video_path)
 
-        preupload_data = vod_preupload(cookie_str, csrf_token, creator_id, market_cfg, fsize, md5, device, device_id, client_request_id)
+        preupload_data = vod_preupload(cookie_str, csrf_token, creator_id, market_cfg, fsize, md5, device, device_id, client_request_id, proxy)
         vid = preupload_data["vid"]
         raw["preupload"] = preupload_data
 
-        upload_token = get_upload_token(signing)
-        upload_video_wscloud(market_cfg, upload_token, vid, video_path)
+        upload_token = get_upload_token(signing, proxy)
+        upload_video_wscloud(market_cfg, upload_token, vid, video_path, proxy)
 
-        report_data = report_upload_wscloud(cookie_str, csrf_token, market_cfg, market, vid, fsize, video_meta, device, device_id, client_request_id)
+        report_data = report_upload_wscloud(cookie_str, csrf_token, market_cfg, market, vid, fsize, video_meta, device, device_id, client_request_id, proxy)
         raw["report"] = report_data
         time.sleep(_AFTER_REPORT_WAIT_SECONDS)
 
