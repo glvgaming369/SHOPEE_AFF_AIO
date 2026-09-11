@@ -2695,6 +2695,14 @@ const MAILACC_LOGIN_STATUS_BADGE = {
   timeout: ['insufficient', 'Quá thời gian'],
   error: ['fail', 'Lỗi'],
 };
+// Cookie co the la 'FAIL' (Get Cookie lay that bai, ghi de de tranh nham cookie cu con dung
+// duoc - xem yeu cau nguoi dung 2026-09-11) - KHONG tinh la "co cookie" o cac cho can biet
+// dong nay co the check-cookie/dung cookie that hay khong.
+function mailAccHasUsableCookie(row) {
+  const c = String((row && row.cookie) || '').trim();
+  return c !== '' && c !== 'FAIL';
+}
+
 function mailAccLoginStatusBadge(a) {
   const status = a.shopee_login_status;
   if (!status) return '<span class="badge idle">Chưa kiểm tra</span>';
@@ -2740,7 +2748,8 @@ function renderMailAccounts() {
         <button class="secondary" onclick="toggleMaskedField(this, 'mailacc-shopeepass-${a.id}')" title="Hiện/ẩn mật khẩu">👁</button>
         ${a.shopee_password ? `<button class="secondary" onclick="copyMailField(${idx}, 'shopee_password')">Sao chép</button>` : ''}</td>
       <td>${mailAccLoginStatusBadge(a)}</td>
-      <td>${a.cookie ? `<span class="ellipsis" style="max-width:140px;" title="${a.cookie.replace(/"/g, '&quot;')}">${a.cookie}</span>
+      <td>${a.cookie === 'FAIL' ? '<span class="badge fail" title="Lần lấy Cookie gần nhất thất bại - cookie cũ (nếu có) đã bị xóa để tránh nhầm là còn dùng được">FAIL</span>'
+        : a.cookie ? `<span class="ellipsis" style="max-width:140px;" title="${a.cookie.replace(/"/g, '&quot;')}">${a.cookie}</span>
         <button class="secondary" onclick="copyMailField(${idx}, 'cookie')">Sao chép</button>` : '<span class="muted">Chưa có</span>'}</td>
       <td><input type="text" value="${(a.device || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'device', this.value)" placeholder="Tên thiết bị" style="min-width:160px; width:100%;"></td>
       <td><input type="text" data-field="profile" value="${(a.profile || '').replace(/"/g, '&quot;')}" onchange="updateMailAccountField(${a.id}, 'profile', this.value)" placeholder="Profile" style="min-width:160px; width:100%;"></td>
@@ -2996,17 +3005,6 @@ async function createGpmProfile(id, btn) {
 async function openGpmProfile(id, btn) {
   await withBusy(btn, async () => {
     try {
-      // Dong da co Cookie: check con song truoc (KHONG mo browser) - con song thi bo qua
-      // khong mo lai, giong logic hang loat openGpmProfilesSelected() - xem yeu cau nguoi
-      // dung 2026-09-11.
-      const row = (lastMailAccountsList || []).find(a => a.id === id);
-      if (row && String(row.cookie || '').trim() !== '') {
-        const chk = await api('POST', `/api/mail_accounts/${id}/check_cookie`, undefined, 20000);
-        if (chk.status === 'alive') {
-          await customAlert('Cookie đã lưu vẫn còn đăng nhập được - không cần mở lại profile.\n\n' + (chk.detail || ''));
-          return;
-        }
-      }
       await api('POST', `/api/mail_accounts/${id}/gpm/open`);
       // Mo thanh cong: KHONG hien thong bao (chi bao khi loi - nguoi dung tu thay cua so GPM).
     } catch (e) {
@@ -3120,34 +3118,21 @@ async function openGpmProfilesSelected(btn) {
   }
   const threads = await _showThreadsModal(
     `Mở profile cho ${ids.length} dòng đang tích chọn:\n\n` +
-    `- Dòng ĐÃ CÓ Cookie: kiểm tra còn đăng nhập được không TRƯỚC (không cần mở browser, chỉ 1 request nhanh) - còn sống thì BỎ QUA, không mở lại.\n` +
-    `- Dòng chưa có Cookie (hoặc cookie đã hết hạn): mở 1 cửa sổ (GPM hoặc GemLogin) tới trang chủ Shopee theo thị trường của dòng đó.\n` +
+    `- Mỗi dòng có GPM/GEM ID sẽ mở 1 cửa sổ (GPM hoặc GemLogin) tới trang chủ Shopee theo thị trường của dòng đó.\n` +
     `- Dòng chưa có GPM/GEM ID sẽ được bỏ qua.`,
     2, 6
   );
   if (threads === null) return; // bam Huy
-  const rowById = new Map(lastMailAccountsList.map(a => [a.id, a]));
   await withBusy(btn, async () => {
     // Chay N luong song song (goi route DUNG 1 dong /gpm/open, KHONG dung route bulk tuan
     // tu cu) - xem yeu cau nguoi dung 2026-09-10, cung mo hinh voi getShopeeIdsSelected()/
-    // getCookiesSelected() ben duoi. Dong DA CO cookie: check_cookie truoc (KHONG mo browser)
-    // - con song thi bo qua khong mo lai (xem yeu cau nguoi dung 2026-09-11 "check cookie còn
-    // sống hay không trước khi mở profile đối với những tài khoản đã có cookie trước rồi").
+    // getCookiesSelected() ben duoi.
     const results = [];
     let cursor = 0;
     const next = () => { const i = cursor++; return i < ids.length ? ids[i] : undefined; };
     const worker = async () => {
       for (let id; (id = next()) !== undefined;) {
         try {
-          const row = rowById.get(id);
-          const hasCookie = row && String(row.cookie || '').trim() !== '';
-          if (hasCookie) {
-            const chk = await api('POST', `/api/mail_accounts/${id}/check_cookie`, undefined, 20000);
-            if (chk.status === 'alive') {
-              results.push({ id, ok: true, skipped: true, message: chk.detail || 'Cookie còn sống.' });
-              continue;
-            }
-          }
           const r = await api('POST', `/api/mail_accounts/${id}/gpm/open`, undefined, 60000);
           results.push({ id, ...r });
         } catch (e) {
@@ -3156,12 +3141,10 @@ async function openGpmProfilesSelected(btn) {
       }
     };
     await Promise.all(Array.from({ length: threads }, () => worker()));
-    const opened = results.filter(r => r.ok && !r.skipped).length;
-    const skipped = results.filter(r => r.skipped).length;
-    // Chi bao khi co dong bi bo qua (cookie con song) hoac loi - mo het thanh cong thi khong hien popup.
-    if (skipped > 0 || opened < results.length - skipped) {
-      const extraNote = skipped ? `Đã bỏ qua ${skipped} dòng vì Cookie đã lưu vẫn còn đăng nhập được (không cần mở lại).` : '';
-      await mailAccSummarizeBulk('Mở profile', opened, results.length, results, extraNote);
+    // Chi bao khi co dong loi/khong mo duoc - thanh cong het thi khong hien popup.
+    const opened = results.filter(r => r.ok).length;
+    if (opened < results.length) {
+      await mailAccSummarizeBulk('Mở profile', opened, results.length, results);
     }
   });
 }
@@ -3951,7 +3934,7 @@ async function loadPostVideoAccounts(sid) {
     const { accounts } = await api('GET', '/api/mail_accounts/list?' + params.toString());
     if (session) session.accounts = accounts || [];
     renderPostVideoAccountsTable(sid);
-    const withCookie = (accounts || []).filter(a => (a.cookie || '').trim()).length;
+    const withCookie = (accounts || []).filter(a => mailAccHasUsableCookie(a)).length;
     infoEl.textContent = `Đã nạp ${(accounts || []).length} tài khoản (${withCookie} có Cookie).`;
   } catch (e) {
     infoEl.textContent = 'Lỗi: ' + e.message;
@@ -3963,7 +3946,7 @@ function renderPostVideoAccountsTable(sid) {
   const tbody = document.getElementById('postvideo-accounts-tbody-' + sid);
   const accounts = (session && session.accounts) || [];
   tbody.innerHTML = accounts.map(a => {
-    const hasCookie = !!(a.cookie || '').trim();
+    const hasCookie = mailAccHasUsableCookie(a);
     const limit = a.rate_limit_video;
     const today = a.posted_today || 0;
     const atLimit = limit != null && today >= limit;
@@ -4239,8 +4222,9 @@ async function getCookiesSelected(btn) {
   const skipNote = skipped ? `- ${skipped} dòng chưa có ID profile sẽ bỏ qua.\n` : '';
   const threads = await _showThreadsModal(
     `Lấy Cookie cho ${valid.length} dòng đang tích chọn:\n\n` +
-    `- Mở trang chủ Shopee theo market của từng dòng, lấy toàn bộ cookie đăng nhập rồi ghi vào cột Cookie (ghi đè nếu đã có).\n` +
-    `- Dòng chưa đăng nhập / bị captcha sẽ không ghi cookie - trình duyệt luôn được đóng lại sau khi xong (dù thành công hay thất bại).\n` +
+    `- Dòng ĐÃ CÓ Cookie: kiểm tra còn đăng nhập được không TRƯỚC (không cần mở browser, chỉ 1 request nhanh) - còn sống thì BỎ QUA, không lấy lại.\n` +
+    `- Dòng chưa có Cookie (hoặc cookie đã hết hạn/FAIL): mở trang chủ Shopee theo market, lấy toàn bộ cookie đăng nhập rồi ghi vào cột Cookie.\n` +
+    `- Dòng chưa đăng nhập / bị captcha / lỗi sẽ ghi 'FAIL' vào cột Cookie - trình duyệt luôn được đóng lại sau khi xong.\n` +
     skipNote +
     `- Quá trình mỗi dòng có thể mất 30-60s, cửa sổ sẽ mở ra trong lúc chạy.`,
     2, 6
@@ -4253,6 +4237,18 @@ async function getCookiesSelected(btn) {
     const worker = async () => {
       for (let id; (id = next()) !== undefined;) {
         try {
+          const row = rowById.get(id);
+          // Dong DA CO cookie dung duoc: check con song truoc (KHONG mo browser) - con song
+          // thi bo qua, khong lay lai lam gi (xem yeu cau nguoi dung 2026-09-11: "kiểm tra
+          // cookie còn sống hay không trước khi Get Cookie đối với những tài khoản đã có
+          // cookie trước rồi" - CHINH XAC la nut nay, khong phai 'Mở profile').
+          if (mailAccHasUsableCookie(row)) {
+            const chk = await api('POST', `/api/mail_accounts/${id}/check_cookie`, undefined, 20000);
+            if (chk.status === 'alive') {
+              results.push({ id, status: 'skipped_alive', detail: chk.detail || 'Cookie còn sống.' });
+              continue;
+            }
+          }
           const r = await api('POST', `/api/mail_accounts/${id}/get_cookie`, undefined, 135000);
           results.push({ id, ...r });
         } catch (e) {
@@ -4262,22 +4258,24 @@ async function getCookiesSelected(btn) {
     };
     await Promise.all(Array.from({ length: threads }, () => worker()));
     const okWrote = results.filter(r => r.status === 'ok').length;
+    const skippedAlive = results.filter(r => r.status === 'skipped_alive').length;
     const noLoginRows = results.filter(r => r.status === 'no_login');
     const captchaRows = results.filter(r => r.status === 'captcha');
     const errs = results.filter(r => ['timeout', 'error', 'no_id'].includes(r.status));
     const noIdCount = results.filter(r => r.status === 'no_id').length;
     const parts = [`Lấy được Cookie và ghi: ${okWrote}/${results.length} dòng.`];
     const extra = [];
+    if (skippedAlive) extra.push(`Bỏ qua (Cookie cũ vẫn còn đăng nhập được): ${skippedAlive}`);
     if (noLoginRows.length) {
-      extra.push(`Chưa đăng nhập (đã mở sẵn cửa sổ): ${noLoginRows.length}`);
+      extra.push(`Chưa đăng nhập (ghi 'FAIL'): ${noLoginRows.length}`);
       parts.push('Chi tiết "chưa đăng nhập" (kiểm tra lại nếu bạn chắc profile đã login):');
       noLoginRows.slice(0, 6).forEach(r => parts.push(`- #${r.id}: ${r.detail || ''}`));
       if (noLoginRows.length > 6) parts.push(`... và ${noLoginRows.length - 6} dòng khác.`);
     }
-    if (captchaRows.length) extra.push(`Bị captcha/traffic (đã mở sẵn cửa sổ): ${captchaRows.length}`);
+    if (captchaRows.length) extra.push(`Bị captcha/traffic (ghi 'FAIL'): ${captchaRows.length}`);
     if (noIdCount) extra.push(`Không có ID profile: ${noIdCount}`);
     if (errs.length) {
-      extra.push(`Lỗi/timeout: ${errs.length}`);
+      extra.push(`Lỗi/timeout (ghi 'FAIL'): ${errs.length}`);
       parts.push('Chi tiết lỗi:');
       errs.slice(0, 6).forEach(e => parts.push(`- #${e.id}: ${e.detail || e.status || 'lỗi'}`));
       if (errs.length > 6) parts.push(`... và ${errs.length - 6} lỗi khác.`);

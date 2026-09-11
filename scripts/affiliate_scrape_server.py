@@ -1418,7 +1418,10 @@ def video_sources_post_next(source_id):
             except (TypeError, ValueError):
                 continue
             acc = shopee_db.get_mail_account(DB_PATH, aid)
-            if not acc or not (acc.get("cookie") or "").strip():
+            # cookie co the la 'FAIL' (Get Cookie lay that bai, ghi de - xem
+            # mail_accounts_get_cookie()) - KHONG tinh la co cookie dung duoc.
+            acc_cookie = (acc.get("cookie") or "").strip() if acc else ""
+            if not acc or not acc_cookie or acc_cookie == "FAIL":
                 continue
             limit = acc.get("rate_limit_video")
             if limit is not None and shopee_db.count_account_success_today(DB_PATH, aid) >= limit:
@@ -2414,9 +2417,12 @@ def mail_accounts_get_cookie(account_id):
     """Nut 'Get Cookie' (hang loat): mo browser cua dong (engine GPM/GEM), mo trang chu
     Shopee theo market va lay TOAN BO cookie dang nhap qua CDP Network.getCookies (ke ca
     HttpOnly/Secure - xem cdp_get_cookie.mjs). Tra ve theo trang thai:
-      status ok        -> da co cookie, ghi vao cot cookie
-      no_login/captcha -> de cua so do lai cho nguoi dung xu ly (khong ghi)
-      timeout/error    -> loi/qua han (khong ghi)."""
+      status ok                        -> da co cookie, ghi vao cot cookie
+      no_login/captcha/timeout/error   -> LAY THAT BAI: ghi de cot cookie = 'FAIL' (KE CA
+                                           khi dong da co cookie CU tu truoc - xem yeu cau
+                                           nguoi dung 2026-09-11 "dòng cookie hiện lên đảm
+                                           bảo luôn sống": tranh de lai cookie cu CO THE da
+                                           chet ma nhin qua tuong nhu van con dung duoc)."""
     row = shopee_db.get_mail_account(DB_PATH, account_id)
     if not row:
         return _bad_request(f"khong tim thay mail id={account_id}")
@@ -2432,8 +2438,9 @@ def mail_accounts_get_cookie(account_id):
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=110)
     except subprocess.TimeoutExpired:
+        shopee_db.update_mail_account_fields(DB_PATH, account_id, cookie="FAIL")
         return jsonify({"ok": True, "status": "error", "detail": "Chay qua 110s (timeout).",
-                        "engine": engine, "url": home_url})
+                        "engine": engine, "url": home_url, "cookie": "FAIL"})
     out_text = (proc.stdout or "").strip()
     last_line = out_text.splitlines()[-1] if out_text else ""
     import json as _json
@@ -2442,15 +2449,21 @@ def mail_accounts_get_cookie(account_id):
     except Exception:
         stderr_tail = (proc.stderr or "").strip().splitlines()
         tail = (stderr_tail[-1] if stderr_tail else "") or (proc.stdout or "")[:200]
+        shopee_db.update_mail_account_fields(DB_PATH, account_id, cookie="FAIL")
         return jsonify({"ok": True, "status": "error", "detail": f"Helper loi: {tail[:240]}",
-                        "engine": engine, "url": home_url})
+                        "engine": engine, "url": home_url, "cookie": "FAIL"})
     status = str(res.get("status") or "error")
     cookie_val = str(res.get("cookie") or "").strip()
     if status == "ok" and cookie_val:
         shopee_db.update_mail_account_fields(DB_PATH, account_id, cookie=cookie_val)
         return jsonify({"ok": True, "status": "ok", "written": True, "cookie": cookie_val,
                         "detail": res.get("detail") or "Da ghi cookie.", "url": home_url})
-    return jsonify({"ok": True, "status": status, "cookie": None,
+    # Lay that bai (no_login/captcha/timeout/error, hoac status 'ok' nhung thieu cookie_val) -
+    # GHI DE cot cookie = 'FAIL', KE CA dong da co cookie CU tu truoc, de dam bao cot Cookie
+    # hien tren UI luon la gia tri MOI KIEM CHUNG, khong bao gio la cookie cu co the da chet
+    # (xem yeu cau nguoi dung 2026-09-11).
+    shopee_db.update_mail_account_fields(DB_PATH, account_id, cookie="FAIL")
+    return jsonify({"ok": True, "status": status, "cookie": "FAIL",
                     "detail": res.get("detail") or "", "url": home_url,
                     "user_handle": status in ("no_login", "captcha")})
 
