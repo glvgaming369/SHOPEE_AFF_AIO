@@ -1618,6 +1618,13 @@
 </main>
 </div><!-- /app-layout -->
 
+<!-- Danh sach TOAN BO port cua cac video-worker PROCESS rieng (xem postVideoPoolWorker) -
+     templated boi Flask (video_ports=VIDEO_PORTS trong index() cua affiliate_scrape_server.py,
+     >= 1 phan tu - moi phan tu la 1 PROCESS Python doc lap, xem main()/--video-workers), TACH
+     RIENG khoi <script> chinh ben duoi de <script> chinh van la JS thuan (khong lan Jinja),
+     giu duoc kiem tra `node --check` tren toan bo noi dung <script> chinh nhu quy uoc cu cua
+     repo. -->
+<script>window.__VIDEO_API_PORTS__ = {{ video_ports | tojson }};</script>
 <script>
 function switchTab(name) {
   document.querySelectorAll('.tab-panel').forEach(el => el.classList.remove('active'));
@@ -4523,14 +4530,40 @@ let postVideoSessions = new Map(); // sessionId -> { id, accounts, running, stop
 let postVideoNextSessionId = 1;
 let postVideoActiveSessionId = null; // sid dang HIEN THI (dang tab kieu Chrome - xem yeu cau nguoi dung 2026-09-11)
 
+// Tai khoan dang bi 1 PHIEN KHAC "giu" (dang thuc su chay, khong phai chi tich chon) - yeu cau
+// nguoi dung 2026-09-11: "những tài khoản đã thuộc 1 phiên đang đăng thì sẽ không xuất hiện
+// tại mục nạp tài khoản để đăng ở phiên khác". accountId -> sid dang giu. Claim() luc bam "Bắt
+// đầu đăng" (KHONG phai luc tich chon), release() luc phien dung/xong (finally trong
+// startPostVideoRun()) de tra lai vao pool cho phien khac nap duoc.
+let postVideoClaimedAccounts = new Map();
+function postVideoClaimAccounts(sid, accountIds) {
+  accountIds.forEach(id => postVideoClaimedAccounts.set(id, sid));
+}
+function postVideoReleaseAccounts(sid) {
+  for (const [id, ownerSid] of postVideoClaimedAccounts) {
+    if (ownerSid === sid) postVideoClaimedAccounts.delete(id);
+  }
+}
+
 function sleepMs(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Gioi han so dong hien thi (yeu cau nguoi dung 2026-09-11 "phân tích và đề xuất hướng giải
+// quyết những điểm nghẽn" - lag khi chay pool lon: chuoi log truoc day PREPEND vo han, cang
+// chay lau/nhieu video cang phinh to, moi lan ghi them cang tra vi phai dung lai TOAN BO text
+// content cu). Chi giu toi da MAILACC_LOG_MAX_LINES dong GAN NHAT, cat bot phan cu - vua gioi
+// han chi phi moi lan ghi (khong con tang vo han theo thoi gian chay), vua tranh chiem qua
+// nhieu bo nho trinh duyet cho 1 phien chay dai.
+const POSTVIDEO_LOG_MAX_LINES = 300;
 function postVideoLog(sid, msg) {
   const box = document.getElementById('postvideo-log-' + sid);
   if (!box) return;
-  box.textContent = `[${new Date().toLocaleTimeString('vi-VN')}] ${msg}\n` + box.textContent;
+  const line = `[${new Date().toLocaleTimeString('vi-VN')}] ${msg}`;
+  const lines = box.textContent ? box.textContent.split('\n') : [];
+  lines.unshift(line);
+  if (lines.length > POSTVIDEO_LOG_MAX_LINES) lines.length = POSTVIDEO_LOG_MAX_LINES;
+  box.textContent = lines.join('\n');
 }
 
 // Bo cuc lai 2026-09-11 (yeu cau nguoi dung): uu tien khong gian cho BANG TAI KHOAN (khong
@@ -4556,18 +4589,22 @@ function postVideoSessionCardHtml(sid) {
         <label style="white-space:nowrap;font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;" title="Chỉ nạp tài khoản có trạng thái Cookie đang LIVE (bỏ qua DIE/FAIL/chưa có Cookie) - xem cột Cookie ở tab &quot;Quản lý account Shopee&quot;">
           <input type="checkbox" id="postvideo-filter-live-${sid}" checked> Chỉ Cookie LIVE
         </label>
-        <button class="secondary" onclick="loadPostVideoAccounts(${sid})">Nạp tài khoản theo lọc</button>
+        <button class="secondary" id="postvideo-load-accounts-btn-${sid}" onclick="loadPostVideoAccounts(${sid})">Nạp tài khoản theo lọc</button>
         <span class="muted" id="postvideo-accounts-info-${sid}"></span>
       </div>
       <div class="row" style="margin-bottom:6px;flex-wrap:wrap;">
         <label style="white-space:nowrap;font-weight:500;">Số lượng:</label>
         <input type="number" id="postvideo-target-${sid}" min="1" value="50" style="max-width:80px;" title="Số lượng muốn đăng - dừng lại sau khi đăng đủ số lượng này CHO MỖI TÀI KHOẢN (hoặc sớm hơn nếu hết video pending / hết Rate limit)">
         <label style="white-space:nowrap;font-weight:500;">Luồng:</label>
-        <input type="number" id="postvideo-threads-${sid}" min="1" max="1000" value="3" style="max-width:64px;" title="Số luồng song song - mỗi luồng = 1 nhóm tài khoản đăng video độc lập cùng lúc, giới hạn thực tế phụ thuộc BĂNG THÔNG UPLOAD + RAM của máy này, KHÔNG có trần cứng đặt sẵn - hãy tự tăng dần và theo dõi log lỗi (timeout/mất kết nối) để tìm mức phù hợp. Lưu ý: server ký bên ngoài (license Chill 68) từng ghi nhận giới hạn ~20 luồng đồng thời cho market PH (field 'phConcurrency', xem CHILL68_VIDEO_UPLOAD_RE.md).">
+        <input type="number" id="postvideo-threads-${sid}" min="1" max="1000" value="3" style="max-width:64px;" oninput="postVideoThreadsHintUpdate(${sid})" title="Số luồng song song - mỗi luồng = 1 nhóm tài khoản đăng video độc lập cùng lúc, giới hạn thực tế phụ thuộc BĂNG THÔNG UPLOAD + RAM của máy này, KHÔNG có trần cứng đặt sẵn - hãy tự tăng dần và theo dõi log lỗi (timeout/mất kết nối) để tìm mức phù hợp. Lưu ý: server ký bên ngoài (license Chill 68) từng ghi nhận giới hạn ~20 luồng đồng thời cho market PH (field 'phConcurrency', xem CHILL68_VIDEO_UPLOAD_RE.md).">
+        <span class="muted" id="postvideo-threads-hint-${sid}" style="font-size:12px;"></span>
         <label style="white-space:nowrap;font-weight:500;">Nghỉ (s):</label>
-        <input type="number" id="postvideo-min-delay-${sid}" min="0" value="8" style="max-width:56px;" title="Nghỉ giữa video (giây) - khoảng ngẫu nhiên từ min đến max">
-        <span>–</span>
+        <input type="number" id="postvideo-min-delay-${sid}" min="0" value="8" style="max-width:56px;" title="Nghỉ giữa 2 video CÙNG 1 tài khoản (giây) - khoảng ngẫu nhiên từ giá trị này đến giá trị bên phải, trừ khi tích 'Cố định'">
+        <span id="postvideo-delay-sep-${sid}">–</span>
         <input type="number" id="postvideo-max-delay-${sid}" min="0" value="20" style="max-width:56px;">
+        <label style="white-space:nowrap;font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer;" title="Bật: LUÔN nghỉ đúng 1 mốc giá trị cố định (ô bên trái) giữa 2 video cùng tài khoản, không random. Tắt: nghỉ ngẫu nhiên trong khoảng min-max như cũ.">
+          <input type="checkbox" id="postvideo-delay-fixed-${sid}" onchange="postVideoToggleDelayMode(${sid})"> Cố định
+        </label>
         <button id="postvideo-start-btn-${sid}" onclick="startPostVideoRun(${sid})">▶ Bắt đầu đăng</button>
         <button id="postvideo-stop-btn-${sid}" class="secondary" onclick="stopPostVideoRun(${sid})" disabled>■ Dừng</button>
       </div>
@@ -4679,8 +4716,71 @@ function populatePostVideoSourceSelect(sid) {
   sel.innerHTML = lastPostVideoSources.map(s =>
     `<option value="${s.id}">${s.folder} (${(s.market || '').toUpperCase()}) - ${s.pending_count != null ? s.pending_count : '?'} pending</option>`
   ).join('') || '<option value="">-- Chưa có nguồn nào, thêm ở tab "Quản lý nguồn video" --</option>';
-  if (current && lastPostVideoSources.some(s => String(s.id) === current)) sel.value = current;
-  onPostVideoSourceChange(sid);
+  const stillValid = !!current && lastPostVideoSources.some(s => String(s.id) === current);
+  if (stillValid) sel.value = current;
+  // QUAN TRONG (bug nguoi dung bao 2026-09-11: "bảng danh sách biến mất" chỉ sau vài video):
+  // ham nay duoc goi LAI DINH KY trong luc dang chay (postVideoPoolWorker() goi
+  // loadPostVideoSources() moi 25 video de dong bo lai cho chac - xem postVideoPatchSourceStats()
+  // cho phan cap nhat NGAY tu ket qua tung video) - KHONG CHI luc nguoi dung
+  // THAT SU doi nguon. onPostVideoSourceChange() RESET TOAN BO (xoa bang tai khoan, xoa
+  // session.accounts, xoa capacity info) - dung khi nguon THAT SU doi (current rong hoac
+  // khong con hop le), nhung goi no MOI LAN lam moi dinh ky se xoa mat bang dang chay du nguon
+  // khong he doi. Chi goi reset day du khi THAT SU can (chua chon nguon / nguon cu bien mat);
+  // con lai chi cap nhat lai dong "info" (Tổng/Đã đăng/Lỗi/Pending) theo du lieu moi nhat.
+  if (!stillValid) {
+    onPostVideoSourceChange(sid);
+    return;
+  }
+  const s = currentPostVideoSource(sid);
+  const infoEl = document.getElementById('postvideo-source-info-' + sid);
+  if (infoEl && s) {
+    infoEl.textContent = `Tổng ${s.total_count ?? '?'} | Đã đăng ${s.success_count ?? '?'} | Lỗi ${s.error_count ?? '?'} | Pending ${s.pending_count ?? '?'}`;
+  }
+}
+
+// Cap nhat NGAY (khong doi goi lai GET /api/video_sources) thong ke pending/success/error cua
+// 1 nguon trong lastPostVideoSources (DUNG CHUNG cho moi phien) tu chinh ket qua post_next()
+// vua nhan duoc - xem yeu cau nguoi dung 2026-09-11: "pending đã giảm trong log nhưng chỉ số
+// trên này không cập nhật, và tôi tạo phiên mới cũng không cập nhật". Truoc day chi dua vao
+// loadPostVideoSources() goi lai MOI 5 video (tranh spam request) nen so hien tren dropdown/
+// dong info bi CHAM hon nhieu so voi log (vd log da qua video thu 3-4 ma tren van con so cu) -
+// va vi phien MOI TAO doc lastPostVideoSources DA CO SAN (khong tu fetch lai), no cung ke thua
+// dung so CU do. res.pending_remaining da la gia tri DUNG/ATOMIC tu server (xem
+// shopee_db.increment_video_source_stats() - sua cung ngay 2026-09-11) nen co the ghi thang
+// vao cache local, KHONG can round-trip GET them - vua nhanh hon vua chinh xac hon. Ap dung
+// cho MOI phien (khong chi phien vua dang) vi lastPostVideoSources la du lieu DUNG CHUNG.
+// THROTTLE + SCOPE lai (yeu cau nguoi dung 2026-09-11 "phân tích và đề xuất hướng giải quyết
+// những điểm nghẽn" - lag/giong treo khi chay pool lon vd 50 luong): ban dau ham nay rebuild
+// LAI TOAN BO <select> (moi <option>) cho MOI phien dang mo, NGAY LAP TUC sau MOI video - voi
+// 50 luong dang gan nhu lien tuc, co the fire hang chuc lan/giay, khien JS main thread ban ron
+// dung DOM lien tuc -> nguoi dung bam chuyen tab bi "xep hang" phia sau, cam giac giong treo.
+// Sua lai 2 diem:
+//  1) THROTTLE: gom nhieu lan patch lai trong 1 cua so ngan (500ms) thanh 1 lan rebuild DOM
+//     duy nhat/session, thay vi rebuild ngay tung lan.
+//  2) SCOPE: CHI rebuild dropdown cua PHIEN nao dang thuc su CHON dung nguon vua doi (cac phien
+//     khac dang xem nguon khac khong can dong cham gi - option text cua nguon KHONG dang chon
+//     khong hien thi gi cho toi khi nguoi dung tu mo dropdown, luc do se tu lay dung du lieu
+//     moi nhat trong lastPostVideoSources - lastPostVideoSources VAN duoc cap nhat NGAY LAP TUC
+//     du DOM chua rebuild, nen khong mat du lieu, chi tri hoan LUC VE (render) thoi).
+let postVideoPatchPendingSourceIds = new Set();
+let postVideoPatchTimer = null;
+function postVideoPatchSourceStats(sourceId, res) {
+  const src = lastPostVideoSources.find(s => String(s.id) === String(sourceId));
+  if (!src) return;
+  if (res.pending_remaining != null) src.pending_count = res.pending_remaining;
+  if (res.success) src.success_count = (src.success_count || 0) + 1;
+  else src.error_count = (src.error_count || 0) + 1;
+  postVideoPatchPendingSourceIds.add(String(sourceId));
+  if (postVideoPatchTimer) return;
+  postVideoPatchTimer = setTimeout(() => {
+    const changedIds = postVideoPatchPendingSourceIds;
+    postVideoPatchPendingSourceIds = new Set();
+    postVideoPatchTimer = null;
+    for (const sid2 of postVideoSessions.keys()) {
+      const sel = document.getElementById('postvideo-source-sel-' + sid2);
+      if (sel && changedIds.has(sel.value)) populatePostVideoSourceSelect(sid2);
+    }
+  }, 500);
 }
 
 // Dung chung voi dropdown "Nhóm GPM" cua tab mailacc (list_mail_account_groups()) nhung do
@@ -4738,17 +4838,24 @@ async function loadPostVideoAccounts(sid) {
   const session = postVideoSessions.get(sid);
   const onlyLive = document.getElementById('postvideo-filter-live-' + sid).checked;
   try {
-    const { accounts: allAccounts } = await api('GET', '/api/mail_accounts/list?' + params.toString());
+    const { accounts: allAccountsRaw } = await api('GET', '/api/mail_accounts/list?' + params.toString());
+    // Bo qua tai khoan dang bi PHIEN KHAC giu (dang chay that su, khong phai chi tich chon) -
+    // yeu cau nguoi dung 2026-09-11: tra lai vao "pool" cho phien khac, khong hien o day nua.
+    // Van giu tai khoan CUA CHINH sid nay (phong khi tu no reload trong luc dang chay).
+    const allAccounts = (allAccountsRaw || []).filter(a => {
+      const owner = postVideoClaimedAccounts.get(a.id);
+      return owner == null || owner === sid;
+    });
     // Loc "Chỉ Cookie LIVE" (client-side) - yeu cau nguoi dung 2026-09-11: "thêm vào điều kiện
     // chỉ lấy những tài khoản có trạng thái cookie đang live" - KHOP CHINH XAC dinh nghia LIVE
     // cua mailAccCookieStatusBadge() qua mailAccCookieIsLive() (khong chi "co cookie" ma con
     // phai khong bi 'dead').
-    const accounts = onlyLive ? (allAccounts || []).filter(a => mailAccCookieIsLive(a)) : (allAccounts || []);
+    const accounts = onlyLive ? allAccounts.filter(a => mailAccCookieIsLive(a)) : allAccounts;
     if (session) session.accounts = accounts;
     renderPostVideoAccountsTable(sid);
-    const liveCount = (allAccounts || []).filter(a => mailAccCookieIsLive(a)).length;
+    const liveCount = allAccounts.filter(a => mailAccCookieIsLive(a)).length;
     infoEl.textContent = onlyLive
-      ? `Đã nạp ${accounts.length}/${(allAccounts || []).length} tài khoản (đã lọc Cookie LIVE).`
+      ? `Đã nạp ${accounts.length}/${allAccounts.length} tài khoản (đã lọc Cookie LIVE).`
       : `Đã nạp ${accounts.length} tài khoản (${liveCount} Cookie LIVE).`;
   } catch (e) {
     infoEl.textContent = 'Lỗi: ' + e.message;
@@ -4787,7 +4894,7 @@ function renderPostVideoAccountsTable(sid) {
 
 // Cap nhat REAL-TIME 1 dong tai khoan trong bang (cot "Trạng thái phiên") - xem yeu cau nguoi
 // dung 2026-09-11 "Thiết kế dạng real-time cho danh sách tài khoản đã chọn được đăng". Goi tu
-// postVideoWorkerLoop() ngay khi co ket qua CHO DUNG account_id do (KHONG doan truoc luc dang
+// postVideoPoolWorker() ngay khi co ket qua CHO DUNG account_id do (KHONG doan truoc luc dang
 // goi API - server moi la noi QUYET DINH tai khoan nao thuc su duoc dung trong 1 lan goi
 // post_next() vi 1 loi goi gui nhieu account_id ung vien - xem _claim_next_pending()).
 function postVideoSetAccountStatus(sid, accountId, html, colorVar) {
@@ -4835,54 +4942,150 @@ function updatePostVideoCapacityInfo(sid) {
     : `${caps.size} tài khoản đã chọn - tài khoản còn ít dung lượng nhất hôm nay: ${Math.min(...finiteVals)} video. Mỗi tài khoản đăng ĐỘC LẬP tới khi đạt "Số lượng muốn đăng" hoặc hết dung lượng riêng.`;
 }
 
-// Chia accountIds thanh N "bucket" KHONG GIAO NHAU (round-robin theo vi tri) - moi bucket
-// giao cho 1 worker rieng, chay Promise.all() song song. Chia bucket (thay vi N worker dung
-// CHUNG 1 hang doi xoay vong) de KHONG BAO GIO 2 worker cung nham 1 tai khoan cung luc -
-// khong can lock/dong bo gi them ben JS, tranh rieng cho tung worker tu quan ly. Bucket rong
-// (thua worker hon so tai khoan) bi loai - thua luong so tai khoan la vo ich, xem UI tooltip.
-function partitionAccountsForWorkers(accountIds, numThreads) {
-  const n = Math.max(1, Math.min(numThreads, accountIds.length));
-  const buckets = Array.from({ length: n }, () => []);
-  accountIds.forEach((id, i) => buckets[i % n].push(id));
-  return buckets.filter(b => b.length > 0);
+// ---- POOL DUNG CHUNG cho N luong (thay the mo hinh "bucket tinh" cu - xem yeu cau nguoi dung
+// 2026-09-11 "nâng cao hiệu suất đăng": bucket tinh khien 1 luong PHAI ngu du delay SAU MOI
+// lan dang du lan dang TIEP THEO la 1 TAI KHOAN KHAC (khong can cho gi ca) - luong ranh trong
+// khi con tai khoan KHAC (thuoc bucket cua luong khac) da san sang, gay lang phi luong that su.
+// Mo hinh moi: MOI tai khoan co 1 "cooldown rieng" (accountState.nextAt), N luong dung CHUNG
+// 1 pool accountIds - luong ranh se tu tim tai khoan SAN SANG NAO CUNG DUOC (khong bi buoc vao
+// 1 tap con co dinh) roi giu (claim) no. Viec "tim + claim" la 1 khoi DONG BO (khong co await o
+// giua) nen an toan tuyet doi voi nhau du JS event loop co xen ke bao nhieu luong - khong can
+// lock/mutex rieng (JS von don luong that su, chi xen ke I/O bat dong bo). ----
+
+// Tim 1 tai khoan SAN SANG (chua du muc tieu, KHONG dang duoc luong khac giu, da het cooldown)
+// trong accountState roi CLAIM NGAY (dong bo, khong await) - tra ve id hoac null. Neu khong co
+// tai khoan nao san sang NGAY BAY GIO nhung van con tai khoan chua xong (dang cooldown), tra ve
+// null kem 'nextAt' la moc thoi gian SOM NHAT co the thu lai (de caller ngu dung khoang do
+// thay vi busy-poll).
+function postVideoClaimReadyAccount(accountIds, accountState, perAccountTarget) {
+  const now = Date.now();
+  let soonestAt = Infinity;
+  let anyPending = false;
+  for (const id of accountIds) {
+    const st = accountState.get(id);
+    if (st.done >= perAccountTarget) continue;
+    anyPending = true;
+    if (st.active) continue;
+    if (st.nextAt <= now) { st.active = true; return { id, anyPending: true }; }
+    if (st.nextAt < soonestAt) soonestAt = st.nextAt;
+  }
+  return { id: null, anyPending, soonestAt };
 }
 
-// 1 "luong" (worker) - dang TUAN TU qua dung SO TAI KHOAN duoc giao (workerAccountIds),
-// hoan toan doc lap voi cac worker khac cua CUNG phien (khong dung chung rotation/index) -
-// nhieu worker CO THE cung goi post_next() tren CUNG 1 nguon gan nhu dong thoi, server da
-// dam bao khong trung sp_id (xem _claim_next_pending() trong affiliate_scrape_server.py).
-async function postVideoWorkerLoop(sid, sourceId, workerAccountIds, perAccountTarget, minDelay, maxDelay, postedByAccount, stats, session) {
-  let rotationIdx = 0;
+// Chon round-robin 1 trong nhieu VIDEO PORT (window.__VIDEO_API_PORTS__, moi port = 1 PROCESS
+// video-worker rieng, xem main()/--video-workers trong affiliate_scrape_server.py) - dung 1 bo
+// dem tang dan DUNG CHUNG cho MOI phien/worker (module-level, khong rieng tung phien) de rai
+// deu request qua CA phien lan luong, tan dung het so process/loi CPU that su. Tra ve null neu
+// server cu chua co danh sach nay (fallback ve cung-origin, xem postVideoPoolWorker()).
+let postVideoPortRoundRobinIdx = 0;
+function postVideoNextVideoPort() {
+  const ports = window.__VIDEO_API_PORTS__;
+  if (!Array.isArray(ports) || !ports.length) return null;
+  const port = ports[postVideoPortRoundRobinIdx % ports.length];
+  postVideoPortRoundRobinIdx++;
+  return port;
+}
+
+// 1 "luong" (worker) trong POOL dung chung - lien tuc: tim + claim 1 tai khoan san sang (bat
+// ke tai khoan do "thuoc" luong nao truoc do, khac han mo hinh bucket tinh cu), goi post_next()
+// CHI VOI 1 account_id da chon san (khong can gui danh sach ung vien xoay vong nua - da tu
+// chon dung 1 cai o phia client), roi dat lai cooldown RIENG cho DUNG tai khoan do. Nhieu
+// worker CO THE goi post_next() gan nhu dong thoi tren CUNG 1 nguon, server da dam bao khong
+// trung sp_id (xem _claim_next_pending()).
+async function postVideoPoolWorker(sid, sourceId, accountIds, accountState, perAccountTarget, minDelay, maxDelay, stats, session) {
   while (!session.stopRequested) {
-    const activeIds = workerAccountIds.filter(id => postedByAccount.get(id) < perAccountTarget);
-    if (!activeIds.length) break; // tai khoan cua RIENG worker nay da du muc tieu
-    const rotated = activeIds.slice(rotationIdx % activeIds.length).concat(activeIds.slice(0, rotationIdx % activeIds.length));
-    rotationIdx++;
+    const claim = postVideoClaimReadyAccount(accountIds, accountState, perAccountTarget);
+    if (!claim.anyPending) break; // MOI tai khoan (trong pool cua CA phien) da du muc tieu
+    if (claim.id == null) {
+      // Chua co tai khoan nao san sang NGAY (tat ca dang trong cooldown hoac dang duoc luong
+      // khac giu) - ngu toi luc SOM NHAT co the co tai khoan san sang, toi da 1s/lan de van
+      // kiem tra lai session.stopRequested dieu dan (tranh ngu 1 lan qua lau roi moi phat hien
+      // nguoi dung da bam Dừng).
+      const waitMs = Number.isFinite(claim.soonestAt) ? Math.max(50, Math.min(claim.soonestAt - Date.now(), 1000)) : 1000;
+      await sleepMs(waitMs);
+      continue;
+    }
+    const accountId = claim.id;
+    const st = accountState.get(accountId);
+    postVideoSetAccountStatus(sid, accountId, '⏳ Đang đăng...', null);
     let res;
     try {
-      res = await api('POST', `/api/video_sources/${sourceId}/post_next`, { account_ids: rotated }, 120000);
+      // Goi sang 1 trong nhieu VIDEO PORT (round-robin, xem postVideoNextVideoPort()) thay vi
+      // cung origin voi trang - xem window.__VIDEO_API_PORTS__ (templated tu Flask, index()
+      // trong affiliate_scrape_server.py, moi port = 1 PROCESS video-worker rieng, xem main())
+      // va _cors_video_post_next(): (1) tranh toi 50 request post_next() dong thoi chiem het
+      // hang doi ~6 ket noi/domain cua Chrome khien cac tab khac "giả treo", (2) rai deu request
+      // len NHIEU PROCESS de tan dung NHIEU LOI CPU that su (Python GIL khien 1 process chi
+      // dung duoc 1 loi cho phan CPU-bound, xem yeu cau nguoi dung 2026-09-11 "triển khai
+      // multi-process ... tối ưu nhất"). Chi doi URL - api() van dung nguyen (fetch() nhan URL
+      // tuyet doi binh thuong), moi call site KHAC trong file nay VAN dung path tuong doi
+      // (cung origin, khong doi).
+      const videoApiPort = postVideoNextVideoPort();
+      const postNextUrl = videoApiPort
+        ? `http://${location.hostname}:${videoApiPort}/api/video_sources/${sourceId}/post_next`
+        : `/api/video_sources/${sourceId}/post_next`; // fallback neu server cu chua co video_ports
+      res = await api('POST', postNextUrl, { account_ids: [accountId] }, 120000);
     } catch (e) {
-      postVideoLog(sid, `✗ LỖI GỌI SERVER: ${e.message} - 1 luồng dừng.`);
+      postVideoLog(sid, `✗ LỖI GỌI SERVER (tài khoản ${accountId}): ${e.message} - 1 luồng dừng.`);
+      st.active = false;
       break;
     }
-    if (res.done) { postVideoLog(sid, `✓ Luồng dừng - nguồn đã hết video pending.`); break; }
-    if (res.blocked) { postVideoLog(sid, `⚠ Luồng dừng: ${res.message}`); break; }
-    if (res.retry) { await sleepMs(400); continue; } // video dang bi worker/phien KHAC giu - cho ngan roi thu lai, khong tinh vao "posted"
+    if (res.done) { postVideoLog(sid, `✓ Luồng dừng - nguồn đã hết video pending.`); st.active = false; break; }
+    if (res.blocked) { postVideoLog(sid, `⚠ Luồng dừng: ${res.message}`); st.active = false; break; }
+    if (res.retry) { st.active = false; await sleepMs(300); continue; } // video dang bi worker/phien KHAC giu - KHONG tinh cooldown, thu lai ngay
     stats.posted++;
     if (res.success) stats.ok++; else stats.fail++;
-    if (res.account_id != null && postedByAccount.has(res.account_id)) postedByAccount.set(res.account_id, postedByAccount.get(res.account_id) + 1);
-    const acctDone = res.account_id != null ? (postedByAccount.get(res.account_id) ?? '?') : '?';
-    postVideoLog(sid, `${res.success ? '✓' : '✗'} ${res.sp_id} (${res.account_label}: ${acctDone}/${perAccountTarget}) - ${res.success ? (res.video_link || 'post_id=' + res.post_id) : 'LỖI: ' + res.error} | còn ${res.pending_remaining} pending`);
-    if (res.account_id != null) {
-      postVideoSetAccountStatus(sid, res.account_id,
-        res.success ? `✓ ${acctDone}/${perAccountTarget}` : `✗ ${acctDone}/${perAccountTarget} - Lỗi: ${String(res.error || '').slice(0, 60)}`,
-        res.success ? '--success-text' : '--danger-text');
-    }
-    if (stats.posted % 5 === 0) loadPostVideoSources(); // cap nhat dinh ky, khong phai moi video (tranh spam request tu nhieu worker cung luc)
-    if (session.stopRequested) break;
-    const delayMs = 1000 * (minDelay + Math.random() * (maxDelay - minDelay));
-    if (delayMs > 0) await sleepMs(delayMs);
+    st.done++;
+    st.active = false;
+    // Cooldown RIENG cho DUNG tai khoan vua dang xong - tai khoan KHAC trong pool KHONG bi
+    // anh huong, co the duoc luong khac (hoac chinh luong nay o vong lap sau) chon ngay lap tuc
+    // neu da san sang - day chinh la diem khac biet cot loi so voi mo hinh bucket cu.
+    const delaySec = minDelay + Math.random() * (maxDelay - minDelay);
+    st.nextAt = Date.now() + delaySec * 1000;
+    postVideoLog(sid, `${res.success ? '✓' : '✗'} ${res.sp_id} (${res.account_label}: ${st.done}/${perAccountTarget}) - ${res.success ? (res.video_link || 'post_id=' + res.post_id) : 'LỖI: ' + res.error} | còn ${res.pending_remaining} pending`);
+    postVideoSetAccountStatus(sid, accountId,
+      res.success ? `✓ ${st.done}/${perAccountTarget}` : `✗ ${st.done}/${perAccountTarget} - Lỗi: ${String(res.error || '').slice(0, 60)}`,
+      res.success ? '--success-text' : '--danger-text');
+    // Cap nhat dropdown/dong info "Tổng/Đã đăng/Lỗi/Pending" NGAY tu chinh ket qua vua nhan
+    // (khong doi round-trip GET rieng) - xem postVideoPatchSourceStats(). Van giu 1 lan resync
+    // day du dinh ky (thua hon nhieu - moi 25 video) lam luoi an toan cho cac field KHONG the
+    // suy tu response nay (vd total_count doi neu co ai quet lai nguon o cho khac).
+    postVideoPatchSourceStats(sourceId, res);
+    if (stats.posted % 25 === 0) loadPostVideoSources();
   }
+}
+
+// Canh bao nhe khi dat so luong "Luồng" vuot qua nguong thuc te trinh duyet co the tan dung -
+// yeu cau nguoi dung 2026-09-11 "phân tích và đề xuất hướng giải quyết những điểm nghẽn":
+// Chrome gioi han ~6 KET NOI dong thoi/origin cho HTTP/1.1 (server nay chua noi HTTP/2), nen
+// dat qua nguong nay se khong tang thong luong THAT SU tu 1 tab trinh duyet (cac luong du se
+// chi cho o hang doi cua CHINH trinh duyet, khong phai loi cua trang) - CHI la thong tin tham
+// khao, KHONG chan nguoi dung dat cao hon (van co the huu ich neu server duoc nang cap sau nay).
+const POSTVIDEO_THREADS_SOFT_LIMIT = 6;
+function postVideoThreadsHintUpdate(sid) {
+  const el = document.getElementById('postvideo-threads-hint-' + sid);
+  if (!el) return;
+  const n = parseInt(document.getElementById('postvideo-threads-' + sid).value, 10) || 0;
+  el.textContent = n > POSTVIDEO_THREADS_SOFT_LIMIT
+    ? `⚠ Trình duyệt chỉ xử lý song song thật ~${POSTVIDEO_THREADS_SOFT_LIMIT} kết nối/tab (giới hạn HTTP/1.1) - luồng dư sẽ chờ ở hàng đợi của trình duyệt, không tăng thêm tốc độ thật.`
+    : '';
+}
+
+// Bat/tat che do "Cố định" cho nghi giua video - yeu cau nguoi dung 2026-09-11: "Thời gian
+// nghỉ giữa 2 video trên cùng 1 tài khoản cập dạng 1 mốc giá trị ví dụ 10s là đúng 10s sau sẽ
+// đăng video tiếp theo" (khac che do ngau nhien min-max cu). Khi bat: o "max" + dau "–" bi vo
+// hieu hoa/mo di (chi ô "min" con y nghia, dung lam gia tri CO DINH DUY NHAT) - xem
+// startPostVideoRun() doc lai checkbox nay khi tinh delayMs thuc te.
+function postVideoToggleDelayMode(sid) {
+  const fixed = document.getElementById('postvideo-delay-fixed-' + sid).checked;
+  const maxInput = document.getElementById('postvideo-max-delay-' + sid);
+  const sep = document.getElementById('postvideo-delay-sep-' + sid);
+  maxInput.disabled = fixed;
+  maxInput.style.opacity = fixed ? '0.35' : '';
+  sep.style.opacity = fixed ? '0.35' : '';
+  document.getElementById('postvideo-min-delay-' + sid).title = fixed
+    ? 'Nghỉ giữa 2 video CÙNG 1 tài khoản (giây) - CỐ ĐỊNH đúng giá trị này, không random.'
+    : 'Nghỉ giữa 2 video CÙNG 1 tài khoản (giây) - khoảng ngẫu nhiên từ giá trị này đến giá trị bên phải, trừ khi tích \'Cố định\'.';
 }
 
 async function startPostVideoRun(sid) {
@@ -4893,7 +5096,10 @@ async function startPostVideoRun(sid) {
   const accountIds = postVideoSelectedAccountIds(sid);
   if (!accountIds.length) { await customAlert('Chưa tích chọn tài khoản nào (hoặc tất cả đều thiếu Cookie/đã đạt rate limit).', { danger: true }); return; }
   const minDelay = Math.max(0, parseFloat(document.getElementById('postvideo-min-delay-' + sid).value) || 0);
-  const maxDelay = Math.max(minDelay, parseFloat(document.getElementById('postvideo-max-delay-' + sid).value) || minDelay);
+  // Che do "Cố định" (yeu cau nguoi dung 2026-09-11): bo qua o "max", dung DUNG 1 moc gia tri
+  // (o "min") cho MOI lan nghi giua 2 video cung tai khoan - khong random nua.
+  const delayFixed = document.getElementById('postvideo-delay-fixed-' + sid).checked;
+  const maxDelay = delayFixed ? minDelay : Math.max(minDelay, parseFloat(document.getElementById('postvideo-max-delay-' + sid).value) || minDelay);
   // "Số lượng muốn đăng" = muc tieu CHO MOI TAI KHOAN (xem yeu cau nguoi dung 2026-09-10) -
   // KHONG PHAI tong so video ca phien. Vi du chon 2 tai khoan + nhap 1 -> MOI tai khoan
   // dang 1 video (tong toi da 2), khong phai 1 video roi dung ngay.
@@ -4901,33 +5107,52 @@ async function startPostVideoRun(sid) {
   // KHONG dat tran cung theo 1 con so gia dinh - gioi han that su phu thuoc bang thong/RAM
   // cua may nay, nguoi dung tu tang dan va quan sat log loi de tim muc phu hop (xem tooltip
   // o input). Chi chan cac gia tri vo ly (<=0 hoac qua lon do go nham).
+  // Khong con "bucket tinh" - so luong worker THAT SU spawn (khong bao gio nhieu hon so tai
+  // khoan, thua worker la vo ich vi ca N worker deu doc CHUNG 1 pool - xem postVideoPoolWorker()).
   const numThreads = Math.max(1, Math.min(1000, parseInt(document.getElementById('postvideo-threads-' + sid).value, 10) || 1));
+  const effectiveThreads = Math.max(1, Math.min(numThreads, accountIds.length));
 
-  const buckets = partitionAccountsForWorkers(accountIds, numThreads);
+  // Giu (claim) cac tai khoan da tich chon truoc khi chay - yeu cau nguoi dung 2026-09-11:
+  // "chỉ những profile nào được chọn đăng thì mới giữ lại làm dashboard real-time còn những
+  // tài khoản nào không được chọn hãy ẩn đi và trả lại pool". Thu gon bang chi con dung cac
+  // tai khoan dang chay (bo het cac dong KHONG duoc tich chon) de tro thanh 1 dashboard
+  // real-time gon gang, dong thoi khoa cac dong nap/loc de tranh thao tac gay nham lan trong
+  // luc dang chay.
+  postVideoClaimAccounts(sid, accountIds);
+  const accountIdSet = new Set(accountIds);
+  session.accounts = (session.accounts || []).filter(a => accountIdSet.has(a.id));
+  renderPostVideoAccountsTable(sid);
+  document.getElementById('postvideo-load-accounts-btn-' + sid).disabled = true;
+  document.getElementById('postvideo-filter-group-' + sid).disabled = true;
+  document.getElementById('postvideo-filter-live-' + sid).disabled = true;
 
   session.running = true;
   session.stopRequested = false;
   document.getElementById('postvideo-start-btn-' + sid).disabled = true;
   document.getElementById('postvideo-stop-btn-' + sid).disabled = false;
   renderPostVideoTabStrip();
-  postVideoLog(sid, `Bắt đầu đăng - nguồn "${s.folder}" (${s.market.toUpperCase()}), ${accountIds.length} tài khoản chia ${buckets.length} luồng song song, MỖI tài khoản đăng tối đa ${perAccountTarget} video.`);
+  postVideoLog(sid, `Bắt đầu đăng - nguồn "${s.folder}" (${s.market.toUpperCase()}), ${accountIds.length} tài khoản dùng chung pool ${effectiveThreads} luồng song song (luồng rảnh tự chọn tài khoản sẵn sàng bất kỳ, không cố định), MỖI tài khoản đăng tối đa ${perAccountTarget} video, nghỉ ${delayFixed ? 'cố định ' + minDelay + 's' : minDelay + '-' + maxDelay + 's'} giữa 2 video cùng tài khoản.`);
 
-  // postedByAccount: dem so lan da THU dang (thanh cong lan that bai deu tinh) CUA TUNG tai
-  // khoan - CHIA SE giua cac worker de biet tai khoan nao da du muc tieu, nhung MOI id CHI
-  // thuoc 1 bucket/worker duy nhat (xem partitionAccountsForWorkers()) nen khong worker nao
-  // ghi de len ket qua cua worker khac.
-  const postedByAccount = new Map(accountIds.map(id => [id, 0]));
+  // accountState: 1 dong ho rieng (done/nextAt/active) CHO TUNG tai khoan, DUNG CHUNG giua tat
+  // ca cac worker cua pool (xem postVideoPoolWorker()/postVideoClaimReadyAccount()) - day la
+  // diem khac biet cot loi so voi mo hinh bucket cu: KHONG con "1 tai khoan chi thuoc 1 luong".
+  const accountState = new Map(accountIds.map(id => [id, { done: 0, nextAt: 0, active: false }]));
   const stats = { posted: 0, ok: 0, fail: 0 };
   try {
-    await Promise.all(buckets.map(bucket =>
-      postVideoWorkerLoop(sid, s.id, bucket, perAccountTarget, minDelay, maxDelay, postedByAccount, stats, session)
+    await Promise.all(Array.from({ length: effectiveThreads }, () =>
+      postVideoPoolWorker(sid, s.id, accountIds, accountState, perAccountTarget, minDelay, maxDelay, stats, session)
     ));
   } finally {
     session.running = false;
     document.getElementById('postvideo-start-btn-' + sid).disabled = false;
     document.getElementById('postvideo-stop-btn-' + sid).disabled = true;
     renderPostVideoTabStrip();
-    postVideoLog(sid, `Đã dừng. Tổng kết phiên: ${stats.posted} video (${stats.ok} thành công, ${stats.fail} lỗi) trên ${accountIds.length} tài khoản, ${buckets.length} luồng.`);
+    // Tra lai (release) cac tai khoan vua giu ve pool - phien khac gio nap lai duoc.
+    postVideoReleaseAccounts(sid);
+    document.getElementById('postvideo-load-accounts-btn-' + sid).disabled = false;
+    document.getElementById('postvideo-filter-group-' + sid).disabled = false;
+    document.getElementById('postvideo-filter-live-' + sid).disabled = false;
+    postVideoLog(sid, `Đã dừng. Tổng kết phiên: ${stats.posted} video (${stats.ok} thành công, ${stats.fail} lỗi) trên ${accountIds.length} tài khoản, ${effectiveThreads} luồng.`);
     loadPostVideoSources();
   }
 }

@@ -290,6 +290,22 @@ create table if not exists video_post_log (
 );
 """
 
+# "Giu cho" (claim) 1 video PENDING TRUOC KHI thuc su dang (xem try_claim_video()) - THAY THE
+# _IN_FLIGHT_SP_IDS (dict trong bo nho 1 process) tu 2026-09-11 khi trien khai NHIEU PROCESS
+# video (khong con 1 process duy nhat de dung chung 1 bien Python nua - moi process co bo nho
+# RIENG, phai chuyen "khoa tam thoi" nay xuong DB moi dung dan xuyen process). Row TON TAI =
+# dang co 1 request GIU video nay (chua kip ghi video_post_log) - xoa ngay sau khi dang xong
+# (thanh cong hay that bai, xem release_video_claim()). claimed_at dung de don rac claim "mo
+# côi" (process giu no bi crash/kill truoc khi kip release, xem try_claim_video()).
+CREATE_VIDEO_CLAIMS_TABLE_SQL = """
+create table if not exists video_claims (
+    folder text not null,
+    sp_id text not null,
+    claimed_at timestamp not null default current_timestamp,
+    primary key (folder, sp_id)
+);
+"""
+
 # Danh sach "nguon video" nguoi dung dang ky qua tab "Quan ly nguon video" (UI) - moi dong la
 # 1 thu muc chua video + file *_results.xlsx (xem gsheet_video_scanner.build_matched_pool()).
 # Thong ke (total/success/error/pending_count) duoc CACHE o day thay vi tinh lai moi lan hien
@@ -477,6 +493,7 @@ def init_db(db_path=DB_PATH_DEFAULT):
     conn.execute(
         "create index if not exists idx_video_post_log_lookup on video_post_log(market, sp_id, success)"
     )
+    conn.execute(CREATE_VIDEO_CLAIMS_TABLE_SQL)
     # Cot 'account_id' (them sau, 2026-09-10): tham chieu mail_accounts.id cua tai khoan THAT
     # SU dung de dang video nay - chi duoc dien khi dang qua tab "Đăng video" (xem
     # /api/video_sources/<id>/post_next trong affiliate_scrape_server.py); dong log tao boi
@@ -611,6 +628,16 @@ def _connect(db_path=DB_PATH_DEFAULT):
     thua o MOI request (xem giai thich chi tiet trong init_db()). Script doc lap (khong
     qua server) van nen tu goi init_db() truoc neu DB co the chua ton tai."""
     return sqlite3.connect(db_path)
+
+
+def open_connection(db_path=DB_PATH_DEFAULT):
+    """Wrapper CONG KHAI cua _connect() - dung khi 1 caller ben ngoai module (vd route trong
+    affiliate_scrape_server.py) can TU MO 1 connection de GOP nhieu lenh ghi (vd
+    log_video_post() + increment_video_source_stats()) vao CHUNG 1 giao dich/1 lan khoa-ghi,
+    thay vi de tung ham tu mo connection rieng cho cung 1 don vi cong viec logic. Caller chiu
+    trach nhiem BEGIN IMMEDIATE (neu can nguyen tu tuyet doi)/commit()/close() - truyen conn=
+    nay vao cac ham ho tro tham so conn de chung KHONG tu commit/dong som."""
+    return _connect(db_path)
 
 
 # --- Nguong loc dieu chinh duoc qua UI (thay hang so tinh select_l1_l2_candidates.py) ---
@@ -1040,8 +1067,69 @@ def already_posted(db_path, sp_id, market, folder):
         conn.close()
 
 
+# --- "Giu cho" (claim) tam thoi 1 video truoc khi thuc su dang - xem CREATE_VIDEO_CLAIMS_TABLE_SQL.
+# Chuyen tu bien Python trong bo nho (_IN_FLIGHT_SP_IDS, 1 process) sang bang DB nay tu
+# 2026-09-11 khi trien khai NHIEU PROCESS video song song (yeu cau nguoi dung "triển khai
+# multi-process ... tối ưu nhất" - moi process co bo nho RIENG, KHONG con dung chung 1 dict
+# Python duoc nua, nen "khoa tam thoi chon video" bat buoc phai o tang DB moi dam bao dung
+# xuyen process, giong het nguyen tac vua ap dung cho pending_count o increment_video_source_stats()). ---
+
+def try_claim_video(db_path, folder, sp_id, stale_after_seconds=300):
+    """Thu 'giu cho' 1 (folder, sp_id) - INSERT vao video_claims, that bai (False) neu DA co
+    process/thread KHAC dang giu (vi pham UNIQUE PRIMARY KEY). BEGIN IMMEDIATE dam bao toan bo
+    kiem tra-don rac-chen deu nam trong 1 giao dich NGUYEN TU (khong the 2 process cung luc
+    cung thay claim cu la "stale" roi cung tuong minh chen thanh cong - SQLite serialize ghi
+    qua khoa file, xem _connect()).
+
+    stale_after_seconds: 1 claim "mo côi" (process giu no bi kill/crash TRUOC KHI kip
+    release_video_claim() trong finally - vd mat dien, OOM-kill) se ket vinh vien neu khong co
+    co che don rac - qua thoi gian nay (mac dinh 5 phut, luon DAI HON nhieu so voi 1 lan dang
+    video thuc te ~30-90s) coi nhu mo côi, tu xoa roi thu chen lai (nguoi khac co the claim
+    duoc). Tra ve True/False."""
+    conn = _connect(db_path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute(
+            "select claimed_at from video_claims where folder=? and sp_id=?",
+            (str(folder), str(sp_id)),
+        ).fetchone()
+        if existing is not None:
+            conn.execute(
+                "delete from video_claims where folder=? and sp_id=? "
+                "and claimed_at < datetime('now', ?)",
+                (str(folder), str(sp_id), f"-{int(stale_after_seconds)} seconds"),
+            )
+        try:
+            conn.execute(
+                "insert into video_claims (folder, sp_id) values (?, ?)",
+                (str(folder), str(sp_id)),
+            )
+        except sqlite3.IntegrityError:
+            conn.commit()  # xa BEGIN IMMEDIATE (khong doi gi neu chua don rac o tren)
+            return False
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def release_video_claim(db_path, folder, sp_id):
+    """Tra lai (bo giu) 1 video - goi trong finally NGAY SAU khi da dang xong (thanh cong hay
+    that bai deu phai goi, xem video_sources_post_next())."""
+    conn = _connect(db_path)
+    try:
+        conn.execute(
+            "delete from video_claims where folder=? and sp_id=?",
+            (str(folder), str(sp_id)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def log_video_post(db_path, sp_id, market, folder, product_name=None, merge_links=None,
-                    success=False, post_id=None, vid=None, error=None, account_id=None):
+                    success=False, post_id=None, vid=None, error=None, account_id=None,
+                    conn=None):
     """Ghi/ghi de 1 dong ket qua dang video (on conflict tren unique(market, sp_id,
     folder) - xem CREATE_VIDEO_POST_LOG_TABLE_SQL). Goi 1 lan/video NGAY SAU khi
     post_video_to_shopee() tra ve (ca thanh cong lan that bai) - KHONG doi den cuoi batch,
@@ -1050,8 +1138,15 @@ def log_video_post(db_path, sp_id, market, folder, product_name=None, merge_link
 
     account_id: id trong mail_accounts cua tai khoan THAT SU dung de dang (None neu khong
     biet - vd goi tu post_videos_cli.py, dung 1 cookie chung khong gan voi 1 dong cu the).
-    Xem count_account_success_today()."""
-    conn = _connect(db_path)
+    Xem count_account_success_today().
+
+    conn: truyen 1 connection SQLite DANG MO (vd de gop chung 1 giao dich voi
+    increment_video_source_stats() trong cung 1 request /api/video_sources/<id>/post_next -
+    xem video_sources_post_next()) - khi do ham nay CHI execute(), KHONG tu commit/dong conn
+    (caller tu quan ly vong doi giao dich). Mac dinh (conn=None, tat ca caller khac hien tai
+    nhu post_videos_cli.py) van giu nguyen hanh vi cu: tu mo/commit/dong 1 connection RIENG."""
+    owns_conn = conn is None
+    conn = conn or _connect(db_path)
     try:
         conn.execute(
             "insert into video_post_log "
@@ -1064,9 +1159,11 @@ def log_video_post(db_path, sp_id, market, folder, product_name=None, merge_link
             (str(sp_id), market, str(folder), product_name, merge_links,
              int(bool(success)), post_id, vid, error, account_id),
         )
-        conn.commit()
+        if owns_conn:
+            conn.commit()
     finally:
-        conn.close()
+        if owns_conn:
+            conn.close()
 
 
 def count_account_success_today(db_path, account_id):
@@ -1244,6 +1341,54 @@ def update_video_source_stats(db_path, source_id, total_count=None, success_coun
     finally:
         conn.close()
     return get_video_source(db_path, source_id)
+
+
+def increment_video_source_stats(db_path, source_id, success_delta=0, error_delta=0,
+                                  pending_delta=0, conn=None):
+    """Cong don (KHONG ghi de) vao success_count/error_count/pending_count bang 1 cau SQL
+    ATOMIC dang 'x = x + ?' (khong doc gia tri cu ra Python roi tinh lai roi ghi de tuyet doi)
+    - dung cho video_sources_post_next() thay cho update_video_source_stats(), vi ham do ghi
+    de GIA TRI TUYET DOI tu 1 'row' snapshot lay o DAU request, trong khi 1 lan dang video mat
+    30-90s: neu 2 luong (threads) cung dang xu ly gan nhu dong thoi (2 phien/tai khoan khac
+    nhau tren CUNG 1 nguon), luong xong SAU se doc snapshot CU (chua thay luong truoc da tru)
+    roi ghi de dung GIA TRI NO tu tinh - XOA MAT phan giam cua luong truoc (da xac nhan qua bao
+    loi nguoi dung 2026-09-11: 2 video dang thanh cong nhung Pending chi giam 1, ca 2 dong log
+    deu bao "còn 2714 pending" giong het nhau). SQL 'x = x + ?' khong co khoang ho nay - phep
+    cong thuc hien NGAY TRONG database engine (SQLite serialize ghi tung cau lenh), khong qua
+    buoc doc-tinh-ghi rieng o tang ung dung nua. pending_count khong bao gio am (max 0 qua
+    SQL). Tra ve row moi sau khi cap nhat, hoac None neu source khong ton tai.
+
+    conn: truyen 1 connection SQLite DANG MO (vd de gop chung 1 giao dich voi log_video_post()
+    trong cung 1 request post_next() - xem video_sources_post_next(), tranh 2 lan khoa-ghi
+    rieng cho CUNG 1 don vi cong viec logic "video nay xong, ghi ket qua + cap nhat thong ke")
+    - khi do ham nay CHI execute()/select() lai bang chinh conn nay, KHONG tu commit/dong
+    (caller tu quan ly vong doi giao dich). Mac dinh (conn=None) tu mo/BEGIN IMMEDIATE/commit/
+    dong 1 connection RIENG nhu truoc."""
+    owns_conn = conn is None
+    conn = conn or _connect(db_path)
+    try:
+        if owns_conn:
+            conn.execute("BEGIN IMMEDIATE")
+        cur = conn.execute(
+            "update video_sources set "
+            "success_count = success_count + ?, "
+            "error_count = error_count + ?, "
+            "pending_count = max(0, pending_count + ?) "
+            "where id=?",
+            (success_delta, error_delta, pending_delta, source_id),
+        )
+        if cur.rowcount == 0:
+            if owns_conn:
+                conn.commit()
+            return None
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("select * from video_sources where id=?", (source_id,)).fetchone()
+        if owns_conn:
+            conn.commit()
+        return dict(row) if row else None
+    finally:
+        if owns_conn:
+            conn.close()
 
 
 # --- Hang doi (queue) phang pending/done/fail - xem C:\Users\Administrator\.claude\

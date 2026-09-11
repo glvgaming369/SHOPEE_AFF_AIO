@@ -14,6 +14,8 @@ Chay:
     python scripts/affiliate_scrape_server.py --port 8877 --db-path artifacts/db/shopee.db
 """
 import argparse
+import atexit
+import ctypes
 import io
 import json
 import os
@@ -47,6 +49,10 @@ import antidetect as _ad  # adapter chung GPM/GemLogin - xem scripts/antidetect.
 app = Flask(__name__)
 gsheet_push_api.register(app)  # tab "Push Sheet" - xem scripts/gsheet_push_api.py
 DB_PATH = shopee_db.DB_PATH_DEFAULT  # ghi de qua --db-path luc khoi dong, xem main()
+VIDEO_PORT = None  # gan trong main() - port RIENG cho traffic dang video, xem index() + main()
+VIDEO_PORTS = []  # gan trong main() (nhanh process cha) - TOAN BO port cua cac video-worker
+# process con (>= 1 phan tu, xem --video-workers trong main()) - dashboard round-robin qua day
+# de rai deu request post_next() len NHIEU process (nhieu loi CPU that su), xem index().
 LAUNCH_URL_DEFAULT = "https://affiliate.shopee.ph/offer/product_offer"
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 USERSCRIPTS_DIR = os.path.join(SCRIPTS_DIR, "userscripts")
@@ -114,7 +120,13 @@ def _userscript_version(filename):
 
 @app.route("/", methods=["GET"])
 def index():
-    return render_template("index.html")
+    # video_ports duoc nhung thang vao trang qua window.__VIDEO_API_PORTS__ (xem template) - JS
+    # postVideoPoolWorker round-robin qua danh sach nay de goi post_next() sang NHIEU PORT
+    # (moi port = 1 process rieng, xem main()) thay vi cung origin voi trang: (1) tranh video
+    # traffic (toi da ~50 request dong thoi) chiem het hang doi ~6 ket noi HTTP/1.1/domain cua
+    # Chrome khien cac tab khac (vd Quan ly account) "giả treo", (2) tan dung NHIEU LOI CPU
+    # that su (moi process video co GIL rieng, khong con bi 1 process/1 loi gioi han thong luong).
+    return render_template("index.html", video_ports=VIDEO_PORTS)
 
 
 @app.route("/api/userscripts", methods=["GET"])
@@ -1267,38 +1279,29 @@ def video_sources_reset_db():
 
 _MATCHED_POOL_CACHE = {}  # folder(str) -> (xlsx_mtime, pool_list) - xem _get_matched_pool_cached()
 
-# Video dang duoc 1 request post_next() KHAC xu ly (chua kip ghi video_post_log) - server
-# chay threaded=True (nhieu request cung luc THAT SU song song, xem app.run() trong main()),
-# nen 2 PHIEN DANG KHAC NHAU (vd nguoi dung mo 2 phien tren cung 1 nguon, hoac 2 tab trinh
-# duyet) co the cung goi post_next() gan nhu cung luc - neu khong danh dau, ca 2 se doc thay
-# CUNG 1 sp_id "chua duoc dang" (video_post_log chua kip co dong nao) roi CUNG dang trung no.
-# Chi giu KHOA trong luc CHON video (cuc nhanh) - KHONG giu khoa trong luc goi Shopee that (30-
-# 90s), de nhieu phien VAN chay that su song song, chi khong bao gio trung sp_id. Reset ve
-# rong khi server restart - chap nhan duoc (khong con request nao dang "giu" video luc do).
-_IN_FLIGHT_LOCK = threading.Lock()
-_IN_FLIGHT_SP_IDS = {}  # folder(str) -> set(sp_id dang duoc 1 request nao do xu ly)
+# Video dang duoc 1 request post_next() KHAC xu ly (chua kip ghi video_post_log) - can danh
+# dau de 2 request (vd 2 phien, hoac 2 process/worker khac nhau - xem "video-worker" trong
+# main()) khong cung doc thay CUNG 1 sp_id "chua duoc dang" (video_post_log chua kip co dong
+# nao) roi CUNG dang trung no. Claim nam trong DB (video_claims, xem shopee_db.try_claim_video()/
+# release_video_claim()) - KHONG con la bien Python trong bo nho (_IN_FLIGHT_SP_IDS cu) tu khi
+# trien khai NHIEU PROCESS video song song (2026-09-11, yeu cau nguoi dung "triển khai multi-
+# process ... tối ưu nhất" de dung nhieu loi CPU that su - moi process co bo nho RIENG, 1 dict
+# Python trong process nay KHONG the ngan process KHAC claim trung sp_id nua). Chi giu claim
+# trong luc CHON video (cuc nhanh) - KHONG giu trong luc goi Shopee that (30-90s).
 
 
 def _claim_next_pending(matched, market, folder):
-    """Chon + 'giu cho' (claim) video PENDING dau tien CHUA co request nao khac dang xu ly.
-    Tra ve ProductRow hoac None (het video / video con lai deu dang bi giu boi request khac -
-    RAT HIEM, chi xay ra neu nhieu phien chay dong thoi tren 1 nguon nho). Nho goi
-    _release_claim(folder, sp_id) trong finally sau khi dang xong (thanh cong hay that bai)."""
-    with _IN_FLIGHT_LOCK:
-        in_flight = _IN_FLIGHT_SP_IDS.setdefault(folder, set())
-        for r in matched:
-            if r.sp_id in in_flight:
-                continue
-            if shopee_db.already_posted(DB_PATH, r.sp_id, market, folder):
-                continue
-            in_flight.add(r.sp_id)
+    """Chon + 'giu cho' (claim, qua DB - xem shopee_db.try_claim_video()) video PENDING dau
+    tien CHUA co request/process nao khac dang xu ly. Tra ve ProductRow hoac None (het video /
+    video con lai deu dang bi giu boi noi khac - RAT HIEM, chi xay ra neu nhieu phien/process
+    chay dong thoi tren 1 nguon nho). Nho goi shopee_db.release_video_claim() trong finally sau
+    khi dang xong (thanh cong hay that bai)."""
+    for r in matched:
+        if shopee_db.already_posted(DB_PATH, r.sp_id, market, folder):
+            continue
+        if shopee_db.try_claim_video(DB_PATH, folder, r.sp_id):
             return r
     return None
-
-
-def _release_claim(folder, sp_id):
-    with _IN_FLIGHT_LOCK:
-        _IN_FLIGHT_SP_IDS.get(folder, set()).discard(sp_id)
 
 
 def _get_matched_pool_cached(folder):
@@ -1366,14 +1369,34 @@ def _video_share_link(market, post_id):
     return f"https://{market_cfg['sv']}/share-video/{post_id}"
 
 
+_VIDEO_POST_NEXT_RE = re.compile(r"^/api/video_sources/\d+/post_next$")
+
+
+@app.after_request
+def _cors_video_post_next(resp):
+    """CORS CHI danh rieng cho route post_next() (video) - xem index()/main(): dashboard
+    (port CHINH, vd 8877) goi fetch() CHEO PORT sang video port (vd 8878) de traffic dang
+    video (toi da ~50 request dong thoi tu postVideoPoolWorker) KHONG dung chung hang doi
+    ~6 ket noi HTTP/1.1/domain cua Chrome voi cac tab khac (nguyen nhan bao cao "dashboard
+    treo" khi dang chay nhieu luong). 2 port khac nhau tren CUNG host van la 2 origin khac
+    nhau theo trinh duyet -> can header CORS thi request nay moi qua duoc. CHI bat cho DUNG
+    route nay (regex match path) - KHONG bat toan cuc, cac API con lai giu nguyen hanh vi
+    cung-origin nhu truoc (server van chi bind 127.0.0.1, khong tang bien mat bao mat)."""
+    if _VIDEO_POST_NEXT_RE.match(request.path):
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    return resp
+
+
 @app.route("/api/video_sources/<int:source_id>/post_next", methods=["POST"])
 def video_sources_post_next(source_id):
     """Dang DUNG 1 video ke tiep (video PENDING dau tien theo thu tu trong xlsx CHUA co request
     nao khac dang xu ly - xem _claim_next_pending()) cua 1 nguon, dung tai khoan DAU TIEN trong
     'account_ids' (theo thu tu client gui - client tu xoay vong mang nay giua cac lan goi de
     phan tai deu qua nhieu tai khoan) con du dieu kien: co Cookie VA (chua dat rate_limit_video
-    HOM NAY, hoac khong gioi han). An toan khi NHIEU PHIEN goi dong thoi (ke ca cung 1 nguon -
-    xem _IN_FLIGHT_SP_IDS), moi phien (tab/nhom tai khoan/thi truong khac nhau) chay doc lap,
+    HOM NAY, hoac khong gioi han). An toan khi NHIEU PHIEN/PROCESS goi dong thoi (ke ca cung 1
+    nguon - xem shopee_db.try_claim_video()), moi phien (tab/nhom tai khoan/thi truong khac nhau) chay doc lap,
     khong can dung phien nay de chay phien khac. Tra ve 1 trong 4 dang:
     - {done: true}: nguon nay het video pending, khong con gi de dang.
     - {done: false, retry: true}: video pending con lai DANG bi phien KHAC xu ly (hiem, chi
@@ -1407,9 +1430,10 @@ def video_sources_post_next(source_id):
             "message": "Video pending còn lại đang được phiên khác xử lý - thử lại ngay.",
         })
 
-    # TU DAY tro di GIU claim tren target_row.sp_id (da danh dau boi _claim_next_pending()) -
-    # BAT BUOC release trong finally o MOI nhanh return, khong thi sp_id nay "ket" - khong
-    # phien nao khac co the dang no nua (kem den khi server restart, xem _IN_FLIGHT_SP_IDS).
+    # TU DAY tro di GIU claim tren target_row.sp_id (da danh dau boi _claim_next_pending(), luu
+    # trong bang video_claims) - BAT BUOC release trong finally o MOI nhanh return, khong thi
+    # sp_id nay "ket" toi khi qua stale_after_seconds (mac dinh 5 phut, xem
+    # shopee_db.try_claim_video()) moi tu don rac duoc.
     try:
         chosen_account = None
         for raw_id in account_ids:
@@ -1452,23 +1476,41 @@ def video_sources_post_next(source_id):
             merge_links=target_row.merge_links, signing=signing, market=market, proxy=proxy,
             device_override=device_override,
         )
-        shopee_db.log_video_post(
-            DB_PATH, sp_id=target_row.sp_id, market=market, folder=folder,
-            product_name=target_row.product_name, merge_links=target_row.merge_links,
-            success=result.success, post_id=result.post_id, vid=result.vid, error=result.error,
-            account_id=chosen_account["id"],
-        )
-        # Cap nhat TANG DAN cache thong ke (video_sources.success/error/pending_count) thay vi
-        # quet lai TOAN BO matched pool + N lan goi already_posted() (O(n) SQL query/lan goi -
-        # qua ton phi neu nguon co vai nghin video va client goi lien tuc post_next()). 1 video
-        # LUON roi khoi "pending" sau lan dang nay (thanh cong -> success, that bai -> error) -
-        # day la so DUNG chinh xac (khong phai uoc luong).
-        updated_source = shopee_db.update_video_source_stats(
-            DB_PATH, source_id,
-            success_count=(row.get("success_count") or 0) + (1 if result.success else 0),
-            error_count=(row.get("error_count") or 0) + (0 if result.success else 1),
-            pending_count=max(0, (row.get("pending_count") or 0) - 1),
-        )
+        # log_video_post() + increment_video_source_stats() la 1 DON VI CONG VIEC LOGIC ("video
+        # nay xong, ghi ket qua + cap nhat thong ke tong") - gop chung 1 connection/1 giao dich
+        # (BEGIN IMMEDIATE) thay vi de moi ham tu mo/khoa-ghi rieng (yeu cau nguoi dung
+        # 2026-09-11 "phân tích và đề xuất hướng giải quyết những điểm nghẽn" - giam mot nua so
+        # lan khoa-ghi file DB cho hot path nay khi hang chuc worker client goi post_next() dong
+        # thoi, giup cac route khac (vd GET /api/mail_accounts/list) cho ngan hon). conn dong
+        # trong finally rieng - loi o 1 trong 2 buoc ghi se rollback ca giao dich (khong con
+        # truong hop 1 buoc ghi thanh cong con buoc kia bi bo lo ngam).
+        #
+        # PHAI dung increment_video_source_stats() (delta, ATOMIC qua SQL) o day, KHONG PHAI
+        # update_video_source_stats() (ghi de gia tri tuyet doi tinh tu 'row' - bien nay la
+        # snapshot lay o DAU request, TRUOC khi goi Shopee that (30-90s) - 2 luong dong thoi
+        # tren cung nguon se GHI DE mat ket qua cua nhau, gay bug Pending giam sai so, xac nhan
+        # qua bao loi nguoi dung 2026-09-11: 2 video dang thanh cong nhung Pending chi giam 1).
+        db_conn = shopee_db.open_connection(DB_PATH)
+        try:
+            db_conn.execute("BEGIN IMMEDIATE")
+            shopee_db.log_video_post(
+                DB_PATH, sp_id=target_row.sp_id, market=market, folder=folder,
+                product_name=target_row.product_name, merge_links=target_row.merge_links,
+                success=result.success, post_id=result.post_id, vid=result.vid, error=result.error,
+                account_id=chosen_account["id"], conn=db_conn,
+            )
+            # 1 video LUON roi khoi "pending" sau lan dang nay (thanh cong -> success, that bai
+            # -> error) - day la so DUNG chinh xac (khong phai uoc luong).
+            updated_source = shopee_db.increment_video_source_stats(
+                DB_PATH, source_id,
+                success_delta=(1 if result.success else 0),
+                error_delta=(0 if result.success else 1),
+                pending_delta=-1,
+                conn=db_conn,
+            )
+            db_conn.commit()
+        finally:
+            db_conn.close()
         pending_remaining = updated_source["pending_count"]
         return jsonify({
             "ok": True, "done": False, "sp_id": target_row.sp_id, "success": result.success,
@@ -1478,7 +1520,7 @@ def video_sources_post_next(source_id):
             "pending_remaining": pending_remaining,
         })
     finally:
-        _release_claim(folder, target_row.sp_id)
+        shopee_db.release_video_claim(DB_PATH, folder, target_row.sp_id)
 
 
 def _enrich_video_post_log(logs):
@@ -3658,6 +3700,87 @@ def gpm_browser_open():
     return jsonify({"ok": True, "url": url, "engine": engine, "port": port, "message": f"Da mo {url}"})
 
 
+def _create_kill_on_close_job():
+    """Tao 1 Windows Job Object voi co JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE - MOI process duoc
+    gan vao job nay (xem _assign_process_to_job()) se TU DONG bi CHINH HE DIEU HANH ket thuc
+    ngay khi process GIU HANDLE cua job (chinh tien trinh cha nay) thoat, BAT KE thoat kieu gi:
+    Ctrl+C binh thuong, `taskkill /F` (force kill), Task Manager "End Task", hay crash bat
+    ngo - khac han atexit/try-finally (CHI chay duoc khi process thoat "binh thuong", hoan toan
+    KHONG chay khi bi kill cung, da xac nhan qua kiem thu thuc te 2026-09-11: taskkill /F
+    process cha de lai 3 video-worker process con van tiep tuc giu port, phai tu tay kill tung
+    cai). Day la co che CHUAN cua Windows (thuc thi o tang KERNEL, khong phu thuoc code Python
+    con chay duoc hay khong) de tranh "process con mo côi". Tra ve HANDLE (int, KHONG duoc dong
+    som - phai giu song song voi vong doi process cha, Windows tu dong dong no + kich hoat kill-
+    on-close khi process nay ket thuc) neu thanh cong, None neu that bai (khong phai Windows /
+    loi API - caller tu fallback, van chay duoc binh thuong, chi mat luoi an toan khi bi kill cung)."""
+    if os.name != "nt":
+        return None
+    try:
+        kernel32 = ctypes.windll.kernel32
+        job = kernel32.CreateJobObjectW(None, None)
+        if not job:
+            return None
+
+        class _JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_int64),
+                ("PerJobUserTimeLimit", ctypes.c_int64),
+                ("LimitFlags", ctypes.c_uint32),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", ctypes.c_uint32),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", ctypes.c_uint32),
+                ("SchedulingClass", ctypes.c_uint32),
+            ]
+
+        class _IO_COUNTERS(ctypes.Structure):
+            _fields_ = [
+                ("ReadOperationCount", ctypes.c_uint64), ("WriteOperationCount", ctypes.c_uint64),
+                ("OtherOperationCount", ctypes.c_uint64), ("ReadTransferCount", ctypes.c_uint64),
+                ("WriteTransferCount", ctypes.c_uint64), ("OtherTransferCount", ctypes.c_uint64),
+            ]
+
+        class _JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", _JOBOBJECT_BASIC_LIMIT_INFORMATION),
+                ("IoInfo", _IO_COUNTERS),
+                ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+        JobObjectExtendedLimitInformation = 9
+        info = _JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        ok = kernel32.SetInformationJobObject(
+            job, JobObjectExtendedLimitInformation, ctypes.byref(info), ctypes.sizeof(info)
+        )
+        if not ok:
+            kernel32.CloseHandle(job)
+            return None
+        return job
+    except Exception:
+        return None
+
+
+def _assign_process_to_job(job, pid):
+    """Gan 1 process (theo pid) vao job da tao boi _create_kill_on_close_job() - im lang bo
+    qua neu that bai (vd job=None do khong phai Windows, hoac process da tu thoat truoc khi
+    kip gan) de KHONG lam hong luong khoi dong chinh, chi mat luoi an toan cho DUNG process do."""
+    if job is None:
+        return
+    try:
+        kernel32 = ctypes.windll.kernel32
+        PROCESS_ALL_ACCESS = 0x1F0FFF
+        hproc = kernel32.OpenProcess(PROCESS_ALL_ACCESS, False, pid)
+        if hproc:
+            kernel32.AssignProcessToJobObject(job, hproc)
+            kernel32.CloseHandle(hproc)
+    except Exception:
+        pass
+
+
 def _ensure_port_free(host, port):
     """Bind THAT (roi dong ngay) truoc khi giao cho Werkzeug - phat hien SOM va bao loi RO
     RANG neu port da co server khac dang chay, thay vi de Werkzeug tu bind. Ly do: da xac
@@ -3689,15 +3812,65 @@ def _ensure_port_free(host, port):
 
 
 def main():
-    global DB_PATH
+    global DB_PATH, VIDEO_PORT, VIDEO_PORTS
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8877)
+    ap.add_argument(
+        "--video-port", type=int, default=None,
+        help=(
+            "Port DAU TIEN cho traffic dang video (postVideoPoolWorker goi post_next() sang "
+            "day thay vi cung origin voi dashboard) - mac dinh --port + 1 neu khong truyen. "
+            "Cac video-worker process con lai dung cac port LIEN TIEP tu day (xem --video-workers)."
+        ),
+    )
+    ap.add_argument(
+        "--video-workers", type=int, default=None,
+        help=(
+            "So PROCESS RIENG (khong phai thread) phuc vu traffic dang video, moi process 1 "
+            "port lien tiep tu --video-port - dung DE THAT SU tan dung nhieu loi CPU: GIL cua "
+            "Python khien nhieu THREAD trong CUNG 1 process KHONG chay song song duoc phan "
+            "CPU-bound (chi phan cho I/O that su moi thuc su chay song song trong 1 process) - "
+            "chi PROCESS RIENG moi co GIL rieng, he dieu hanh moi xep duoc len loi CPU khac "
+            "nhau THAT SU. Mac dinh min(4, so loi CPU logic cua may nay)."
+        ),
+    )
     ap.add_argument("--db-path", default=shopee_db.DB_PATH_DEFAULT)
+    ap.add_argument(
+        "--serve-only-port", type=int, default=None, help=argparse.SUPPRESS,
+        # NOI BO - KHONG phai co cho nguoi dung tu truyen tay: main() tu goi lai CHINH SCRIPT
+        # NAY (sys.executable, __file__) voi co nay de tao 1 "video-worker" PROCESS CON dich
+        # thuc (xem nhanh spawn ben duoi) - process con chi phuc vu DUY NHAT 1 port nay,
+        # KHONG spawn them process/thread nao khac (tranh de quy vo han goi lai chinh no).
+    )
     args = ap.parse_args()
     DB_PATH = args.db_path
+    shopee_db.init_db(DB_PATH)  # dam bao bang/cot ton tai truoc khi nhan request dau tien - luon
+    # chay o CA process cha lan con, nhung process cha luon chay TRUOC (spawn con SAU khi ham
+    # nay tra ve) nen migration/tao bang chi thuc su xay ra 1 lan, process con goi lai chi la
+    # cac PRAGMA/CREATE-IF-NOT-EXISTS khong lam gi them (an toan, khong rac giao dich).
+
+    if args.serve_only_port is not None:
+        # Nhanh "video-worker" CON - xem giai thich o --serve-only-port o tren.
+        VIDEO_PORT = args.serve_only_port
+        _ensure_port_free("127.0.0.1", args.serve_only_port)
+        print(f"[affiliate_scrape_server] video-worker process (PID {os.getpid()}): http://127.0.0.1:{args.serve_only_port}")
+        app.run(host="127.0.0.1", port=args.serve_only_port, debug=False, threaded=True)
+        return
+
+    VIDEO_PORT = args.video_port if args.video_port is not None else args.port + 1
+    video_workers = args.video_workers if args.video_workers is not None else min(4, os.cpu_count() or 4)
+    video_workers = max(1, video_workers)
+    video_ports = [VIDEO_PORT + i for i in range(video_workers)]
+    VIDEO_PORTS = video_ports
+
     _ensure_port_free("127.0.0.1", args.port)
-    shopee_db.init_db(DB_PATH)  # dam bao bang/cot ton tai truoc khi nhan request dau tien
-    print(f"[affiliate_scrape_server] DB: {DB_PATH} | http://127.0.0.1:{args.port}")
+    for p in video_ports:
+        _ensure_port_free("127.0.0.1", p)
+
+    print(
+        f"[affiliate_scrape_server] DB: {DB_PATH} | chinh: http://127.0.0.1:{args.port} "
+        f"| video ({video_workers} process): {', '.join('http://127.0.0.1:' + str(p) for p in video_ports)}"
+    )
     # threaded=True QUAN TRONG: mac dinh Werkzeug dev server xu ly TUAN TU tung request 1
     # (single-threaded) - voi so luong tab Tampermonkey (worker) chay song song + dashboard
     # tu poll 4 API moi 5s, request nao cung phai xep hang cho request truoc xong. Nguoi
@@ -3706,7 +3879,53 @@ def main():
     # thread vi tang du lieu (shopee_db.py) da thiet ke san cho ghi song song: moi ham tu mo
     # 1 connection SQLite RIENG (_connect(), khong dung chung giua cac request/thread) + WAL
     # mode + BEGIN IMMEDIATE cho cac giao dich ghi quan trong (xem init_db()/try_assign_verified()).
-    app.run(host="127.0.0.1", port=args.port, debug=False, threaded=True)
+    #
+    # NHIEU PROCESS (khong phai thread) cho video - yeu cau nguoi dung 2026-09-11 "triển khai
+    # multi-process ... tối ưu nhất" sau khi xac nhan van con bi GIL gioi han 1 loi CPU du da
+    # tach port. Moi child o day la 1 tien trinh Python HOAN TOAN doc lap (KHONG chia se bo nho
+    # voi nhau/voi cha, ke ca _MATCHED_POOL_CACHE - moi process tu cache rieng, ton chut bo nho
+    # du khong anh huong dung), CHI chia se DUY NHAT qua file DB chung. Vi vay claim video
+    # TRUOC KHI dang (xem _claim_next_pending()) BAT BUOC phai chuyen tu bien Python trong bo
+    # nho (cach cu, chi dung dan trong 1 process) sang bang DB video_claims (xem
+    # shopee_db.try_claim_video()/release_video_claim()) - neu khong 2 process khac nhau co the
+    # cung claim/dang trung 1 video.
+    # Windows Job Object voi kill-on-close (xem _create_kill_on_close_job()) - luoi an toan de
+    # video-worker process con KHONG bi mo côi (giu port mai) neu process cha nay bi ket thuc
+    # BAT NGO/CUNG (taskkill /F, Task Manager, crash) thay vi thoat binh thuong qua Ctrl+C - da
+    # xac nhan qua kiem thu thuc te la 1 van de THAT (atexit/try-finally KHONG du, chi chay
+    # duoc khi thoat "binh thuong"). None neu khong phai Windows - _assign_process_to_job() se
+    # im lang bo qua, chap nhan mat luoi an toan nay tren nen tang khac.
+    _kill_on_close_job = _create_kill_on_close_job()
+
+    child_procs = []
+    for p in video_ports:
+        proc = subprocess.Popen(
+            [sys.executable, os.path.abspath(__file__), "--serve-only-port", str(p), "--db-path", DB_PATH],
+        )
+        child_procs.append(proc)
+        _assign_process_to_job(_kill_on_close_job, proc.pid)
+
+    def _terminate_children():
+        for proc in child_procs:
+            if proc.poll() is None:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+        for proc in child_procs:
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
+    atexit.register(_terminate_children)  # luoi an toan neu app.run() thoat qua nhanh khac Ctrl+C binh thuong
+    try:
+        app.run(host="127.0.0.1", port=args.port, debug=False, threaded=True)
+    finally:
+        _terminate_children()
 
 
 if __name__ == "__main__":
