@@ -3936,6 +3936,17 @@ def _ensure_port_free(host, port):
 
 def main():
     global DB_PATH, VIDEO_PORT, VIDEO_PORTS, MAIN_PORT, _KILL_ON_CLOSE_JOB
+    # Ep stdout/stderr sang UTF-8 (2026-09-12, bug thuc te: chay .bat qua SSH/plink khong ke
+    # thua duoc `chcp 65001` cua .bat nhu khi mo truc tiep tren may - console fallback ve
+    # codepage mac dinh (vd cp1252), khien BAT KY print() nao co ky tu tieng Viet (rat nhieu
+    # trong file nay, vd dong log "video (N process, ...)" o duoi) crash ngay voi
+    # UnicodeEncodeError, server KHONG khoi dong duoc. reconfigure() co tu Python 3.7+.
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            try:
+                _stream.reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8877)
     ap.add_argument(

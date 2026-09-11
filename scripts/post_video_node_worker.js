@@ -30,7 +30,10 @@ if (!configPath) {
   console.error('Thieu duong dan file config (argv[2])');
   process.exit(1);
 }
-const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+// Bo BOM (U+FEFF) neu file config duoc ghi boi PowerShell 'Set-Content -Encoding utf8' (mac
+// dinh Windows PowerShell 5.1 ghi kem BOM dau file) - JSON.parse() khong tu bo qua duoc ky tu
+// nay, se bao loi "Unexpected token" ngay dong dau.
+const config = JSON.parse(fs.readFileSync(configPath, 'utf8').replace(/^﻿/, ''));
 const {
   mainOrigin, videoPorts, sourceId, accountIds, threads,
   perAccountTarget, minDelay, maxDelay, statusFilePath, stopFilePath,

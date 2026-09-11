@@ -558,7 +558,7 @@ def _tls_session(proxy: str | None = None):
 def _post_signed(
     signing: SigningConfig, url: str, body: dict, cookie_str: str, csrf_token: str,
     market_cfg: dict, proxy: str | None = None, device: dict = DEFAULT_DEVICE,
-    device_id: str = "", client_request_id: str = "",
+    device_id: str = "", client_request_id: str = "", session=None,
 ):
     """POST tới sv.shopee.co.th với header đã ký - dùng chung cho precheck và create. Tự
     retry (xem _POST_ANTI_BOT_MAX_ATTEMPTS) nếu bị anti-bot chặn (HTTP 418 / code 90309999)
@@ -566,9 +566,14 @@ def _post_signed(
     vẫn bị chặn ở lần 2), không phải "chặn lần 1, chắc qua lần 2" như quan sát ban đầu từ
     tool gốc. Dùng _tls_session() (KHÔNG phải requests) - xem docstring hàm đó. Ký LẠI TỪ
     ĐẦU mỗi lần thử (không dùng lại header cũ) - header ký có thể gắn theo thời điểm/nonce,
-    dùng lại header stale nhiều khả năng vẫn bị chặn."""
+    dùng lại header stale nhiều khả năng vẫn bị chặn.
+
+    session: truyền vào 1 tls_client.Session đã tạo sẵn để TÁI DÙNG (tối ưu CPU - gộp TLS
+    handshake giữa nhiều lần gọi cùng host/proxy trong 1 lần đăng video, xem
+    post_video_to_shopee()); None (mặc định) thì tự tạo mới như cũ để không phá vỡ call site
+    khác."""
     body_str = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
-    session = _tls_session(proxy)
+    session = session if session is not None else _tls_session(proxy)
     for attempt in range(_POST_ANTI_BOT_MAX_ATTEMPTS):
         signed_headers = sign_request(signing, url, body_str, proxy)
         headers = {
@@ -588,7 +593,7 @@ def _post_signed(
 def shopee_precheck(
     signing: SigningConfig, cookie_str: str, csrf_token: str, creator_id: str,
     market_cfg: dict, video_meta: dict, proxy: str | None = None, device: dict = DEFAULT_DEVICE,
-    device_id: str = "", client_request_id: str = "",
+    device_id: str = "", client_request_id: str = "", session=None,
 ) -> str:
     """Bước 4. Trả về 'extra_context' cần cho create_post(). video.url/video_id/cover để
     rỗng - đúng payload thật đã capture (Shopee chưa cần biết file thật ở bước precheck).
@@ -600,7 +605,10 @@ def shopee_precheck(
     '{"code":400003,"msg":"Post too many videos, please have a rest"}' bất kể đổi tài khoản/
     video/IP proxy - KHÔNG phải rate-limit thật, code gốc (biến SERVER1_APP_VERSION/
     FALLBACK_APP_VERSION) coi 400003 là tín hiệu "thử lại với app_version khác" chứ không
-    phải quota (quota thật là code 400002, tool gốc check riêng)."""
+    phải quota (quota thật là code 400002, tool gốc check riêng).
+
+    session: truyền xuống _post_signed() để tái dùng TLS session (tối ưu CPU, xem docstring
+    _post_signed())."""
     url = f"https://{market_cfg['sv']}/api/v2/biz/post/precheck"
     body = {
         "content": {
@@ -625,7 +633,7 @@ def shopee_precheck(
             "app_version": device["client_version"], "device_model": _app_info_device_model(device),
         },
     }
-    resp = _post_signed(signing, url, body, cookie_str, csrf_token, market_cfg, proxy, device, device_id, client_request_id)
+    resp = _post_signed(signing, url, body, cookie_str, csrf_token, market_cfg, proxy, device, device_id, client_request_id, session)
     if resp.status_code != 200:
         raise RuntimeError(f"Precheck thất bại (status={resp.status_code}): {resp.text[:300]!r}")
     data = resp.json()
@@ -679,6 +687,7 @@ def shopee_create_post(
     market_cfg: dict, video_meta: dict, vid: str, caption: str,
     products: list[dict], extra_context: str, fsize: int = 0, proxy: str | None = None,
     device: dict = DEFAULT_DEVICE, device_id: str = "", client_request_id: str = "",
+    session=None,
 ) -> str:
     """Bước 6. Trả về post_id nếu thành công, raise RuntimeError nếu vẫn thất bại sau khi thử
     cả 2 biến thể 'shopee_app_version'.
@@ -688,7 +697,10 @@ def shopee_create_post(
     `{"code":400003,"msg":"Post too many videos, please have a rest"}` thì thử NGAY (không
     delay) biến thể 'fallback' - device['client_version'] VÀ cookie's shopee_app_version cùng
     đổi sang _FALLBACK_APP_VERSION. 400003 ở đây là tín hiệu "app_version bị từ chối", KHÔNG
-    PHẢI rate-limit thật (xem module docstring)."""
+    PHẢI rate-limit thật (xem module docstring).
+
+    session: truyền xuống _post_signed() cho CẢ 2 biến thể trong vòng lặp bên dưới - tái
+    dùng CHUNG 1 TLS session (tối ưu CPU, xem docstring _post_signed())."""
     url = (
         f"https://{market_cfg['sv']}/api/v2/biz/post/create"
         f"?os_type=2&system_version={device['os_version']}&sdk_version=1.61.2"
@@ -702,7 +714,7 @@ def shopee_create_post(
     last_status = 0
     for label, variant_device, variant_cookie in variants:
         body = _create_post_body(creator_id, market_cfg, video_meta, vid, caption, products, extra_context, fsize, variant_device)
-        resp = _post_signed(signing, url, body, variant_cookie, csrf_token, market_cfg, proxy, variant_device, device_id, client_request_id)
+        resp = _post_signed(signing, url, body, variant_cookie, csrf_token, market_cfg, proxy, variant_device, device_id, client_request_id, session)
         data = resp.json() if _get_header(resp.headers, "Content-Type", "").startswith("application/json") else {}
         if resp.status_code == 200 and data.get("code") == 0:
             post_id = (data.get("data") or {}).get("post_id")
@@ -786,11 +798,16 @@ def post_video_to_shopee(
         time.sleep(_AFTER_REPORT_WAIT_SECONDS)
 
         products = build_products_field(merge_links)
-        extra_context = shopee_precheck(signing, cookie_str, csrf_token, creator_id, market_cfg, video_meta, proxy, device, device_id, client_request_id)
+        # Tái dùng CHUNG 1 TLS session cho precheck + create (2-3 lần gọi _post_signed() ở
+        # trên, cùng proxy/host market_cfg['sv']) - tối ưu CPU (gộp TLS handshake, xem
+        # docstring _post_signed()), KHÔNG đổi behavior nghiệp vụ nào.
+        session = _tls_session(proxy)
+        extra_context = shopee_precheck(signing, cookie_str, csrf_token, creator_id, market_cfg, video_meta, proxy, device, device_id, client_request_id, session)
         post_id = shopee_create_post(
             signing, cookie_str, csrf_token, creator_id, market_cfg, video_meta,
             vid, caption, products, extra_context, fsize=fsize, proxy=proxy,
             device=device, device_id=device_id, client_request_id=client_request_id,
+            session=session,
         )
         return PostResult(success=True, post_id=post_id, vid=vid, raw_responses=raw)
     except Exception as exc:  # noqa: BLE001 - lỗi 1 video phải trả về trong PostResult, không được crash cả batch (post_videos_from_folder cần chạy tiếp các video còn lại)
