@@ -298,7 +298,10 @@ def file_md5(path: str) -> str:
     return h.hexdigest()
 
 
-def sign_request(signing: SigningConfig, target_url: str, body_str: str, proxy: str | None = None) -> dict[str, str]:
+def sign_request(
+    signing: SigningConfig, target_url: str, body_str: str, proxy: str | None = None,
+    requests_session=None,
+) -> dict[str, str]:
     """Gọi server ký chống anti-bot (server2Url/api/sign) - trả object header để merge
     trực tiếp vào request thật gửi Shopee. KHÔNG có logic tự tính ở local - xem docstring
     module. body_str PHẢI là chuỗi JSON đã stringify (không phải dict) - đúng như request
@@ -320,9 +323,16 @@ def sign_request(signing: SigningConfig, target_url: str, body_str: str, proxy: 
     ky (server2_url) ra ngoai UI, vi thong bao loi mac dinh cua requests/urllib3 nhung the nay
     LUON nhung nguyen host/port vao (vd "HTTPSConnectionPool(host='...', port=443)..."). Van
     raise tu (`from exc`) de giu nguyen traceback goc phia server cho debug, chi phan HIEN THI
-    (str(exc) -> PostResult.error) la bi thay the."""
+    (str(exc) -> PostResult.error) la bi thay the.
+
+    requests_session: 'requests.Session()' tao san o post_video_to_shopee() de TAI DUNG ket
+    noi/tranh tao SSL context moi moi lan goi (toi uu CPU, xem yeu cau nguoi dung 2026-09-12
+    "triển khai" sau khi do cProfile xac nhan load_verify_locations/do_handshake chiem CPU
+    dang ke khi nhieu video chay dong thoi) - None (mac dinh) fallback ve module-level
+    requests.post() nhu cu de khong pha vo call site khac."""
+    caller = requests_session if requests_session is not None else requests
     try:
-        resp = requests.post(
+        resp = caller.post(
             signing.server2_url,
             json={"url": target_url, "body": body_str},
             headers={"Content-Type": "application/json", "X-API-Key": signing.server2_api_key},
@@ -339,12 +349,14 @@ def sign_request(signing: SigningConfig, target_url: str, body_str: str, proxy: 
     return headers
 
 
-def get_upload_token(signing: SigningConfig, proxy: str | None = None) -> str:
+def get_upload_token(signing: SigningConfig, proxy: str | None = None, requests_session=None) -> str:
     """Token dạng Qiniu ('key:sign:policy_base64') dùng ngay cho upload_video_wscloud().
     Body rỗng '{}' - chỉ cần đúng X-API-Key (đã xác nhận bằng capture thật).
 
-    proxy: xem docstring sign_request() - cùng server ký, cùng rate-limit theo IP nguồn."""
-    resp = requests.post(
+    proxy: xem docstring sign_request() - cùng server ký, cùng rate-limit theo IP nguồn.
+    requests_session: xem docstring sign_request()."""
+    caller = requests_session if requests_session is not None else requests
+    resp = caller.post(
         signing.token_url,
         json={},
         headers={"Content-Type": "application/json", "X-API-Key": signing.token_api_key},
@@ -416,6 +428,7 @@ def vod_preupload(
     cookie_str: str, csrf_token: str, user_id: str, market_cfg: dict,
     fsize: int, md5: str, device: dict = DEFAULT_DEVICE,
     device_id: str = "", client_request_id: str = "", proxy: str | None = None,
+    requests_session=None,
 ) -> dict:
     """Bước 1. Trả về dict từ field 'data' của response ({'vid': ..., 'services': [...]}).
 
@@ -425,7 +438,10 @@ def vod_preupload(
     của MỌI tài khoản đều dồn vào 1 IP, có thể tự nó đã là 1 nguồn nghẽn/rate-limit ẩn phía
     Shopee (xem yêu cầu người dùng 2026-09-12 "test thử giới hạn server ký" + timeout 120s khi
     chạy nhiều luồng). None = không dùng proxy (giữ nguyên hành vi cũ, dùng IP máy chủ) - dùng
-    khi tài khoản chưa gán proxy riêng."""
+    khi tài khoản chưa gán proxy riêng.
+
+    requests_session: xem docstring sign_request()."""
+    caller = requests_session if requests_session is not None else requests
     headers = {
         **_base_headers(cookie_str, csrf_token, market_cfg, device, device_id, client_request_id),
         "Content-Type": "application/json",
@@ -444,7 +460,7 @@ def vod_preupload(
         # thật, nhưng field vẫn bắt buộc phải có mặt trong payload (đã xác nhận qua capture).
         "cover_fingerprint_info": {"fsize": 0, "md5": "00000000000000000000000000000000"},
     }
-    resp = requests.post(
+    resp = caller.post(
         f"https://{market_cfg['api_mms']}/uploadapi/api/v1/vod/preupload",
         json=body, headers=headers,
         proxies={"http": proxy, "https": proxy} if proxy else None,
@@ -457,14 +473,19 @@ def vod_preupload(
     return data
 
 
-def upload_video_wscloud(market_cfg: dict, upload_token: str, vid: str, video_path: str, proxy: str | None = None) -> None:
+def upload_video_wscloud(
+    market_cfg: dict, upload_token: str, vid: str, video_path: str,
+    proxy: str | None = None, requests_session=None,
+) -> None:
     """Bước 2 - upload file thật lên WSCloud. Không dùng lại token cũ - luôn gọi
     get_upload_token() ngay trước bước này (xem docstring module).
 
     proxy: xem docstring vod_preupload() - đây là bước NẶNG BĂNG THÔNG NHẤT (upload nguyên
-    file video), dùng proxy tài khoản giúp không dồn tải upload của MỌI tài khoản vào 1 IP."""
+    file video), dùng proxy tài khoản giúp không dồn tải upload của MỌI tài khoản vào 1 IP.
+    requests_session: xem docstring sign_request()."""
+    caller = requests_session if requests_session is not None else requests
     with open(video_path, "rb") as f:
-        resp = requests.post(
+        resp = caller.post(
             f"https://{market_cfg['wscloud']}/file/upload",
             files={"file": (f"{vid}.mp4", f, "video/mp4")},
             data={"token": upload_token, "key": f"{vid}.mp4"},
@@ -479,12 +500,14 @@ def report_upload_wscloud(
     cookie_str: str, csrf_token: str, market_cfg: dict, market_key: str,
     vid: str, fsize: int, video_meta: dict, device: dict = DEFAULT_DEVICE,
     device_id: str = "", client_request_id: str = "", proxy: str | None = None,
+    requests_session=None,
 ) -> dict:
     """Bước 3. cover_md5 dùng giá trị random (giống hành vi tool gốc ở nhánh WSCloud PH -
     không phải MD5 thật của cover, chỉ là placeholder Shopee chấp nhận nhờ
     skip_cover_check=true ở các bước sau).
 
-    proxy: xem docstring vod_preupload()."""
+    proxy: xem docstring vod_preupload(). requests_session: xem docstring sign_request()."""
+    caller = requests_session if requests_session is not None else requests
     headers = {
         **_base_headers(cookie_str, csrf_token, market_cfg, device, device_id, client_request_id),
         "Content-Type": "application/json",
@@ -503,7 +526,7 @@ def report_upload_wscloud(
             "fps": 0, "mediatype": 1,
         },
     }
-    resp = requests.post(
+    resp = caller.post(
         f"https://{market_cfg['api_mms']}/uploadapi/api/v1/vod/reportupload",
         json=body, headers=headers,
         proxies={"http": proxy, "https": proxy} if proxy else None,
@@ -568,7 +591,7 @@ def _tls_session(proxy: str | None = None):
 def _post_signed(
     signing: SigningConfig, url: str, body: dict, cookie_str: str, csrf_token: str,
     market_cfg: dict, proxy: str | None = None, device: dict = DEFAULT_DEVICE,
-    device_id: str = "", client_request_id: str = "", session=None,
+    device_id: str = "", client_request_id: str = "", session=None, requests_session=None,
 ):
     """POST tới sv.shopee.co.th với header đã ký - dùng chung cho precheck và create. Tự
     retry (xem _POST_ANTI_BOT_MAX_ATTEMPTS) nếu bị anti-bot chặn (HTTP 418 / code 90309999)
@@ -581,11 +604,16 @@ def _post_signed(
     session: truyền vào 1 tls_client.Session đã tạo sẵn để TÁI DÙNG (tối ưu CPU - gộp TLS
     handshake giữa nhiều lần gọi cùng host/proxy trong 1 lần đăng video, xem
     post_video_to_shopee()); None (mặc định) thì tự tạo mới như cũ để không phá vỡ call site
-    khác."""
+    khác.
+
+    requests_session: truyền xuống sign_request() (dùng thư viện `requests` thường, KHÁC hẳn
+    `session` ở trên là tls_client.Session) - xem docstring sign_request(). Vòng lặp retry bên
+    dưới có thể gọi sign_request() TỚI 4 LẦN, cùng CHUNG 1 host (server2_url) mỗi lần - đây là
+    chỗ tái dùng session có lợi nhất trong toàn bộ chuỗi 6 bước."""
     body_str = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
     session = session if session is not None else _tls_session(proxy)
     for attempt in range(_POST_ANTI_BOT_MAX_ATTEMPTS):
-        signed_headers = sign_request(signing, url, body_str, proxy)
+        signed_headers = sign_request(signing, url, body_str, proxy, requests_session)
         headers = {
             **_base_headers(cookie_str, csrf_token, market_cfg, device, device_id, client_request_id),
             **signed_headers,
@@ -603,7 +631,7 @@ def _post_signed(
 def shopee_precheck(
     signing: SigningConfig, cookie_str: str, csrf_token: str, creator_id: str,
     market_cfg: dict, video_meta: dict, proxy: str | None = None, device: dict = DEFAULT_DEVICE,
-    device_id: str = "", client_request_id: str = "", session=None,
+    device_id: str = "", client_request_id: str = "", session=None, requests_session=None,
 ) -> str:
     """Bước 4. Trả về 'extra_context' cần cho create_post(). video.url/video_id/cover để
     rỗng - đúng payload thật đã capture (Shopee chưa cần biết file thật ở bước precheck).
@@ -618,6 +646,7 @@ def shopee_precheck(
     phải quota (quota thật là code 400002, tool gốc check riêng).
 
     session: truyền xuống _post_signed() để tái dùng TLS session (tối ưu CPU, xem docstring
+    _post_signed()). requests_session: tương tự, cho sign_request() (xem docstring
     _post_signed())."""
     url = f"https://{market_cfg['sv']}/api/v2/biz/post/precheck"
     body = {
@@ -643,7 +672,7 @@ def shopee_precheck(
             "app_version": device["client_version"], "device_model": _app_info_device_model(device),
         },
     }
-    resp = _post_signed(signing, url, body, cookie_str, csrf_token, market_cfg, proxy, device, device_id, client_request_id, session)
+    resp = _post_signed(signing, url, body, cookie_str, csrf_token, market_cfg, proxy, device, device_id, client_request_id, session, requests_session)
     if resp.status_code != 200:
         raise RuntimeError(f"Precheck thất bại (status={resp.status_code}): {resp.text[:300]!r}")
     data = resp.json()
@@ -706,7 +735,7 @@ def shopee_create_post(
     market_cfg: dict, video_meta: dict, vid: str, caption: str,
     products: list[dict], extra_context: str, fsize: int = 0, proxy: str | None = None,
     device: dict = DEFAULT_DEVICE, device_id: str = "", client_request_id: str = "",
-    session=None, is_ai_generated: bool = False,
+    session=None, is_ai_generated: bool = False, requests_session=None,
 ) -> str:
     """Bước 6. Trả về post_id nếu thành công, raise RuntimeError nếu vẫn thất bại sau khi thử
     cả 2 biến thể 'shopee_app_version'.
@@ -719,7 +748,8 @@ def shopee_create_post(
     PHẢI rate-limit thật (xem module docstring).
 
     session: truyền xuống _post_signed() cho CẢ 2 biến thể trong vòng lặp bên dưới - tái
-    dùng CHUNG 1 TLS session (tối ưu CPU, xem docstring _post_signed())."""
+    dùng CHUNG 1 TLS session (tối ưu CPU, xem docstring _post_signed()). requests_session:
+    tương tự, cho sign_request() (xem docstring _post_signed())."""
     url = (
         f"https://{market_cfg['sv']}/api/v2/biz/post/create"
         f"?os_type=2&system_version={device['os_version']}&sdk_version=1.61.2"
@@ -733,7 +763,7 @@ def shopee_create_post(
     last_status = 0
     for label, variant_device, variant_cookie in variants:
         body = _create_post_body(creator_id, market_cfg, video_meta, vid, caption, products, extra_context, fsize, variant_device, is_ai_generated)
-        resp = _post_signed(signing, url, body, variant_cookie, csrf_token, market_cfg, proxy, variant_device, device_id, client_request_id, session)
+        resp = _post_signed(signing, url, body, variant_cookie, csrf_token, market_cfg, proxy, variant_device, device_id, client_request_id, session, requests_session)
         data = resp.json() if _get_header(resp.headers, "Content-Type", "").startswith("application/json") else {}
         if resp.status_code == 200 and data.get("code") == 0:
             post_id = (data.get("data") or {}).get("post_id")
@@ -809,29 +839,38 @@ def post_video_to_shopee(
         md5 = file_md5(video_path)
         video_meta = get_video_metadata(video_path)
 
-        preupload_data = vod_preupload(cookie_str, csrf_token, creator_id, market_cfg, fsize, md5, device, device_id, client_request_id, proxy)
-        vid = preupload_data["vid"]
-        raw["preupload"] = preupload_data
+        # 1 requests.Session() DUY NHAT dung chung cho ca 5 buoc goi qua `requests` thuong ben
+        # duoi (preupload/upload_token/upload/report/sign_request ben trong precheck+create) -
+        # toi uu CPU (tranh tao SSL context + bat tay TLS moi lan goi, xem yeu cau nguoi dung
+        # 2026-09-12 "triển khai" sau khi do cProfile xac nhan load_verify_locations/
+        # do_handshake chiem CPU dang ke khi nhieu video chay dong thoi). Dung `with` de DAM
+        # BAO dong session (giai phong ket noi) du thanh cong hay loi - khac han
+        # tls_client.Session o duoi (session/_tls_session()) la 1 thu vien RIENG, khong lien
+        # quan gi (tls_client CHI dung cho 2 buoc can gia fingerprint la precheck/create).
+        with requests.Session() as requests_session:
+            preupload_data = vod_preupload(cookie_str, csrf_token, creator_id, market_cfg, fsize, md5, device, device_id, client_request_id, proxy, requests_session)
+            vid = preupload_data["vid"]
+            raw["preupload"] = preupload_data
 
-        upload_token = get_upload_token(signing, proxy)
-        upload_video_wscloud(market_cfg, upload_token, vid, video_path, proxy)
+            upload_token = get_upload_token(signing, proxy, requests_session)
+            upload_video_wscloud(market_cfg, upload_token, vid, video_path, proxy, requests_session)
 
-        report_data = report_upload_wscloud(cookie_str, csrf_token, market_cfg, market, vid, fsize, video_meta, device, device_id, client_request_id, proxy)
-        raw["report"] = report_data
-        time.sleep(_AFTER_REPORT_WAIT_SECONDS)
+            report_data = report_upload_wscloud(cookie_str, csrf_token, market_cfg, market, vid, fsize, video_meta, device, device_id, client_request_id, proxy, requests_session)
+            raw["report"] = report_data
+            time.sleep(_AFTER_REPORT_WAIT_SECONDS)
 
-        products = build_products_field(merge_links)
-        # Tái dùng CHUNG 1 TLS session cho precheck + create (2-3 lần gọi _post_signed() ở
-        # trên, cùng proxy/host market_cfg['sv']) - tối ưu CPU (gộp TLS handshake, xem
-        # docstring _post_signed()), KHÔNG đổi behavior nghiệp vụ nào.
-        session = _tls_session(proxy)
-        extra_context = shopee_precheck(signing, cookie_str, csrf_token, creator_id, market_cfg, video_meta, proxy, device, device_id, client_request_id, session)
-        post_id = shopee_create_post(
-            signing, cookie_str, csrf_token, creator_id, market_cfg, video_meta,
-            vid, caption, products, extra_context, fsize=fsize, proxy=proxy,
-            device=device, device_id=device_id, client_request_id=client_request_id,
-            session=session, is_ai_generated=is_ai_generated,
-        )
+            products = build_products_field(merge_links)
+            # Tái dùng CHUNG 1 TLS session cho precheck + create (2-3 lần gọi _post_signed() ở
+            # trên, cùng proxy/host market_cfg['sv']) - tối ưu CPU (gộp TLS handshake, xem
+            # docstring _post_signed()), KHÔNG đổi behavior nghiệp vụ nào.
+            session = _tls_session(proxy)
+            extra_context = shopee_precheck(signing, cookie_str, csrf_token, creator_id, market_cfg, video_meta, proxy, device, device_id, client_request_id, session, requests_session)
+            post_id = shopee_create_post(
+                signing, cookie_str, csrf_token, creator_id, market_cfg, video_meta,
+                vid, caption, products, extra_context, fsize=fsize, proxy=proxy,
+                device=device, device_id=device_id, client_request_id=client_request_id,
+                session=session, is_ai_generated=is_ai_generated, requests_session=requests_session,
+            )
         return PostResult(success=True, post_id=post_id, vid=vid, raw_responses=raw)
     except Exception as exc:  # noqa: BLE001 - lỗi 1 video phải trả về trong PostResult, không được crash cả batch (post_videos_from_folder cần chạy tiếp các video còn lại)
         return PostResult(success=False, error=str(exc), raw_responses=raw)
