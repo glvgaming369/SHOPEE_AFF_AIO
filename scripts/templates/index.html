@@ -4611,11 +4611,12 @@ function postVideoSessionCardHtml(sid) {
       <div class="muted" id="postvideo-capacity-info-${sid}" style="margin-bottom:10px;"></div>
       <div class="table-wrap" style="max-height:480px;overflow-y:auto;"><table>
         <thead><tr>
-          <th style="width:36px;"><input type="checkbox" id="postvideo-sel-all-${sid}" onclick="postVideoToggleAll(${sid}, this)" title="Chọn/bỏ chọn tất cả tài khoản đang nạp"></th>
+          <th style="width:36px;"><input type="checkbox" id="postvideo-sel-all-${sid}" onclick="postVideoToggleAll(${sid}, this)" title="Chọn/bỏ chọn tất cả tài khoản của TRANG ĐANG HIỆN"></th>
           <th>Tài khoản</th><th>Cookie</th><th>Proxy</th><th style="text-align:center;">Rate limit/ngày</th><th style="text-align:center;">Đã đăng hôm nay</th><th style="min-width:200px;">Trạng thái phiên</th>
         </tr></thead>
         <tbody id="postvideo-accounts-tbody-${sid}"><tr><td colspan="7" class="muted">Chưa nạp tài khoản - chọn nguồn rồi bấm "Nạp tài khoản theo lọc".</td></tr></tbody>
       </table></div>
+      <div id="postvideo-pager-${sid}" class="mailacc-pager"></div>
       <pre id="postvideo-log-${sid}" class="console-log" style="max-height:150px;"></pre>
     </div>`;
 }
@@ -4662,10 +4663,15 @@ function switchPostVideoSession(sid) {
 
 function addPostVideoSession() {
   const sid = postVideoNextSessionId++;
-  postVideoSessions.set(sid, { id: sid, accounts: [], running: false, stopRequested: false, label: '' });
+  // selected (Set id) + page: xem khoi "Phan trang + Quet chon (keo chuot)" o gan
+  // renderPostVideoAccountsTable() - port nguyen mo hinh tu tab "Quản lý account Shopee"
+  // (mailAccSelected/mailAccCurrentPage), yeu cau nguoi dung 2026-09-11: ap dung phan trang +
+  // keo chuot chon profile tu tab mailacc sang danh sach tai khoan nap o tab "Đăng video".
+  postVideoSessions.set(sid, { id: sid, accounts: [], selected: new Set(), page: 1, statusById: new Map(), running: false, stopRequested: false, label: '' });
   document.getElementById('postvideo-sessions-container').insertAdjacentHTML('beforeend', postVideoSessionCardHtml(sid));
   populatePostVideoSourceSelect(sid);
   loadMailAccountGroupsInto('postvideo-filter-group-' + sid);
+  postVideoWireDragSelect(sid);
   switchPostVideoSession(sid); // tab MOI tu dong thanh tab active, giong Chrome mo new tab
   return sid;
 }
@@ -4810,9 +4816,14 @@ function onPostVideoSourceChange(sid) {
     : '';
   document.getElementById('postvideo-market-label-' + sid).textContent = s ? `Market: ${s.market.toUpperCase()}` : '(chọn nguồn trước)';
   document.getElementById('postvideo-accounts-tbody-' + sid).innerHTML = '<tr><td colspan="7" class="muted">Chưa nạp tài khoản - bấm "Nạp tài khoản theo lọc".</td></tr>';
+  const pagerEl = document.getElementById('postvideo-pager-' + sid);
+  if (pagerEl) pagerEl.innerHTML = '';
   const session = postVideoSessions.get(sid);
   if (session) {
     session.accounts = [];
+    session.selected = new Set();
+    session.page = 1;
+    session.statusById = new Map();
     // Nhan tab cap nhat theo nguon da chon, giong browser doi tieu de tab theo trang dang mo.
     session.label = s ? `#${sid} · ${s.folder}` : '';
     renderPostVideoTabStrip();
@@ -4851,7 +4862,14 @@ async function loadPostVideoAccounts(sid) {
     // cua mailAccCookieStatusBadge() qua mailAccCookieIsLive() (khong chi "co cookie" ma con
     // phai khong bi 'dead').
     const accounts = onlyLive ? allAccounts.filter(a => mailAccCookieIsLive(a)) : allAccounts;
-    if (session) session.accounts = accounts;
+    if (session) {
+      session.accounts = accounts;
+      // Mac dinh tich chon san MOI tai khoan CON DUNG DUOC (giu nguyen hanh vi cu truoc khi co
+      // phan trang - trươc day moi checkbox khong bi disable deu tu tich san).
+      session.selected = new Set(accounts.filter(a => !postVideoAccountDisabled(a)).map(a => a.id));
+      session.page = 1;
+      session.statusById = new Map(); // danh sach vua nap lai - bo trang thai "Đã đăng hôm nay" cu
+    }
     renderPostVideoAccountsTable(sid);
     const liveCount = allAccounts.filter(a => mailAccCookieIsLive(a)).length;
     infoEl.textContent = onlyLive
@@ -4862,34 +4880,242 @@ async function loadPostVideoAccounts(sid) {
   }
 }
 
+// Tai khoan bi khoa tich chon vi thieu Cookie LIVE hoac da dat Rate limit hom nay - dung chung
+// giua render dong (postVideoAccountRowHtml) va "chọn tất cả"/drag-select de khong lap logic.
+function postVideoAccountDisabled(a) {
+  const atLimit = a.rate_limit_video != null && (a.posted_today || 0) >= a.rate_limit_video;
+  return !mailAccCookieIsLive(a) || atLimit;
+}
+
+function postVideoAccountRowHtml(sid, a) {
+  const session = postVideoSessions.get(sid);
+  const isLive = mailAccCookieIsLive(a);
+  const hasCookieAtAll = mailAccHasUsableCookie(a);
+  const limit = a.rate_limit_video;
+  const today = a.posted_today || 0;
+  const atLimit = limit != null && today >= limit;
+  const disabled = postVideoAccountDisabled(a);
+  const checked = !disabled && !!(session && session.selected.has(a.id));
+  const cookieCell = isLive
+    ? '<span style="color:var(--success-text);">✓ LIVE</span>'
+    : hasCookieAtAll
+      ? '<span style="color:var(--danger-text);">✗ DIE</span>'
+      : '<span style="color:var(--danger-text);">✗ Thiếu</span>';
+  // Khoi phuc trang thai real-time da ghi nhan truoc do (postVideoSetAccountStatus) - can THIET
+  // vi gio bang chi render 1 TRANG, dong o trang khac co the bi go/dung lai DOM nhieu lan khi
+  // nguoi dung chuyen trang qua lai trong luc dang chay, khong con lai '—' mac dinh nua.
+  const savedStatus = session && session.statusById && session.statusById.get(a.id);
+  const statusClass = savedStatus ? '' : ' class="muted"';
+  const statusStyle = savedStatus && savedStatus.colorVar ? ` style="color:var(${savedStatus.colorVar});"` : '';
+  const statusHtml = savedStatus ? savedStatus.html : '—';
+  return `
+    <tr style="${disabled ? 'opacity:.5;' : ''}">
+      <td class="sel-cell"><input type="checkbox" class="postvideo-acc-sel-${sid}" data-id="${a.id}" onchange="postVideoSelChanged(${sid}, this)" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}></td>
+      <td>${a.profile || a.email || a.shopee_id || ('#' + a.id)}</td>
+      <td>${cookieCell}</td>
+      <td>${(a.proxy || '').trim() ? '✓' : '-'}</td>
+      <td style="text-align:center;">${limit != null ? limit : '∞'}</td>
+      <td style="text-align:center;${atLimit ? 'color:var(--danger-text);font-weight:600;' : ''}">${today}${atLimit ? ' (đủ)' : ''}</td>
+      <td id="postvideo-acc-status-${sid}-${a.id}"${statusClass}${statusStyle}>${statusHtml}</td>
+    </tr>`;
+}
+
+// ---- Phan trang + "quét chọn" (kéo chuột) tren danh sach tai khoan nap - port nguyen mo hinh
+// tu tab "Quản lý account Shopee" (mailAccPageSize/mailAccSelected/mailAccWireDragSelect, xem
+// phia tren) sang day (yeu cau nguoi dung 2026-09-11: "Áp dụng phân trang và tính năng kéo
+// chuột chọn profile từ tab quản lý account shopee => danh sách tài khoản nạp ở tab đăng
+// video"). Khac biet vs mailacc: co NHIEU bang doc lap cung luc (moi PHIEN sid 1 bang rieng,
+// xem postVideoSessions) nen lua chon (selected) + trang (page) luu THEO TUNG session thay vi
+// bien global, chi rieng so dong/trang (pageSize) la 1 tuy chon HIEN THI dung chung moi bang. ----
+const POSTVIDEO_PAGESIZE_STORAGE_KEY = 'postvideo_page_size_v1';
+const POSTVIDEO_PAGE_SIZES = [25, 50, 100, 200, 500];
+function postVideoLoadPageSize() {
+  try {
+    const n = parseInt(localStorage.getItem(POSTVIDEO_PAGESIZE_STORAGE_KEY), 10);
+    return POSTVIDEO_PAGE_SIZES.includes(n) ? n : 50;
+  } catch (e) { return 50; }
+}
+let postVideoPageSize = postVideoLoadPageSize();
+
+function postVideoTotalPages(sid) {
+  const session = postVideoSessions.get(sid);
+  const total = (session && session.accounts && session.accounts.length) || 0;
+  return Math.max(1, Math.ceil(total / postVideoPageSize));
+}
+
+// Cac tai khoan (object) CUA TRANG DANG HIEN trong PHIEN sid - dung cho render + "chọn tất cả"
+// (chi ap dung trang dang hien, giong mailAccPageIds()) + tinh trang thai checkbox header.
+function postVideoPageAccounts(sid) {
+  const session = postVideoSessions.get(sid);
+  const accounts = (session && session.accounts) || [];
+  const page = (session && session.page) || 1;
+  const start = (page - 1) * postVideoPageSize;
+  return accounts.slice(start, start + postVideoPageSize);
+}
+
 function renderPostVideoAccountsTable(sid) {
   const session = postVideoSessions.get(sid);
   const tbody = document.getElementById('postvideo-accounts-tbody-' + sid);
-  const accounts = (session && session.accounts) || [];
-  tbody.innerHTML = accounts.map(a => {
-    const isLive = mailAccCookieIsLive(a);
-    const hasCookieAtAll = mailAccHasUsableCookie(a);
-    const limit = a.rate_limit_video;
-    const today = a.posted_today || 0;
-    const atLimit = limit != null && today >= limit;
-    const disabled = !isLive || atLimit;
-    const cookieCell = isLive
-      ? '<span style="color:var(--success-text);">✓ LIVE</span>'
-      : hasCookieAtAll
-        ? '<span style="color:var(--danger-text);">✗ DIE</span>'
-        : '<span style="color:var(--danger-text);">✗ Thiếu</span>';
-    return `
-      <tr style="${disabled ? 'opacity:.5;' : ''}">
-        <td class="sel-cell"><input type="checkbox" class="postvideo-acc-sel-${sid}" data-id="${a.id}" onchange="updatePostVideoCapacityInfo(${sid})" ${!disabled ? 'checked' : ''} ${disabled ? 'disabled' : ''}></td>
-        <td>${a.profile || a.email || a.shopee_id || ('#' + a.id)}</td>
-        <td>${cookieCell}</td>
-        <td>${(a.proxy || '').trim() ? '✓' : '-'}</td>
-        <td style="text-align:center;">${limit != null ? limit : '∞'}</td>
-        <td style="text-align:center;${atLimit ? 'color:var(--danger-text);font-weight:600;' : ''}">${today}${atLimit ? ' (đủ)' : ''}</td>
-        <td class="muted" id="postvideo-acc-status-${sid}-${a.id}">—</td>
-      </tr>`;
-  }).join('') || '<tr><td colspan="7" class="muted">Không có tài khoản nào khớp bộ lọc.</td></tr>';
+  if (!tbody || !session) return;
+  const accounts = session.accounts || [];
+  if (!accounts.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="muted">Không có tài khoản nào khớp bộ lọc.</td></tr>';
+  } else {
+    const totalPages = postVideoTotalPages(sid);
+    if (!session.page || session.page > totalPages) session.page = totalPages;
+    tbody.innerHTML = postVideoPageAccounts(sid).map(a => postVideoAccountRowHtml(sid, a)).join('');
+  }
+  postVideoRenderPager(sid);
+  refreshPostVideoSelUI(sid);
   updatePostVideoCapacityInfo(sid);
+}
+
+function postVideoRenderPager(sid) {
+  const el = document.getElementById('postvideo-pager-' + sid);
+  const session = postVideoSessions.get(sid);
+  if (!el || !session) return;
+  const total = (session.accounts && session.accounts.length) || 0;
+  const totalPages = postVideoTotalPages(sid);
+  const page = session.page || 1;
+  el.innerHTML = `
+    <button class="secondary" onclick="postVideoGoPage(${sid}, ${page - 1})" ${page <= 1 ? 'disabled' : ''} title="Trang trước">‹</button>
+    <span>Trang ${page} / ${totalPages}</span>
+    <button class="secondary" onclick="postVideoGoPage(${sid}, ${page + 1})" ${page >= totalPages ? 'disabled' : ''} title="Trang sau">›</button>
+    <label style="white-space:nowrap;margin-left:16px;">Số dòng/trang:
+      <select onchange="postVideoChangePageSize(this)">
+        ${POSTVIDEO_PAGE_SIZES.map(n => `<option value="${n}" ${n === postVideoPageSize ? 'selected' : ''}>${n}</option>`).join('')}
+      </select>
+    </label>
+    <span class="muted" style="margin-left:16px;">Tổng số ${total}</span>`;
+}
+
+function postVideoGoPage(sid, p) {
+  const session = postVideoSessions.get(sid);
+  if (!session) return;
+  session.page = Math.max(1, Math.min(postVideoTotalPages(sid), p));
+  renderPostVideoAccountsTable(sid);
+}
+
+// So dong/trang la 1 tuy chon hien thi DUNG CHUNG cho moi bang tai khoan (moi phien) - doi o
+// bang nay se ap dung + ve lai luon TAT CA cac phien dang mo, tuong tu mailAccChangePageSize().
+function postVideoChangePageSize(sel) {
+  postVideoPageSize = parseInt(sel.value, 10) || 50;
+  try { localStorage.setItem(POSTVIDEO_PAGESIZE_STORAGE_KEY, String(postVideoPageSize)); } catch (e) {}
+  for (const session of postVideoSessions.values()) session.page = 1;
+  for (const sid of postVideoSessions.keys()) renderPostVideoAccountsTable(sid);
+}
+
+function postVideoSelChanged(sid, input) {
+  const session = postVideoSessions.get(sid);
+  if (!session) return;
+  const id = parseInt(input.dataset.id, 10);
+  if (input.checked) session.selected.add(id); else session.selected.delete(id);
+  refreshPostVideoSelUI(sid);
+  updatePostVideoCapacityInfo(sid);
+}
+
+// ---- "Quét chọn" (kéo chuột) + Shift+Click chọn theo khoảng - port tu mailAccWireDragSelect()
+// (xem chú thích gốc phía trên). Goi 1 LAN cho MOI phien khi tbody duoc tao (addPostVideoSession())
+// - moi phien co state rieng (lastClickedId/dragSelecting/dragSelectValue) qua closure, tranh
+// dam vao nhau giua nhieu phien dang mo cung luc. ----
+function postVideoWireDragSelect(sid) {
+  const tbody = document.getElementById('postvideo-accounts-tbody-' + sid);
+  if (!tbody) return;
+  const selClass = `postvideo-acc-sel-${sid}`;
+  let lastClickedId = null;
+  let dragSelecting = false;
+  let dragSelectValue = null;
+
+  tbody.addEventListener('click', (e) => {
+    const cb = e.target.closest(`input.${selClass}`);
+    if (!cb || cb.disabled) return;
+    const id = parseInt(cb.dataset.id, 10);
+    if (e.shiftKey && lastClickedId != null && lastClickedId !== id) {
+      e.preventDefault();
+      postVideoApplyRangeSelect(sid, lastClickedId, id, true);
+      postVideoSyncMountedCheckboxes(sid);
+      refreshPostVideoSelUI(sid);
+      updatePostVideoCapacityInfo(sid);
+      return;
+    }
+    lastClickedId = id;
+  });
+
+  tbody.addEventListener('mousedown', (e) => {
+    const cb = e.target.closest(`input.${selClass}`);
+    if (!cb || cb.disabled || e.shiftKey) return;
+    dragSelecting = true;
+    dragSelectValue = null;
+    setTimeout(() => { dragSelectValue = cb.checked; }, 0);
+  });
+  tbody.addEventListener('mouseover', (e) => {
+    if (!dragSelecting || dragSelectValue === null) return;
+    const cb = e.target.closest(`input.${selClass}`);
+    if (!cb || cb.disabled || cb.checked === dragSelectValue) return;
+    cb.checked = dragSelectValue;
+    postVideoSelChanged(sid, cb);
+  });
+  document.addEventListener('mouseup', () => {
+    dragSelecting = false;
+    dragSelectValue = null;
+  });
+}
+
+function postVideoSyncMountedCheckboxes(sid) {
+  const session = postVideoSessions.get(sid);
+  if (!session) return;
+  document.querySelectorAll(`#postvideo-accounts-tbody-${sid} input.postvideo-acc-sel-${sid}`).forEach(el => {
+    if (el.disabled) return;
+    el.checked = session.selected.has(parseInt(el.dataset.id, 10));
+  });
+}
+
+function postVideoApplyRangeSelect(sid, fromId, toId, checked) {
+  const session = postVideoSessions.get(sid);
+  if (!session) return;
+  const ids = Array.from(document.querySelectorAll(`#postvideo-accounts-tbody-${sid} input.postvideo-acc-sel-${sid}:not(:disabled)`))
+    .map(el => parseInt(el.dataset.id, 10));
+  const i1 = ids.indexOf(fromId), i2 = ids.indexOf(toId);
+  if (i1 < 0 || i2 < 0) return;
+  const [lo, hi] = i1 < i2 ? [i1, i2] : [i2, i1];
+  for (let i = lo; i <= hi; i++) {
+    if (checked) session.selected.add(ids[i]); else session.selected.delete(ids[i]);
+  }
+}
+
+// Checkbox header "chọn tất cả" - CHI ap dung cho cac dong (con dung duoc) cua TRANG DANG HIEN,
+// giong mailAccToggleAll() - khong dong cham lua chon cua cac trang khac (van giu nguyen trong
+// session.selected).
+function postVideoToggleAll(sid, header) {
+  const session = postVideoSessions.get(sid);
+  if (!session) return;
+  postVideoPageAccounts(sid).forEach(a => {
+    if (postVideoAccountDisabled(a)) return;
+    if (header.checked) session.selected.add(a.id); else session.selected.delete(a.id);
+  });
+  postVideoSyncMountedCheckboxes(sid);
+  refreshPostVideoSelUI(sid);
+  updatePostVideoCapacityInfo(sid);
+}
+
+function refreshPostVideoSelUI(sid) {
+  const header = document.getElementById('postvideo-sel-all-' + sid);
+  const session = postVideoSessions.get(sid);
+  if (!header || !session) return;
+  const pageEnabled = postVideoPageAccounts(sid).filter(a => !postVideoAccountDisabled(a));
+  const selInPage = pageEnabled.filter(a => session.selected.has(a.id)).length;
+  header.checked = pageEnabled.length > 0 && selInPage === pageEnabled.length;
+  header.indeterminate = selInPage > 0 && selInPage < pageEnabled.length;
+}
+
+function postVideoSelectedAccountIds(sid) {
+  // Tra ve TOAN BO id da tich chon QUA MOI TRANG (nguoi dung co the tich chon dan qua nhieu
+  // trang roi moi bam "Bắt đầu đăng" 1 lan) - loc lai theo session.accounts hien tai de bo id
+  // da khong con khop bo loc/nguon (giong mailAccSelectedIds()).
+  const session = postVideoSessions.get(sid);
+  if (!session) return [];
+  const accounts = session.accounts || [];
+  return accounts.filter(a => session.selected.has(a.id)).map(a => a.id);
 }
 
 // Cap nhat REAL-TIME 1 dong tai khoan trong bang (cot "Trạng thái phiên") - xem yeu cau nguoi
@@ -4898,20 +5124,16 @@ function renderPostVideoAccountsTable(sid) {
 // goi API - server moi la noi QUYET DINH tai khoan nao thuc su duoc dung trong 1 lan goi
 // post_next() vi 1 loi goi gui nhieu account_id ung vien - xem _claim_next_pending()).
 function postVideoSetAccountStatus(sid, accountId, html, colorVar) {
+  // Luu lai (khong chi ghi DOM) - dong co the dang o TRANG KHAC voi trang dang xem (xem phan
+  // trang), can trang thai nay de ve lai dung khi nguoi dung quay lai trang do (xem
+  // postVideoAccountRowHtml()).
+  const session = postVideoSessions.get(sid);
+  if (session) session.statusById.set(accountId, { html, colorVar });
   const cell = document.getElementById(`postvideo-acc-status-${sid}-${accountId}`);
   if (!cell) return;
   cell.className = '';
   cell.style.color = colorVar ? `var(${colorVar})` : '';
   cell.innerHTML = html;
-}
-
-function postVideoToggleAll(sid, cb) {
-  document.querySelectorAll(`.postvideo-acc-sel-${sid}:not(:disabled)`).forEach(el => { el.checked = cb.checked; });
-  updatePostVideoCapacityInfo(sid);
-}
-
-function postVideoSelectedAccountIds(sid) {
-  return Array.from(document.querySelectorAll(`.postvideo-acc-sel-${sid}:checked`)).map(el => parseInt(el.dataset.id, 10));
 }
 
 // Dung luong con lai HOM NAY cua TUNG tai khoan dang tich chon (trong PHIEN sid) - Map
@@ -5121,6 +5343,7 @@ async function startPostVideoRun(sid) {
   postVideoClaimAccounts(sid, accountIds);
   const accountIdSet = new Set(accountIds);
   session.accounts = (session.accounts || []).filter(a => accountIdSet.has(a.id));
+  session.page = 1; // danh sach vua thu gon manh - ve lai tu trang 1 cho chac (tranh trang rong)
   renderPostVideoAccountsTable(sid);
   document.getElementById('postvideo-load-accounts-btn-' + sid).disabled = true;
   document.getElementById('postvideo-filter-group-' + sid).disabled = true;
