@@ -1585,6 +1585,7 @@ def video_sources_node_pool_start(source_id):
     config_path = run_dir / f"{run_id}.config.json"
     status_path = run_dir / f"{run_id}.status.json"
     stop_path = run_dir / f"{run_id}.stop"
+    retry_path = run_dir / f"{run_id}.retry.json"
     log_path = run_dir / f"{run_id}.log"
 
     config = {
@@ -1599,6 +1600,7 @@ def video_sources_node_pool_start(source_id):
         "isAiGenerated": is_ai_generated,
         "statusFilePath": str(status_path),
         "stopFilePath": str(stop_path),
+        "retryFilePath": str(retry_path),
     }
     config_path.write_text(json.dumps(config), encoding="utf-8")
 
@@ -1611,7 +1613,7 @@ def video_sources_node_pool_start(source_id):
         return _bad_request("Khong tim thay lenh 'node' - can cai Node.js (https://nodejs.org/) tren may nay de dung che do chay qua Node.")
     _assign_process_to_job(_KILL_ON_CLOSE_JOB, proc.pid)
     _NODE_POOL_RUNS[run_id] = {
-        "proc": proc, "status_path": status_path, "stop_path": stop_path,
+        "proc": proc, "status_path": status_path, "stop_path": stop_path, "retry_path": retry_path,
         "log_file": log_file, "source_id": source_id,
     }
     return jsonify({"ok": True, "run_id": run_id})
@@ -1649,6 +1651,37 @@ def video_sources_node_pool_stop(source_id):
         run["stop_path"].touch()
     except OSError:
         pass
+    return jsonify({"ok": True})
+
+
+# Yeu cau nguoi dung 2026-09-12: tai khoan bi "⛔ Đã dừng - Cookie thiếu SPC_U/csrftoken" (loi
+# unrecoverable) sau khi nguoi dung lay lai Cookie moi, can dua tai khoan do QUAY LAI pool NGAY
+# trong PHIEN Node dang chay (khong can dung ca phien chi vi 1 tai khoan) - vi tien trinh Node
+# chay doc lap, khong the goi thang ham JS trong do, nen dung THEM 1 file tin hieu (retryFilePath,
+# cung co che voi stopFilePath) de Node tu doc lai o vong poll ke tiep (xem post_video_node_worker.js).
+@app.route("/api/video_sources/<int:source_id>/node_pool/retry", methods=["POST"])
+def video_sources_node_pool_retry(source_id):
+    body = request.get_json(force=True, silent=True) or {}
+    run_id = body.get("run_id", "")
+    run = _NODE_POOL_RUNS.get(run_id)
+    if not run:
+        return _bad_request(f"khong tim thay phien Node id={run_id!r}")
+    try:
+        account_id = int(body.get("account_id"))
+    except (TypeError, ValueError):
+        return _bad_request("thieu 'account_id' hop le")
+    if run["proc"].poll() is not None:
+        return _bad_request("Tiến trình Node của phiên này đã dừng hẳn - hãy nạp tài khoản và bắt đầu phiên mới.")
+    retry_path = run["retry_path"]
+    # Doc-sua-ghi: nhieu lan bam "Thử lại" lien tiep (cac tai khoan khac nhau) truoc khi Node kip
+    # doc file cu se GOP lai thanh 1 danh sach, tranh lenh truoc bi ghi de mat neu bam don don.
+    try:
+        pending = json.loads(retry_path.read_text(encoding="utf-8")) if retry_path.exists() else []
+    except (OSError, ValueError):
+        pending = []
+    if account_id not in pending:
+        pending.append(account_id)
+    retry_path.write_text(json.dumps(pending), encoding="utf-8")
     return jsonify({"ok": True})
 
 

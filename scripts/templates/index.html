@@ -4625,7 +4625,7 @@ function postVideoSessionCardHtml(sid) {
       <div class="table-wrap" style="max-height:480px;overflow-y:auto;"><table>
         <thead><tr>
           <th style="width:36px;"><input type="checkbox" id="postvideo-sel-all-${sid}" onclick="postVideoToggleAll(${sid}, this)" title="Chọn/bỏ chọn tất cả tài khoản của TRANG ĐANG HIỆN"></th>
-          <th>Tài khoản</th><th>Cookie</th><th>Proxy</th><th style="text-align:center;">Rate limit/ngày</th><th style="text-align:center;">Đã đăng hôm nay</th><th style="min-width:200px;">Trạng thái phiên</th>
+          <th id="postvideo-sort-th-${sid}" class="sortable" onclick="postVideoToggleSort(${sid})" title="Sắp xếp A-Z theo tên tài khoản">Tài khoản</th><th>Cookie</th><th>Proxy</th><th style="text-align:center;">Rate limit/ngày</th><th style="text-align:center;">Đã đăng hôm nay</th><th style="min-width:200px;">Trạng thái phiên</th>
         </tr></thead>
         <tbody id="postvideo-accounts-tbody-${sid}"><tr><td colspan="7" class="muted">Chưa nạp tài khoản - chọn nguồn rồi bấm "Nạp tài khoản theo lọc".</td></tr></tbody>
       </table></div>
@@ -4680,7 +4680,11 @@ function addPostVideoSession() {
   // renderPostVideoAccountsTable() - port nguyen mo hinh tu tab "Quản lý account Shopee"
   // (mailAccSelected/mailAccCurrentPage), yeu cau nguoi dung 2026-09-11: ap dung phan trang +
   // keo chuot chon profile tu tab mailacc sang danh sach tai khoan nap o tab "Đăng video".
-  postVideoSessions.set(sid, { id: sid, accounts: [], selected: new Set(), page: 1, statusById: new Map(), running: false, stopRequested: false, label: '' });
+  // sortDir: 0 = chua sap xep (giu nguyen thu tu tu API/bo loc), 1 = A-Z, -1 = Z-A - xem
+  // postVideoToggleSort()/postVideoSortedAccounts() (yeu cau nguoi dung 2026-09-12: sort A-Z
+  // cho bang danh sach tai khoan da nap, port lai dung mo hinh sortMailAccounts() da co san
+  // o tab "Quản lý account Shopee" thay vi lam moi kieu khac).
+  postVideoSessions.set(sid, { id: sid, accounts: [], selected: new Set(), page: 1, sortDir: 0, statusById: new Map(), running: false, stopRequested: false, label: '' });
   document.getElementById('postvideo-sessions-container').insertAdjacentHTML('beforeend', postVideoSessionCardHtml(sid));
   populatePostVideoSourceSelect(sid);
   loadMailAccountGroupsInto('postvideo-filter-group-' + sid);
@@ -4920,11 +4924,11 @@ function postVideoAccountRowHtml(sid, a) {
   const savedStatus = session && session.statusById && session.statusById.get(a.id);
   const statusClass = savedStatus ? '' : ' class="muted"';
   const statusStyle = savedStatus && savedStatus.colorVar ? ` style="color:var(${savedStatus.colorVar});"` : '';
-  const statusHtml = savedStatus ? savedStatus.html : '—';
+  const statusHtml = savedStatus ? postVideoStatusCellHtml(sid, a.id, savedStatus.html, savedStatus.retryable) : '—';
   return `
     <tr style="${disabled ? 'opacity:.5;' : ''}">
       <td class="sel-cell"><input type="checkbox" class="postvideo-acc-sel-${sid}" data-id="${a.id}" onchange="postVideoSelChanged(${sid}, this)" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}></td>
-      <td>${a.profile || a.email || a.shopee_id || ('#' + a.id)}</td>
+      <td>${postVideoAccountLabel(a)}</td>
       <td>${cookieCell}</td>
       <td>${(a.proxy || '').trim() ? '✓' : '-'}</td>
       <td style="text-align:center;">${limit != null ? limit : '∞'}</td>
@@ -4956,11 +4960,48 @@ function postVideoTotalPages(sid) {
   return Math.max(1, Math.ceil(total / postVideoPageSize));
 }
 
+// Ten hien thi 1 tai khoan trong bang - dung chung cho render dong LAN sap xep, tranh
+// lap logic (giu dong bo giua postVideoAccountRowHtml() va postVideoSortedAccounts()).
+function postVideoAccountLabel(a) {
+  return a.profile || a.email || a.shopee_id || ('#' + a.id);
+}
+
+// Danh sach tai khoan CUA PHIEN sid, da SAP XEP theo session.sortDir (0 = giu nguyen thu tu
+// nap ve - xem postVideoToggleSort()). Khong sua truc tiep session.accounts (giu nguyen thu
+// tu goc tu API) - chi tao ban sao da sap de hien thi, nho vay bam "bỏ sắp xếp"/nap lai KHONG
+// mat thu tu goc.
+function postVideoSortedAccounts(sid) {
+  const session = postVideoSessions.get(sid);
+  const accounts = (session && session.accounts) || [];
+  if (!session || !session.sortDir) return accounts;
+  return [...accounts].sort((a, b) =>
+    session.sortDir * postVideoAccountLabel(a).localeCompare(postVideoAccountLabel(b), 'vi', { numeric: true, sensitivity: 'base' }));
+}
+
+// Bam vao tieu de cot "Tài khoản" - yeu cau nguoi dung 2026-09-12: "sort A-Z cho bảng danh
+// sách tài khoản đã nạp để đăng video". Port dung mo hinh sortMailAccounts() da co san (bam
+// lan 1 = A-Z, bam lai = Z-A) thay vi tu che kieu khac cho nhat quan trong toan bo UI.
+function postVideoToggleSort(sid) {
+  const session = postVideoSessions.get(sid);
+  if (!session) return;
+  session.sortDir = session.sortDir === 1 ? -1 : 1;
+  session.page = 1; // doi thu tu -> quay ve trang 1, tranh trang hien tai loi thoi
+  renderPostVideoAccountsTable(sid);
+}
+
+function postVideoUpdateSortHeader(sid) {
+  const th = document.getElementById('postvideo-sort-th-' + sid);
+  const session = postVideoSessions.get(sid);
+  if (!th || !session) return;
+  const arrow = session.sortDir === 1 ? ' ▲' : session.sortDir === -1 ? ' ▼' : '';
+  th.textContent = 'Tài khoản' + arrow;
+}
+
 // Cac tai khoan (object) CUA TRANG DANG HIEN trong PHIEN sid - dung cho render + "chọn tất cả"
 // (chi ap dung trang dang hien, giong mailAccPageIds()) + tinh trang thai checkbox header.
 function postVideoPageAccounts(sid) {
   const session = postVideoSessions.get(sid);
-  const accounts = (session && session.accounts) || [];
+  const accounts = postVideoSortedAccounts(sid);
   const page = (session && session.page) || 1;
   const start = (page - 1) * postVideoPageSize;
   return accounts.slice(start, start + postVideoPageSize);
@@ -4978,6 +5019,7 @@ function renderPostVideoAccountsTable(sid) {
     if (!session.page || session.page > totalPages) session.page = totalPages;
     tbody.innerHTML = postVideoPageAccounts(sid).map(a => postVideoAccountRowHtml(sid, a)).join('');
   }
+  postVideoUpdateSortHeader(sid);
   postVideoRenderPager(sid);
   refreshPostVideoSelUI(sid);
   updatePostVideoCapacityInfo(sid);
@@ -5136,17 +5178,33 @@ function postVideoSelectedAccountIds(sid) {
 // postVideoPoolWorker() ngay khi co ket qua CHO DUNG account_id do (KHONG doan truoc luc dang
 // goi API - server moi la noi QUYET DINH tai khoan nao thuc su duoc dung trong 1 lan goi
 // post_next() vi 1 loi goi gui nhieu account_id ung vien - xem _claim_next_pending()).
-function postVideoSetAccountStatus(sid, accountId, html, colorVar) {
+// Ghep them nut "🔁 Thử lại" vao SAU noi dung status THO (rawHtml) khi retryable=true - tach
+// rieng khoi rawHtml (thay vi nhet luon nut vao html luu trong statusById) vi rawHtml con duoc
+// dung de SO SANH phat hien "1 lan thanh cong MOI" o che do Node (xem runPostVideoNodeMode()) -
+// neu luu ca nut vao do, moi lan re-render se lam sai lech so sanh nay.
+function postVideoStatusCellHtml(sid, accountId, rawHtml, retryable) {
+  if (!retryable) return rawHtml;
+  return `${rawHtml} <button class="secondary" style="padding:1px 8px;font-size:11px;margin-left:4px;" onclick="postVideoRetryAccount(${sid}, ${accountId})" title="Cookie đã cập nhật xong? Bấm để đưa tài khoản này chạy lại NGAY trong phiên hiện tại - không cần dừng cả phiên.">🔁 Thử lại</button>`;
+}
+
+// Cap nhat REAL-TIME 1 dong tai khoan trong bang (cot "Trạng thái phiên") - xem yeu cau nguoi
+// dung 2026-09-11 "Thiết kế dạng real-time cho danh sách tài khoản đã chọn được đăng". Goi tu
+// postVideoPoolWorker() ngay khi co ket qua CHO DUNG account_id do (KHONG doan truoc luc dang
+// goi API - server moi la noi QUYET DINH tai khoan nao thuc su duoc dung trong 1 lan goi
+// post_next() vi 1 loi goi gui nhieu account_id ung vien - xem _claim_next_pending()).
+// retryable (yeu cau nguoi dung 2026-09-12): true khi day la trang thai ⛔ DUNG do loi
+// unrecoverable - hien them nut "Thử lại" tren dong nay (xem postVideoRetryAccount()).
+function postVideoSetAccountStatus(sid, accountId, html, colorVar, retryable = false) {
   // Luu lai (khong chi ghi DOM) - dong co the dang o TRANG KHAC voi trang dang xem (xem phan
   // trang), can trang thai nay de ve lai dung khi nguoi dung quay lai trang do (xem
   // postVideoAccountRowHtml()).
   const session = postVideoSessions.get(sid);
-  if (session) session.statusById.set(accountId, { html, colorVar });
+  if (session) session.statusById.set(accountId, { html, colorVar, retryable });
   const cell = document.getElementById(`postvideo-acc-status-${sid}-${accountId}`);
   if (!cell) return;
   cell.className = '';
   cell.style.color = colorVar ? `var(${colorVar})` : '';
-  cell.innerHTML = html;
+  cell.innerHTML = postVideoStatusCellHtml(sid, accountId, html, retryable);
 }
 
 // Cap nhat cot "Đã đăng hôm nay" REAL-TIME ngay khi 1 video dang THANH CONG trong phien -
@@ -5343,7 +5401,7 @@ async function postVideoPoolWorker(sid, sourceId, accountIds, accountState, perA
     if (!res.success && res.unrecoverable) {
       st.stopped = true;
       postVideoLog(sid, `⛔ DỪNG tài khoản ${res.account_label} - lỗi không thể khắc phục (sẽ KHÔNG thử lại tài khoản này nữa): ${res.error}`);
-      postVideoSetAccountStatus(sid, accountId, `⛔ Đã dừng - ${String(res.error || '').slice(0, 60)}`, '--danger-text');
+      postVideoSetAccountStatus(sid, accountId, `⛔ Đã dừng - ${String(res.error || '').slice(0, 60)}`, '--danger-text', true);
     } else {
       postVideoLog(sid, `${res.success ? '✓' : '✗'} ${res.sp_id} (${res.account_label}: ${st.done}/${perAccountTarget}) - ${res.success ? (res.video_link || 'post_id=' + res.post_id) : 'LỖI: ' + res.error} | còn ${res.pending_remaining} pending`);
       postVideoSetAccountStatus(sid, accountId,
@@ -5465,6 +5523,11 @@ async function startPostVideoRun(sid) {
   // diem khac biet cot loi so voi mo hinh bucket cu: KHONG con "1 tai khoan chi thuoc 1 luong".
   const accountState = new Map(accountIds.map(id => [id, { done: 0, nextAt: 0, active: false, stopped: false }]));
   const stats = { posted: 0, ok: 0, fail: 0 };
+  // Luu lai de nut "🔁 Thử lại" (postVideoRetryAccount()) dung duoc du dang o che do nao - Node
+  // (goi API qua session.sourceId + session.nodeRunId) hay vong lap trinh duyet (sua truc tiep
+  // session.accountState, xem giai thich trong postVideoRetryAccount()).
+  session.sourceId = s.id;
+  session.accountState = useNode ? null : accountState;
   try {
     if (useNode) {
       await runPostVideoNodeMode(sid, s, accountIds, effectiveThreads, perAccountTarget, minDelay, maxDelay, session, stats, isAiGenerated);
@@ -5503,6 +5566,45 @@ function stopPostVideoRun(sid) {
   if (!session) return;
   session.stopRequested = true;
   postVideoLog(sid, 'Đã yêu cầu dừng - sẽ dừng sau video đang xử lý.');
+}
+
+// Nut "🔁 Thử lại" tren dong tai khoan bi ⛔ DUNG do loi unrecoverable (vd "Cookie thiếu
+// SPC_U/csrftoken") - yeu cau nguoi dung 2026-09-12: "lấy lại cookie thì có chạy tiếp được
+// không hay phải tạo phiên mới, lưu ý phiên chạy vẫn đang chạy". Gia dinh nguoi dung DA cap
+// nhat Cookie LIVE cho tai khoan nay truoc khi bam - ham nay KHONG tu kiem tra lai Cookie, chi
+// go co "stopped" de tai khoan duoc pool nhan lai o lan claim ke tiep. Hoat dong duoc trong
+// CA 2 che do ma KHONG can dung ca phien (chi tai khoan nay quay lai, cac tai khoan khac trong
+// phien khong bi anh huong).
+async function postVideoRetryAccount(sid, accountId) {
+  const session = postVideoSessions.get(sid);
+  if (!session || !session.running) {
+    await customAlert('Phiên không còn chạy nữa - hãy "Nạp tài khoản theo lọc" rồi bắt đầu 1 phiên mới cho tài khoản này.', { danger: true });
+    return;
+  }
+  if (session.accountState) {
+    // Che do vong lap trinh duyet: accountState la 1 Map DUNG CHUNG cho MOI luong dang chay
+    // (xem postVideoClaimReadyAccount()) - chi can go "stopped", luong ranh gan nhat se TU
+    // NHAN LAI tai khoan nay o lan claim ke tiep (toi da ~1s), khong can khoi dong gi them.
+    const st = session.accountState.get(accountId);
+    if (!st) return;
+    st.stopped = false;
+    st.active = false;
+    st.nextAt = Date.now();
+    postVideoSetAccountStatus(sid, accountId, '🔁 Đã đưa lại vào hàng chờ...', null);
+    postVideoLog(sid, `🔁 Đã thử lại tài khoản ${accountId} - sẽ được 1 luồng nhận lại trong giây lát.`);
+    return;
+  }
+  // Che do Node.js: trang thai nam trong tien trinh Node CHAY DOC LAP, khong goi thang ham JS
+  // trong do duoc - phai gui lenh qua file tin hieu (retryFilePath, cung co che voi stop) roi
+  // Node tu doc lai o vong poll ke tiep (xem route + post_video_node_worker.js).
+  if (!session.nodeRunId) return;
+  try {
+    await api('POST', `/api/video_sources/${session.sourceId}/node_pool/retry`, { run_id: session.nodeRunId, account_id: accountId }, 15000);
+    postVideoSetAccountStatus(sid, accountId, '🔁 Đã gửi yêu cầu thử lại...', null);
+    postVideoLog(sid, `🔁 Đã gửi yêu cầu thử lại tài khoản ${accountId} tới tiến trình Node.`);
+  } catch (e) {
+    await customAlert(`Không gửi được yêu cầu thử lại: ${e.message}`, { danger: true });
+  }
 }
 
 // ---- Che do "Chạy qua Node.js" (yeu cau nguoi dung 2026-09-12) - xem post_video_node_worker.js
@@ -5553,7 +5655,7 @@ async function runPostVideoNodeMode(sid, s, accountIds, effectiveThreads, perAcc
       // status text voi lan poll truoc (xem postVideoBumpPostedToday()).
       const prev = session.statusById && session.statusById.get(accountId);
       const isNewSuccess = info.color === '--success-text' && (!prev || prev.html !== info.status);
-      postVideoSetAccountStatus(sid, accountId, info.status, info.color);
+      postVideoSetAccountStatus(sid, accountId, info.status, info.color, !!info.stopped);
       if (isNewSuccess) postVideoBumpPostedToday(sid, accountId);
     }
     stats.posted = status.stats.posted;

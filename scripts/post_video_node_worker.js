@@ -36,7 +36,7 @@ if (!configPath) {
 const config = JSON.parse(fs.readFileSync(configPath, 'utf8').replace(/^﻿/, ''));
 const {
   mainOrigin, videoPorts, sourceId, accountIds, threads,
-  perAccountTarget, minDelay, maxDelay, statusFilePath, stopFilePath,
+  perAccountTarget, minDelay, maxDelay, statusFilePath, stopFilePath, retryFilePath,
   isAiGenerated,
 } = config;
 
@@ -140,6 +140,35 @@ const stopPoll = setInterval(() => {
   }
 }, 1000);
 
+// Poll file "retry" moi giay - dashboard GHI danh sach account_id vao day khi nguoi dung bam
+// nut "🔁 Thử lại" tren 1 tai khoan bi ⛔ dung do loi unrecoverable (xem
+// /api/video_sources/<id>/node_pool/retry trong affiliate_scrape_server.py). Go co "stopped" +
+// dat lai nextAt=now de lan claimReadyAccount() ke tiep cua BAT KY luong ranh nao tu nhan lai
+// tai khoan nay, KHONG can khoi dong luong moi (pool dung CHUNG 1 accountState).
+const retryPoll = setInterval(() => {
+  if (!retryFilePath || !fs.existsSync(retryFilePath)) return;
+  let ids = [];
+  try {
+    ids = JSON.parse(fs.readFileSync(retryFilePath, 'utf8').replace(/^﻿/, ''));
+  } catch (e) {
+    ids = [];
+  }
+  try { fs.unlinkSync(retryFilePath); } catch (e) { /* da bi xoa/doc boi vong poll khac - bo qua */ }
+  let changed = false;
+  for (const rawId of ids) {
+    const id = Number(rawId);
+    const st = accountState.get(id);
+    if (!st) continue;
+    st.stopped = false;
+    st.active = false;
+    st.nextAt = Date.now();
+    log(`🔁 Đã thử lại tài khoản ${id} theo yêu cầu từ dashboard (cookie có thể vừa được cập nhật).`);
+    setStatus(id, '🔁 Đã đưa lại vào hàng chờ...', null);
+    changed = true;
+  }
+  if (changed) scheduleWriteStatus();
+}, 1000);
+
 function claimReadyAccount() {
   const now = Date.now();
   let soonestAt = Infinity;
@@ -215,6 +244,7 @@ async function main() {
     Array.from({ length: threads }, (_, i) => poolWorker(Math.floor((i / threads) * RAMP_WINDOW_MS)))
   );
   clearInterval(stopPoll);
+  clearInterval(retryPoll);
   stopRequested = true;
   log(`Đã dừng. Tổng kết phiên: ${stats.posted} video (${stats.ok} thành công, ${stats.fail} lỗi).`);
   writeStatusNow();
