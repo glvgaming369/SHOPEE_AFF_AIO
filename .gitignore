@@ -43,8 +43,19 @@ check_phone_exist/
 
 # Capture / RE workspace - co the chua header/token/session that, KHONG commit.
 burp-suite/
-re_work/
 gpm Login/
+# re_work/ noi chung van KHONG commit (co the chua header/token/session that) - NGOAI TRU 2
+# file duoi day: cdp_login_shopee.mjs (production) import truc tiep tu day o top-level, KHONG
+# boc trong try/catch - thieu file gay Node crash ERR_MODULE_NOT_FOUND ngay lap tuc (xac nhan
+# thuc te 2026-09-12 tren may SSH: git pull code moi nhung thieu 2 file nay vi bi ignore, moi
+# lan Login Shopee deu loi "Node.js vXX.XX.X" - xem shopee_captcha_solver.mjs da duoc go sach
+# API key hardcode truoc khi mo ngoai le nay, BAT BUOC dat OMOCAPTCHA_API_KEY qua bien moi
+# truong tren MOI may chay, KHONG duoc hardcode lai key that vao file).
+re_work/*
+!re_work/captcha_re/
+re_work/captcha_re/*
+!re_work/captcha_re/shopee_captcha_solver.mjs
+!re_work/captcha_re/closed_loop_dom_drag.mjs
 artifacts/*.log
 artifacts/cdp_*
 
