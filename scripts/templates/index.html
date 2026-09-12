@@ -4612,11 +4612,11 @@ function postVideoSessionCardHtml(sid) {
         <label style="white-space:nowrap;font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer;" title="Bật: LUÔN nghỉ đúng 1 mốc giá trị cố định (ô bên trái) giữa 2 video cùng tài khoản, không random. Tắt: nghỉ ngẫu nhiên trong khoảng min-max như cũ.">
           <input type="checkbox" id="postvideo-delay-fixed-${sid}" onchange="postVideoToggleDelayMode(${sid})"> Cố định
         </label>
-        <label style="white-space:nowrap;font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer;" title="Chạy vòng lặp gọi post_next() bằng 1 tiến trình Node.js riêng thay vì JS trong tab trình duyệt này - thử nghiệm (2026-09-12): đo thực tế xác nhận gọi thẳng server KHÔNG qua Chrome tránh được hiện tượng 'Initial connection' bị kẹt hàng phút khi máy chạy nhiều Chrome/tiện ích mạng khác cùng lúc. Cần cài Node.js trên máy chạy server. Trạng thái vẫn hiện gần real-time qua polling, không mất khả năng theo dõi.">
-          <input type="checkbox" id="postvideo-use-node-${sid}"> Chạy qua Node.js
+        <label hidden style="white-space:nowrap;font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer;" title="Chạy vòng lặp gọi post_next() bằng 1 tiến trình Node.js riêng thay vì JS trong tab trình duyệt này - thử nghiệm (2026-09-12): đo thực tế xác nhận gọi thẳng server KHÔNG qua Chrome tránh được hiện tượng 'Initial connection' bị kẹt hàng phút khi máy chạy nhiều Chrome/tiện ích mạng khác cùng lúc. Cần cài Node.js trên máy chạy server. Trạng thái vẫn hiện gần real-time qua polling, không mất khả năng theo dõi. Yêu cầu người dùng 2026-09-12: luôn mặc định chạy qua Node.js, ẩn tùy chọn này đi.">
+          <input type="checkbox" id="postvideo-use-node-${sid}" checked> Chạy qua Node.js
         </label>
-        <label style="white-space:nowrap;font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer;" title="Khai báo trung thực với Shopee video này do AI tạo ra (field 'is_creator_claim_aigc') - yêu cầu người dùng 2026-09-12. CHỈ bật nếu video nguồn trong thư mục THẬT SỰ do AI tạo (tool này KHÔNG tự biết được điều đó - tính năng 'Tạo Video'/VideoAI hoàn toàn độc lập với pipeline đăng video này). Để trống nếu video tự quay/edit thủ công.">
-          <input type="checkbox" id="postvideo-ai-label-${sid}"> Gắn nhãn video do AI tạo
+        <label style="white-space:nowrap;font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer;" title="Khai báo trung thực với Shopee video này do AI tạo ra (field 'is_creator_claim_aigc') - yêu cầu người dùng 2026-09-12. CHỈ bật nếu video nguồn trong thư mục THẬT SỰ do AI tạo (tool này KHÔNG tự biết được điều đó - tính năng 'Tạo Video'/VideoAI hoàn toàn độc lập với pipeline đăng video này). Để trống nếu video tự quay/edit thủ công. Mặc định tích chọn theo yêu cầu người dùng 2026-09-12 - bỏ tích nếu video không phải do AI tạo.">
+          <input type="checkbox" id="postvideo-ai-label-${sid}" checked> Gắn nhãn video do AI tạo
         </label>
         <button id="postvideo-start-btn-${sid}" onclick="startPostVideoRun(${sid})">▶ Bắt đầu đăng</button>
         <button id="postvideo-stop-btn-${sid}" class="secondary" onclick="stopPostVideoRun(${sid})" disabled>■ Dừng</button>
@@ -4877,9 +4877,9 @@ async function loadPostVideoAccounts(sid) {
     const accounts = onlyLive ? allAccounts.filter(a => mailAccCookieIsLive(a)) : allAccounts;
     if (session) {
       session.accounts = accounts;
-      // Mac dinh tich chon san MOI tai khoan CON DUNG DUOC (giu nguyen hanh vi cu truoc khi co
-      // phan trang - trươc day moi checkbox khong bi disable deu tu tich san).
-      session.selected = new Set(accounts.filter(a => !postVideoAccountDisabled(a)).map(a => a.id));
+      // KHONG tu tich san tai khoan nao - yeu cau nguoi dung 2026-09-12: sau khi "Nạp tài khoản
+      // theo lọc" danh sach phai hien ra o trang thai CHUA tich chon, nguoi dung tu chon tay.
+      session.selected = new Set();
       session.page = 1;
       session.statusById = new Map(); // danh sach vua nap lai - bo trang thai "Đã đăng hôm nay" cu
     }
@@ -4928,7 +4928,7 @@ function postVideoAccountRowHtml(sid, a) {
       <td>${cookieCell}</td>
       <td>${(a.proxy || '').trim() ? '✓' : '-'}</td>
       <td style="text-align:center;">${limit != null ? limit : '∞'}</td>
-      <td style="text-align:center;${atLimit ? 'color:var(--danger-text);font-weight:600;' : ''}">${today}${atLimit ? ' (đủ)' : ''}</td>
+      <td id="postvideo-acc-today-${sid}-${a.id}" style="text-align:center;${atLimit ? 'color:var(--danger-text);font-weight:600;' : ''}">${today}${atLimit ? ' (đủ)' : ''}</td>
       <td id="postvideo-acc-status-${sid}-${a.id}"${statusClass}${statusStyle}>${statusHtml}</td>
     </tr>`;
 }
@@ -5149,6 +5149,24 @@ function postVideoSetAccountStatus(sid, accountId, html, colorVar) {
   cell.innerHTML = html;
 }
 
+// Cap nhat cot "Đã đăng hôm nay" REAL-TIME ngay khi 1 video dang THANH CONG trong phien -
+// yeu cau nguoi dung 2026-09-12: cot nay truoc day chi lay tu snapshot luc "Nạp tài khoản
+// theo lọc", khong tu tang khi tai khoan vua hoan thanh 1 video giua phien dang chay.
+function postVideoBumpPostedToday(sid, accountId) {
+  const session = postVideoSessions.get(sid);
+  const a = session && session.accounts && session.accounts.find(x => x.id === accountId);
+  if (!a) return;
+  a.posted_today = (a.posted_today || 0) + 1;
+  const limit = a.rate_limit_video;
+  const atLimit = limit != null && a.posted_today >= limit;
+  const cell = document.getElementById(`postvideo-acc-today-${sid}-${accountId}`);
+  if (cell) {
+    cell.style.color = atLimit ? 'var(--danger-text)' : '';
+    cell.style.fontWeight = atLimit ? '600' : '';
+    cell.textContent = `${a.posted_today}${atLimit ? ' (đủ)' : ''}`;
+  }
+}
+
 // Dung luong con lai HOM NAY cua TUNG tai khoan dang tich chon (trong PHIEN sid) - Map
 // accountId -> so con dang duoc (Infinity = khong gioi han). "Số lượng muốn đăng" la muc
 // tieu MOI TAI KHOAN (xem yeu cau nguoi dung 2026-09-10: nhap 1 + chon 2 tai khoan = MOI tai
@@ -5309,7 +5327,7 @@ async function postVideoPoolWorker(sid, sourceId, accountIds, accountState, perA
     if (res.blocked) { postVideoLog(sid, `⚠ Luồng dừng: ${res.message}`); st.active = false; break; }
     if (res.retry) { st.active = false; await sleepMs(300); continue; } // video dang bi worker/phien KHAC giu - KHONG tinh cooldown, thu lai ngay
     stats.posted++;
-    if (res.success) stats.ok++; else stats.fail++;
+    if (res.success) { stats.ok++; postVideoBumpPostedToday(sid, accountId); } else stats.fail++;
     st.done++;
     st.active = false;
     // Cooldown RIENG cho DUNG tai khoan vua dang xong - tai khoan KHAC trong pool KHONG bi
@@ -5528,7 +5546,15 @@ async function runPostVideoNodeMode(sid, s, accountIds, effectiveThreads, perAcc
       continue;
     }
     for (const [accIdStr, info] of Object.entries(status.accounts || {})) {
-      postVideoSetAccountStatus(sid, parseInt(accIdStr, 10), info.status, info.color);
+      const accountId = parseInt(accIdStr, 10);
+      // Phat hien 1 video MOI vua dang THANH CONG (khac lan poll truoc) de cong don vao cot
+      // "Đã đăng hôm nay" REAL-TIME - status.accounts KHONG co field rieng dem so THANH CONG
+      // (chi co "done" = tong so LAN THU, ca thanh cong lan loi), nen phai so sanh NOI DUNG
+      // status text voi lan poll truoc (xem postVideoBumpPostedToday()).
+      const prev = session.statusById && session.statusById.get(accountId);
+      const isNewSuccess = info.color === '--success-text' && (!prev || prev.html !== info.status);
+      postVideoSetAccountStatus(sid, accountId, info.status, info.color);
+      if (isNewSuccess) postVideoBumpPostedToday(sid, accountId);
     }
     stats.posted = status.stats.posted;
     stats.ok = status.stats.ok;

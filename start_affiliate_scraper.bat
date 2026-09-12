@@ -7,9 +7,9 @@ set PORT=8877
 set DBPATH=artifacts\db\shopee.db
 rem So process rieng xu ly dang video (moi process 1 port, tan dung nhieu loi CPU that su - xem
 rem --video-workers trong scripts\affiliate_scrape_server.py). 2026-09-12: DE TRONG = tool TU
-rem TINH = 80% so loi CPU logic cua may nay (yeu cau nguoi dung "tool tự set-process thông
-rem minh theo 80% số process của máy server") - CHI dien so vao day neu muon TU TAY ghi de (vd
-rem muon it hon de danh CPU cho viec khac tren cung may).
+rem DONG tinh bang 80 phan tram so loi CPU logic cua may nay (theo yeu cau tool tu dat so
+rem process thong minh theo 80% so loi cua may server). CHI dien so vao day neu muon TU TAY
+rem ghi de (vd muon it hon de danh CPU cho viec khac tren cung may).
 set VIDEO_WORKERS=
 set VIDEO_WORKERS_ARG=
 if not "%VIDEO_WORKERS%"=="" set VIDEO_WORKERS_ARG=--video-workers %VIDEO_WORKERS%
