@@ -145,7 +145,16 @@ _LOGIN_LINK_PATTERN = re.compile(r"https?://[\w-]+\.shp\.ee/dlink/[\w-]+", re.I)
 # da xac nhan o dongvanfb_client.py/shopee_collector.user.js, chi khac tld), da xac nhan
 # THAT voi 1 mail TH (info@security.shopee.co.th, 2026-08-24). Neu Shopee dung dia chi khac
 # o thi truong khac, can bo sung vi du that truoc khi tin tuong hoan toan cho market do.
-_SECURITY_SENDER_RE = re.compile(r"^info@security\.shopee\.", re.I)
+#
+# Prefix (khong phai regex) - dung truc tiep trong $filter startswith() phia Graph API (xem
+# list_login_link_candidates()) thay vi tai ve top-N tin roi loc sender O PHIA PYTHON nhu truoc
+# (2026-09-12: yeu cau nguoi dung sau khi phat hien bug thuc te - TH-00013/TH-00017 bao "khong
+# tim thay link sau nhieu lan thu" du email THAT SU ton tai trong hop thu, chi la bi CHON VUI
+# phia sau >=15 email khac (newsletter/spam Shopee gui rat day) truoc khi loc-tay kip thay -
+# loc thang tai server tranh han che nay HOAN TOAN, bat ke hop thu co bao nhieu email khac xen
+# giua).
+_SECURITY_SENDER_PREFIX = "info@security.shopee."
+_SECURITY_SENDER_RE = re.compile(r"^info@security\.shopee\.", re.I)  # con dung lam luoi an toan doi chieu client-side
 
 
 # Shopee (it nhat thi truong TH, xac nhan THAT 2026-09-11) doi sang gui link kich hoat qua
@@ -184,15 +193,56 @@ def _resolve_sendgrid_login_link(content, timeout=15):
     return None
 
 
+def list_login_link_candidates(access_token, since_iso=None, top=15, timeout=20):
+    """Lay cac tin nhan tu dung sender 'info@security.shopee.*' - LOC NGAY TAI SERVER Graph qua
+    $filter (thay vi tai top-N tin BAT KY roi loc sender O PHIA PYTHON nhu list_recent_messages()
+    cu) - xem _SECURITY_SENDER_PREFIX ve ly do (bug thuc te 2026-09-12: email that su ton tai
+    trong hop thu nhung bi CHON VUI phia sau >=15 email newsletter/spam khac truoc khi loc-tay
+    kip thay).
+
+    since_iso: neu co (chuoi ISO8601 UTC, vd '2026-09-12T07:30:00Z'), CHI lay tin nhan nhan
+    DUOC TU MOC NAY TRO DI (`receivedDateTime ge {since_iso}`) - yeu cau nguoi dung 2026-09-12
+    "phải đảm bảo là chỉ lấy mail được gửi trong thời điểm chạy login", tranh nham phai 1 link
+    CU tu lan dang nhap TRUOC DO (da xac nhan thuc te: TH-00013 co san 1 email hop le nhung tu
+    3 NGAY TRUOC - link kieu nay gan nhu chac chan da HET HAN, dung se chi that bai o buoc
+    activate). None = khong gioi han thoi gian (dung cho nut "⟳ Kích hoạt" thu cong hien co -
+    xem mail_accounts_activate_login(), khong gan voi 1 lan chay login cu the nao).
+
+    QUAN TRONG - da xac nhan qua test THAT tren mailbox @outlook.com ca nhan (endpoint
+    /consumers/, KHONG phai tai khoan work/school): Graph API tra loi 400 'InefficientFilter'
+    ('restriction or sort order qua phuc tap') neu ket hop startswith(...) VOI $orderby CUNG
+    LUC, nhung ket hop startswith(...) AND receivedDateTime ge ... (khong kem $orderby) THI
+    hoat dong binh thuong (200 OK). Vi vay KHONG dung $orderby o day - tu sap lai O PHIA PYTHON
+    sau khi nhan ve (danh sach da loc theo sender + since_iso nen rat nho, sap tay khong dang
+    ke)."""
+    filt = f"startswith(from/emailAddress/address,'{_SECURITY_SENDER_PREFIX}')"
+    if since_iso:
+        filt += f" and receivedDateTime ge {since_iso}"
+    resp = requests.get(
+        GRAPH_MESSAGES_URL,
+        headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+        params={"$filter": filt, "$top": top, "$select": "from,subject,body,receivedDateTime"},
+        timeout=timeout,
+    )
+    try:
+        body = resp.json()
+    except ValueError:
+        raise MicrosoftMailError(f"Graph tra ve khong phai JSON (HTTP {resp.status_code}): {resp.text[:200]}")
+    if resp.status_code != 200:
+        err = (body.get("error") or {}).get("message") or "unknown_error"
+        raise MicrosoftMailError(f"loi Graph API (HTTP {resp.status_code}): {err}")
+    messages = body.get("value") or []
+    messages.sort(key=lambda m: m.get("receivedDateTime") or "", reverse=True)
+    return messages
+
+
 def _find_login_link(messages):
-    """Tim email 'co lan dang nhap moi' + trich link kich hoat. Uu tien pattern truc tiep
-    (mail cu/thi truong khac co the van gui link tho khong qua SendGrid); fallback sang giai
-    quyet link SendGrid click-tracking neu khong tim thay truc tiep (xem
-    _resolve_sendgrid_login_link)."""
+    """Tim email 'co lan dang nhap moi' + trich link kich hoat. messages da duoc LOC SAN theo
+    dung sender (xem list_login_link_candidates() - $filter phia Graph, khong con can doi
+    chieu _SECURITY_SENDER_RE o day nua). Uu tien pattern truc tiep (mail cu/thi truong khac co
+    the van gui link tho khong qua SendGrid); fallback sang giai quyet link SendGrid
+    click-tracking neu khong tim thay truc tiep (xem _resolve_sendgrid_login_link)."""
     for m in messages:
-        from_addr = ((m.get("from") or {}).get("emailAddress") or {}).get("address") or ""
-        if not _SECURITY_SENDER_RE.match(from_addr):
-            continue
         subject = m.get("subject") or ""
         content = (m.get("body") or {}).get("content") or ""
         match = _LOGIN_LINK_PATTERN.search(content) or _LOGIN_LINK_PATTERN.search(subject)
@@ -204,19 +254,21 @@ def _find_login_link(messages):
     return None, None
 
 
-def fetch_login_link(refresh_token, client_id):
+def fetch_login_link(refresh_token, client_id, since_iso=None):
     """Tim link kich hoat dang nhap TRUC TIEP qua Microsoft Graph - cung co che voi
-    fetch_shopee_code() (refresh token roi quet Inbox), chi khac dieu kien tim: sender +
-    dinh dang link thay vi ma OTP. Tra ve (link, note, new_refresh_token) - xem
-    fetch_shopee_code() ve y nghia new_refresh_token (nen luu, khong bat buoc)."""
+    fetch_shopee_code() (refresh token roi quet Inbox), chi khac dieu kien tim: $filter theo
+    dung sender (+ tuy chon moc thoi gian since_iso, xem list_login_link_candidates()) thay vi
+    dinh dang ma OTP. Tra ve (link, note, new_refresh_token) - xem fetch_shopee_code() ve y
+    nghia new_refresh_token (nen luu, khong bat buoc)."""
     token_data = refresh_access_token(refresh_token, client_id)
     new_refresh_token = token_data.get("refresh_token") or refresh_token
-    messages = list_recent_messages(token_data["access_token"])
+    messages = list_login_link_candidates(token_data["access_token"], since_iso)
     link, subject = _find_login_link(messages)
     if link:
         note = f'Graph API trực tiếp - tìm thấy link trong "{subject}"'
     else:
-        note = f"Graph API trực tiếp - không tìm thấy email xác nhận đăng nhập trong {len(messages)} tin nhắn gần nhất"
+        scope = f"gửi từ {since_iso} trở đi" if since_iso else "gần đây"
+        note = f"Graph API trực tiếp - không tìm thấy email xác nhận đăng nhập ({scope}, {len(messages)} tin khớp người gửi)"
     return link, note, new_refresh_token
 
 

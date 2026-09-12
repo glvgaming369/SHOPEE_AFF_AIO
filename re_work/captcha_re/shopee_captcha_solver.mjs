@@ -102,16 +102,37 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // CDP WebSocket helper toi gian (khong dung Puppeteer/Playwright - raw JSON-RPC qua
 // WebSocket global co san trong Node 22+).
 // -----------------------------------------------------------------------------
+// on()/off() (2026-09-13, xem detectManualLoginViaNetwork()): truoc day ws.onmessage CHI xu ly
+// message co 'id' (request/response) va IM LANG bo qua moi message KIEU SU KIEN (Network.*,
+// Page.* khong co 'id') - khong the dung de bat Network.responseReceived. Them dispatch cho
+// event-type message, COPY dung mo hinh eventHandlers/on()/off() da co san trong class Cdp cua
+// cdp_login_shopee.mjs de nhat quan trong toan repo - hoan toan THEM MOI (khong doi hanh vi
+// send() cu), an toan cho MOI call site dang dung ham nay.
 export function connectCDP(wsUrl) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(wsUrl); const pending = new Map(); let id = 0;
+    const eventHandlers = new Map();
     ws.onopen = () => resolve({
       send(m, p = {}) { return new Promise((res, rej) => { const mid = ++id; pending.set(mid, { res, rej }); ws.send(JSON.stringify({ id: mid, method: m, params: p })); }); },
+      on(method, handler) {
+        if (!eventHandlers.has(method)) eventHandlers.set(method, []);
+        eventHandlers.get(method).push(handler);
+      },
+      off(method, handler) {
+        const list = eventHandlers.get(method);
+        if (!list) return;
+        const i = list.indexOf(handler);
+        if (i >= 0) list.splice(i, 1);
+      },
       close() { try { ws.close(); } catch (e) {} },
     });
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
-      if (msg.id && pending.has(msg.id)) { const p = pending.get(msg.id); pending.delete(msg.id); msg.error ? p.rej(new Error(msg.error.message)) : p.res(msg.result); }
+      if (msg.id && pending.has(msg.id)) { const p = pending.get(msg.id); pending.delete(msg.id); msg.error ? p.rej(new Error(msg.error.message)) : p.res(msg.result); return; }
+      if (msg.method) {
+        const handlers = eventHandlers.get(msg.method);
+        if (handlers) handlers.slice().forEach((h) => { try { h(msg.params); } catch (e) {} });
+      }
     };
     ws.onerror = () => reject(new Error('ws err'));
   });
@@ -123,6 +144,18 @@ export async function findShopeeTab(port) {
   const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
   return list.find((x) => x.type === 'page' && /shopee/i.test(x.url)) || list.find((x) => x.type === 'page');
 }
+
+// -----------------------------------------------------------------------------
+// Phat hien "da dang nhap thanh cong" qua request MANG THAT (khong phai doan qua DOM/href) -
+// yeu cau nguoi dung 2026-09-13: "lỗ hổng nhỏ ... nếu trong quá trình đang đợi giải captcha có
+// người can thiệp giải captcha thành công mà tool không bắt được xác nhận ... thì tool sẽ
+// reload hết số lần thử". Widget webchat cua Shopee TU DONG goi request nay ngay khi trang co
+// phien dang nhap hop le (xem login_thanhcong.txt - vi du that da capture, market TH, request
+// tu https://seller.shopee.co.th/webchat/api/coreapi/v1.2/mini/login, response 200 kem day du
+// user/shop that). Khop CHI theo PATH (bo qua host/TLD) de hoat dong DUNG TREN MOI MARKET
+// (yeu cau nguoi dung "thiết kế bắt request hoạt động trên mọi market") - vd
+// seller.shopee.ph/... hay seller.shopee.com.my/... deu khop, khong can liet ke tung TLD.
+const LOGIN_SUCCESS_REQUEST_RE = /\/webchat\/api\/coreapi\/v1\.2\/mini\/login(\?|$)/i;
 
 // -----------------------------------------------------------------------------
 // HOOK bat captcha_body: ghi de JSON.parse de bat response cua get_config/generate
@@ -309,7 +342,20 @@ export async function solveShopeeCaptcha(opts) {
   if (!target) throw new Error(`Khong tim thay tab shopee.* nao tren port ${port}`);
   const cdp = await connectCDP(target.webSocketDebuggerUrl);
 
-  // KHONG goi Runtime.enable - xem ghi chu #4 o dau file.
+  // KHONG goi Runtime.enable - xem ghi chu #4 o dau file. Network.enable la 1 DOMAIN KHAC
+  // (khong lien quan vector chong-detect qua Runtime da xac nhan o ghi chu do) - dung de bat
+  // tin hieu "da dang nhap thanh cong" qua request that (xem LOGIN_SUCCESS_REQUEST_RE +
+  // ghi chu duoi vong lap, yeu cau nguoi dung 2026-09-13).
+  let manualLoginConfirmed = false;
+  const onNetworkResponse = (params) => {
+    try {
+      const respUrl = (params.response && params.response.url) || '';
+      const status = params.response && params.response.status;
+      if (status === 200 && LOGIN_SUCCESS_REQUEST_RE.test(respUrl)) manualLoginConfirmed = true;
+    } catch (e) {}
+  };
+  await cdp.send('Network.enable').catch(() => {});
+  cdp.on('Network.responseReceived', onNetworkResponse);
   await cdp.send('Page.enable');
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: CAPTURE_HOOK });
 
@@ -341,6 +387,19 @@ export async function solveShopeeCaptcha(opts) {
       onLog(`${res.reason} - navigate ve trang chu (${homeUrl}) de lay tracking_id moi`);
       waitFromTs = Date.now();
       await cdp.send('Page.navigate', { url: homeUrl });
+      // Vá lỗ hổng (yêu cầu người dùng 2026-09-13): NGƯỜI THẬT có thể đã tự giải xong captcha
+      // hiển thị trên màn hình NGAY TRONG LÚC attemptOnce() đang chờ 20s ở trên (khiến trang tự
+      // điều hướng sang trạng thái đã đăng nhập) - nếu không kiểm tra, code cứ tưởng "chưa có
+      // captcha mới" rồi reload xin captcha mới liên tục cho tới hết maxAttempts dù ĐÃ đăng
+      // nhập xong từ lâu. Đợi vài giây cho widget webchat tự gọi request xác nhận (xem
+      // LOGIN_SUCCESS_REQUEST_RE) rồi kiểm tra cờ - nếu đã thấy, dừng vòng lặp ngay, coi như
+      // giải captcha thành công (dù không phải do CHÍNH module này giải).
+      await sleep(4000);
+      if (manualLoginConfirmed) {
+        onLog('Phát hiện tín hiệu đăng nhập thành công qua request webchat mini/login - có thể đã được giải thủ công, dừng vòng lặp giải captcha.');
+        passed = true;
+        break;
+      }
     } else {
       waitFromTs = Date.now();
     }

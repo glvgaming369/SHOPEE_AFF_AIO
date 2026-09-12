@@ -33,6 +33,15 @@ const URL = arg('--url', '');
 const GPM_BASE = arg('--gpm-base', 'http://127.0.0.1:9495');
 const GEM_BASE = arg('--gem-base', 'http://127.0.0.1:1010');
 const TIMEOUT = parseInt(arg('--timeout', '60000'), 10) || 60000;
+// Sap xep vi tri cua so tren man hinh theo luoi hang x cot - xem chu thich day du tai
+// positionWindow()/positionWindowRaw() trong cdp_login_shopee.mjs (COPY nguyen, 2 file nay
+// khong import lan nhau - xem tien le class Cdp da duoc lap lai o ca 2 file). Yeu cau nguoi
+// dung 2026-09-12 "thêm cấu hình sắp xếp profile hiển thị ... nhập số hàng và số cột".
+const GRID_ROWS = Math.max(1, parseInt(arg('--grid-rows', '1'), 10) || 1);
+const GRID_COLS = Math.max(1, parseInt(arg('--grid-cols', '1'), 10) || 1);
+const GRID_SLOT = Math.max(0, parseInt(arg('--grid-slot', '0'), 10) || 0);
+const SCREEN_WIDTH = parseInt(arg('--screen-width', '1920'), 10) || 1920;
+const SCREEN_HEIGHT = parseInt(arg('--screen-height', '1080'), 10) || 1080;
 
 // Suffix co dinh giong extension mau (popup.js: additionalCookies) - KHONG phai cookie thuc,
 // chi la thong tin app dinh kem theo dinh dang yeu cau.
@@ -53,6 +62,12 @@ const ft = (u, opts = {}) => {
 };
 
 function out(obj) { process.stdout.write(JSON.stringify(obj) + '\n'); }
+
+// Bao tien trinh THEO THOI GIAN THUC ve dashboard (xem _CDP_PROGRESS/_run_cdp_script() trong
+// affiliate_scrape_server.py) - COPY nguyen co che tu cdp_login_shopee.mjs (2026-09-12, yeu
+// cau nguoi dung thiet ke lai popup "Shopee Cookie" hang loat can theo doi tung buoc real-time
+// thay vi chi thay "Đang chạy" ---> ket qua cuoi cung nhu truoc).
+function progress(step, detail) { out({ progress: true, step, detail: detail || '' }); }
 
 // Phu 1 lop mau xanh nhat len TOAN BO man hinh tab kem chu thong bao lon truoc khi dong browser
 // - nguoi dung thuong mo NHIEU cua so profile GPM/GEM cung luc, can nhan biet NGAY ket qua
@@ -118,7 +133,7 @@ async function startProfile() {
     const r = await ft(base + path, { ms: 20000 });
     const t = await r.text();
     let j = null; try { j = JSON.parse(t); } catch (e) {}
-    if (!r.ok || !(j && j.success)) return { ok: false, raw: t };
+    if (!r.ok || !(j && j.success)) return { ok: false, raw: t, message: j && j.message };
     return { ok: true, data: (j && j.data) || {} };
   };
   let res = await doStart();
@@ -130,7 +145,13 @@ async function startProfile() {
     await sleep(2500);
     res = await doStart();
   }
-  if (!res.ok) throw new Error((ENGINE === 'gem' ? 'GemLogin' : 'GPM') + ' start fail: ' + res.raw.slice(0, 240));
+  // Dat 'message' (vd GPM tra 'ProxyCheckFailed') NGAY DAU chuoi loi, TRUOC ban dump 'raw' cat
+  // ngan - xem chu thich day du tai cdp_login_shopee.mjs (COPY nguyen, 2 file khong import lan
+  // nhau) - bug thuc te 2026-09-12: 240 ky tu cat ngan LUON cat DUNG NGAY TRUOC field 'message'.
+  if (!res.ok) {
+    const msgPart = res.message ? ` message=${res.message}` : '';
+    throw new Error(`${ENGINE === 'gem' ? 'GemLogin' : 'GPM'} start fail:${msgPart} raw=${res.raw.slice(0, 180)}`);
+  }
   const d = res.data;
   if (ENGINE === 'gem') {
     const addr = String(d.remote_debugging_address || '');
@@ -196,6 +217,69 @@ async function pickTab(port, url) {
   return created ? { tab: created, needsNavigate: false } : null;
 }
 
+// Dat vi tri/kich thuoc cua so browser theo luoi hang x cot tren man hinh - xem chu thich day
+// du (co ca ket qua test that xac nhan can 2 luot goi rieng) tai positionWindow()/
+// positionWindowRaw() trong cdp_login_shopee.mjs, COPY nguyen sang day (2 file nay khong import
+// lan nhau - da co tien le class Cdp lap lai o ca 2 file). Best-effort hoan toan (nuot moi loi -
+// tinh nang PHU TRO, khong duoc lam hong/lam cham luong lay cookie chinh).
+async function positionWindow(port) {
+  if (GRID_ROWS <= 1 && GRID_COLS <= 1) return positionWindowRaw(port, null);
+  const cellW = Math.floor(SCREEN_WIDTH / GRID_COLS);
+  const cellH = Math.floor(SCREEN_HEIGHT / GRID_ROWS);
+  const cellsPerScreen = GRID_ROWS * GRID_COLS;
+  const idx = GRID_SLOT % cellsPerScreen; // luong > so o: CHO DE (nguoi dung da xac nhan chap nhan)
+  const col = idx % GRID_COLS;
+  const row = Math.floor(idx / GRID_COLS);
+  return positionWindowRaw(port, { left: col * cellW, top: row * cellH, width: cellW, height: cellH });
+}
+
+async function positionWindowRaw(port, bounds) {
+  let ws = null;
+  try {
+    const v = await (await ft(`http://127.0.0.1:${port}/json/version`, { ms: 6000 })).json();
+    const browserWsUrl = v && v.webSocketDebuggerUrl;
+    if (!browserWsUrl) return;
+    ws = new WebSocket(browserWsUrl);
+    await new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('ws timeout')), 6000);
+      ws.onopen = () => { clearTimeout(t); resolve(); };
+      ws.onerror = () => { clearTimeout(t); reject(new Error('ws error')); };
+    });
+    let msgId = 0;
+    const pending = new Map();
+    ws.onmessage = (ev) => {
+      let msg = null; try { msg = JSON.parse(String(ev.data)); } catch (e) {}
+      if (!msg || msg.id === undefined) return;
+      const p = pending.get(msg.id);
+      if (p) { pending.delete(msg.id); msg.error ? p.reject(new Error(JSON.stringify(msg.error))) : p.resolve(msg.result); }
+    };
+    const send = (method, params = {}) => {
+      const id = ++msgId;
+      return new Promise((resolve, reject) => {
+        pending.set(id, { resolve, reject });
+        ws.send(JSON.stringify({ id, method, params }));
+      });
+    };
+    const targets = await send('Target.getTargets');
+    const pageTarget = (targets.targetInfos || []).find((t) => t.type === 'page');
+    if (!pageTarget) return;
+    const win = await send('Browser.getWindowForTarget', { targetId: pageTarget.targetId });
+    const windowId = win.windowId;
+    if (!bounds) {
+      await send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'maximized' } });
+      return;
+    }
+    await send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } });
+    await sleep(300);
+    await send('Browser.setWindowBounds', { windowId, bounds });
+  } catch (e) {
+    // best-effort - khong ghi stderr de tranh nham voi loi that (file nay khong co co che
+    // DSH_DEBUG rieng nhu cdp_login_shopee.mjs).
+  } finally {
+    try { ws && ws.close(); } catch (e) {}
+  }
+}
+
 class Cdp {
   constructor(wsUrl) { this.wsUrl = wsUrl; this.ws = null; this.id = 0; this.pending = new Map(); }
   async connect() {
@@ -224,10 +308,12 @@ class Cdp {
 
 async function main() {
   if (!PROFILE || !URL) { process.stderr.write('thieu --profile/--url\n'); process.exit(2); }
+  progress('Đang mở trình duyệt profile (GPM/GEM)...');
   let st;
   try { st = await startProfile(); }
   catch (e) { process.stderr.write('START_ERR: ' + e.message + '\n'); process.exit(3); }
   if (!(await waitCdpUp(st.port))) { process.stderr.write('CDP khong len port ' + st.port + '\n'); await closeProfile(); process.exit(4); }
+  await positionWindow(st.port); // best-effort, xem ghi chu dau ham
   const picked = await pickTab(st.port, URL);
   if (!picked) { process.stderr.write('Mo tab that bai\n'); await closeProfile(); process.exit(5); }
   const cdp = new Cdp(picked.tab.webSocketDebuggerUrl);
@@ -235,6 +321,7 @@ async function main() {
   await cdp.send('Page.enable').catch(() => {});
   await cdp.send('Network.enable').catch(() => {});
   await cdp.send('Runtime.enable').catch(() => {});
+  progress('Đang tải trang chủ Shopee...');
   if (picked.needsNavigate) {
     try { await cdp.send('Page.navigate', { url: URL }); } catch (e) { process.stderr.write('NAV loi: ' + (e && e.message) + '\n'); await closeProfile(); process.exit(7); }
   }
@@ -254,6 +341,7 @@ async function main() {
 
   if (/\/login(\?|$)/.test(current) || /accounts\.shopee/.test(current)) { await fail(cdp, 'no_login', 'Chua dang nhap: ' + current); return; }
   if (/\/verify\/(captcha|traffic)/.test(current)) { await fail(cdp, 'captcha', 'Bi chan captcha/traffic: ' + current); return; }
+  progress('Đã xác nhận đăng nhập, đang đọc cookie...');
 
   // Network.getCookies({urls}) - GIONG chrome.cookies.getAll({url}) cua extension mau: chi
   // tra ve dung nhung cookie se duoc gui kem request toi URL nay (khop domain/path chuan cua
@@ -296,4 +384,12 @@ async function main() {
   process.exit(0);
 }
 
-main().then(() => process.exit(0)).catch((e) => { process.stderr.write('FATAL: ' + (e && e.message) + '\n'); process.exit(1); });
+// Luoi an toan CUOI CUNG cho exception khong duoc cac try/catch cuc bo bat - PHAI dong profile
+// o day (2026-09-12, phat hien khi ra soat lai cung 1 lop bug vua sua o cdp_login_shopee.mjs:
+// moi nhanh thoat CO SAN trong main() da tu goi closeProfile(), nhung day la nhanh DUY NHAT
+// truoc do CHUA goi - 1 loi bat ngo khong luong truoc duoc se de lai profile mo mai).
+main().then(() => process.exit(0)).catch(async (e) => {
+  process.stderr.write('FATAL: ' + (e && e.message) + '\n');
+  await closeProfile();
+  process.exit(1);
+});

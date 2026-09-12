@@ -30,8 +30,10 @@ import tempfile
 import threading
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import psutil  # dung cho _kill_gpm_chrome_by_profile(), xem chu thich ham do
 
 from flask import Flask, Response, abort, jsonify, render_template, request
 from openpyxl import Workbook, load_workbook
@@ -1053,8 +1055,12 @@ def mail_accounts_list():
     # login_status: 'ok'/'failed'/'unchecked', khong truyen = khong loc - xem
     # shopee_db.list_mail_accounts() va yeu cau nguoi dung 2026-09-11.
     login_status = request.args.get("login_status") or None
+    # cookie_status: 'live'/'dead'/'fail'/'empty', khong truyen = khong loc - xem
+    # shopee_db.list_mail_accounts() va yeu cau nguoi dung 2026-09-12 "làm thêm bộ lọc theo
+    # trạng thái của cột cookie".
+    cookie_status = request.args.get("cookie_status") or None
     limit = request.args.get("limit", 500, type=int)
-    rows = shopee_db.list_mail_accounts(DB_PATH, market=market, slot=slot, search=search, group_gpm=group_gpm, has_id_gpm=has_id_gpm, login_status=login_status, limit=limit)
+    rows = shopee_db.list_mail_accounts(DB_PATH, market=market, slot=slot, search=search, group_gpm=group_gpm, has_id_gpm=has_id_gpm, login_status=login_status, cookie_status=cookie_status, limit=limit)
     # with_today_count=1: kem so video da dang THANH CONG HOM NAY moi dong - dung cho bang
     # chon tai khoan o tab "Đăng video" (doi chieu voi rate_limit_video). 1 query GROUP BY
     # chung cho CA trang (xem count_success_today_by_account()), khong phai N query rieng.
@@ -2266,6 +2272,70 @@ def _check_shopee_cookie_alive(cookie_str, market):
     return False, j.get("error_msg") or f"Cookie khong con hop le (error={err})."
 
 
+def _check_proxy_alive(proxy_line, timeout=10):
+    """Kiem tra 1 proxy (dinh dang 'ip:port:user:pass' hoac 'ip:port', cot 'Proxy') CON SONG
+    hay khong bang 1 request HTTP THAT DI QUA NO - dung khi GPM/GEM bao loi start profile CO
+    LIEN QUAN proxy (xem _enrich_proxy_error()) de bao chinh xac LY DO thay vi chi dump nguyen
+    JSON loi tho tu GPM (yeu cau nguoi dung 2026-09-12: "thêm hàm check proxy ... nếu là lỗi
+    proxy thì thông báo chi tiết do proxy die"). Tai su dung parse_proxy() da co san trong
+    shopee_video_post.py (dung chung dinh dang voi upload/proxy.txt cua pipeline dang video),
+    tranh viet lai logic parse ip:port:user:pass lan 2.
+
+    Da xac nhan THAT (2026-09-12, dieu tra TH-00024/TH-00042/TH-00043): proxy chet KIEU PHO
+    BIEN NHAT la 407 Proxy Authentication Required (sai/het han thong tin dang nhap cua CHINH
+    IP:port do trong pool xoay vong - KHONG PHAI ca goi proxy chet, cac IP khac cung tai khoan
+    proxy van song binh thuong). Tra ve (alive: bool, detail: str)."""
+    if not proxy_line or not proxy_line.strip():
+        return False, "Chưa cấu hình proxy cho dòng này."
+    try:
+        proxy_url = shopee_video_post.parse_proxy(proxy_line)
+    except ValueError as e:
+        return False, f"Định dạng proxy không hợp lệ: {e}"
+    try:
+        r = _requests.get(
+            "http://api.ipify.org?format=json",
+            proxies={"http": proxy_url, "https": proxy_url},
+            timeout=timeout,
+        )
+        if r.status_code == 200:
+            ip = (r.json() or {}).get("ip", "?")
+            return True, f"Proxy còn sống (IP thật qua proxy: {ip})."
+        if r.status_code == 407:
+            # Proxy voi target HTTP (khong qua CONNECT tunnel) tra thang 407 nhu 1 response
+            # binh thuong thay vi nem ProxyError nhu voi target HTTPS - gom chung 1 cho de dam
+            # bao thong diep nhat quan bat ke scheme nao duoc dung o day.
+            return False, "Proxy DIE - sai/hết hạn thông tin đăng nhập proxy (407 Proxy Authentication Required)."
+        return False, f"Proxy phản hồi bất thường (HTTP {r.status_code})."
+    except _requests.exceptions.ProxyError as e:
+        msg = str(e)
+        if "407" in msg:
+            return False, "Proxy DIE - sai/hết hạn thông tin đăng nhập proxy (407 Proxy Authentication Required)."
+        return False, f"Proxy DIE - không kết nối được: {msg[:200]}"
+    except _requests.exceptions.ConnectTimeout:
+        return False, f"Proxy DIE - quá thời gian kết nối ({timeout}s)."
+    except Exception as e:
+        return False, f"Proxy DIE - lỗi: {type(e).__name__}: {str(e)[:150]}"
+
+
+def _enrich_proxy_error(detail, proxy_line):
+    """Neu 'detail' (loi tra ve tu GPM/GEM khi start profile that bai, xem _run_cdp_script())
+    co dau hieu LIEN QUAN PROXY (chua tu 'proxy' - khong phan biet hoa/thuong, khop ca
+    'ProxyCheckFailed' GPM hay tra ve), tu dong CHECK THAT proxy cua dong nay (xem
+    _check_proxy_alive()) roi GHEP THEM 1 dong ket luan RO RANG vao cuoi - yeu cau nguoi dung
+    2026-09-12 "nếu là lỗi proxy thì thông báo chi tiết do proxy die" (thay vi nguoi dung phai
+    tu doc JSON loi tho kho hieu tu GPM/GEM). Goi o CA 2 route login_shopee/get_cookie (2 noi
+    duy nhat thuc su goi startProfile() mo profile moi - runActivate() dung lai profile CU nen
+    khong can). Best-effort - loi trong luc check KHONG duoc lam mat detail goc."""
+    if not detail or "proxy" not in detail.lower():
+        return detail
+    try:
+        alive, proxy_detail = _check_proxy_alive(proxy_line)
+    except Exception:
+        return detail
+    tag = "✓" if alive else "⚠"
+    return f"{detail}\n{tag} Đã tự động kiểm tra proxy: {proxy_detail}"
+
+
 def _gpm_list_page_items(payload):
     """GPM Local API tra list dang {"data": {...phan trang, "data": [items...]}} hoac truc tiep
     [items] - trich ra dung danh sach item (cung kieu xu ly nhu gpm_groups()/gpm_profiles())."""
@@ -2703,6 +2773,22 @@ def mail_accounts_check_cookie(account_id):
     return jsonify({"ok": True, "status": "alive" if alive else "dead", "detail": detail})
 
 
+@app.route("/api/mail_accounts/<int:account_id>/del_cookie", methods=["POST"])
+def mail_accounts_del_cookie(account_id):
+    """Nut 'Del Cookie' (popup "Shopee Cookie" hang loat, yeu cau nguoi dung 2026-09-12) - CHI
+    xoa gia tri cookie trong DB (cookie='', cookie_status=NULL), KHONG mo browser/profile that
+    (nguoi dung da xac nhan chon phuong an nay thay vi mo profile that xoa cookie trinh duyet -
+    nhanh, tuc thi, an toan cho hang loat). Ket qua sau khi xoa la badge 'NULL' tren cot Cookie -
+    CO Y khac voi 'FAIL' (dau hieu rieng cua 1 LAN LAY COOKIE THAT BAI, xem mail_accounts_get_cookie())
+    de nguoi dung phan biet duoc "chua tung/vua bi xoa" voi "vua thu lay nhung khong duoc"."""
+    row = shopee_db.get_mail_account(DB_PATH, account_id)
+    if not row:
+        return _bad_request(f"khong tim thay mail id={account_id}")
+    shopee_db.update_mail_account_fields(DB_PATH, account_id, cookie="")
+    shopee_db.set_mail_account_cookie_status(DB_PATH, account_id, None)
+    return jsonify({"ok": True, "status": "ok", "detail": "Đã xoá cookie."})
+
+
 @app.route("/api/mail_accounts/gpm/open_bulk", methods=["POST"])
 def mail_accounts_gpm_open_bulk():
     """Nut 'Mở profile' hang loat cho cac dong dang duoc TICH CHON: mo browser theo engine cua
@@ -2805,9 +2891,14 @@ def mail_accounts_get_shopee_id(account_id):
 
 @app.route("/api/mail_accounts/<int:account_id>/get_cookie", methods=["POST"])
 def mail_accounts_get_cookie(account_id):
-    """Nut 'Get Cookie' (hang loat): mo browser cua dong (engine GPM/GEM), mo trang chu
-    Shopee theo market va lay TOAN BO cookie dang nhap qua CDP Network.getCookies (ke ca
-    HttpOnly/Secure - xem cdp_get_cookie.mjs). Tra ve theo trang thai:
+    """Nut 'Get Cookie' (hang loat, trong popup "Shopee Cookie" - xem yeu cau nguoi dung
+    2026-09-12 thiet ke lai): mo browser cua dong (engine GPM/GEM), mo trang chu Shopee theo
+    market va lay TOAN BO cookie dang nhap qua CDP Network.getCookies (ke ca HttpOnly/Secure -
+    xem cdp_get_cookie.mjs). LUON CHAY (ghi de neu da co cookie cu) - khong con tu kiem tra
+    "con song thi bo qua" nhu ban cu (logic do da chuyen sang nut Check Cookie RIENG trong
+    popup moi, nguoi dung tu quyet dinh trinh tu chay). Chay qua _run_get_cookie_node() (Popen +
+    _CDP_PROGRESS, cung co che voi Login Shopee) thay vi subprocess.run() chan cung nhu truoc -
+    de frontend poll duoc tung buoc real-time (xem GET .../cdp_progress). Tra ve theo trang thai:
       status ok                        -> da co cookie, ghi vao cot cookie
       no_login/captcha/timeout/error   -> LAY THAT BAI: ghi de cot cookie = 'FAIL' (KE CA
                                            khi dong da co cookie CU tu truoc - xem yeu cau
@@ -2822,29 +2913,12 @@ def mail_accounts_get_cookie(account_id):
         return jsonify({"ok": True, "status": "no_id", "detail": "Chua co ID GPM/GEM (bo qua)."})
     engine = _row_engine(row)
     home_url, _code = _gpm_market_home(row.get("market"))
-    node_exe = _find_node()
-    cmd = [node_exe, os.path.join(SCRIPTS_DIR, "cdp_get_cookie.mjs"),
-           "--engine", engine, "--profile", profile_id, "--url", home_url,
-           "--gpm-base", GPM_BASE, "--gem-base", GEM_BASE]
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=110)
-    except subprocess.TimeoutExpired:
-        shopee_db.update_mail_account_fields(DB_PATH, account_id, cookie="FAIL")
-        shopee_db.set_mail_account_cookie_status(DB_PATH, account_id, None)
-        return jsonify({"ok": True, "status": "error", "detail": "Chay qua 110s (timeout).",
-                        "engine": engine, "url": home_url, "cookie": "FAIL"})
-    out_text = (proc.stdout or "").strip()
-    last_line = out_text.splitlines()[-1] if out_text else ""
-    import json as _json
-    try:
-        res = _json.loads(last_line)
-    except Exception:
-        stderr_tail = (proc.stderr or "").strip().splitlines()
-        tail = (stderr_tail[-1] if stderr_tail else "") or (proc.stdout or "")[:200]
-        shopee_db.update_mail_account_fields(DB_PATH, account_id, cookie="FAIL")
-        shopee_db.set_mail_account_cookie_status(DB_PATH, account_id, None)
-        return jsonify({"ok": True, "status": "error", "detail": f"Helper loi: {tail[:240]}",
-                        "engine": engine, "url": home_url, "cookie": "FAIL"})
+    body = request.get_json(force=True, silent=True) or {}
+    _set_cdp_progress(account_id, "Đang mở trình duyệt profile...")
+    res = _run_get_cookie_node([
+        "--engine", engine, "--profile", profile_id, "--url", home_url,
+        "--gpm-base", GPM_BASE, "--gem-base", GEM_BASE,
+    ] + _grid_cli_args(body), timeout=110, account_id=account_id)
     status = str(res.get("status") or "error")
     cookie_val = str(res.get("cookie") or "").strip()
     if status == "ok" and cookie_val:
@@ -2861,23 +2935,29 @@ def mail_accounts_get_cookie(account_id):
     # (xem yeu cau nguoi dung 2026-09-11).
     shopee_db.update_mail_account_fields(DB_PATH, account_id, cookie="FAIL")
     shopee_db.set_mail_account_cookie_status(DB_PATH, account_id, None)
+    detail = _enrich_proxy_error(res.get("detail") or "", row.get("proxy"))
+    # Luoi an toan OS-level - xem giai thich day du o mail_accounts_login_shopee() (cung 1 bug:
+    # GPM API 'stop' co the tra "thanh cong" ma khong thuc su dong duoc profile sau khi gap
+    # captcha, xem _kill_gpm_chrome_by_profile()).
+    _kill_gpm_chrome_by_profile(profile_id)
     return jsonify({"ok": True, "status": status, "cookie": "FAIL",
-                    "detail": res.get("detail") or "", "url": home_url,
+                    "detail": detail, "url": home_url,
                     "user_handle": status in ("no_login", "captcha")})
 
 
-# Trang thai "dang lam gi" MOI NHAT cua tung dong dang chay nut 'Login Shopee' - cho popup
-# tien trinh o frontend POLL de hien chi tiet tung buoc (xem yeu cau nguoi dung 2026-09-11:
-# "muon chi tiet hon tung tai khoan"), KHONG chi biet ket qua cuoi cung. Key = account_id,
-# value = {"step", "detail", "ts"}. Ghi de MOI LAN co buoc moi (khong can lich su), doc qua
-# GET /api/mail_accounts/<id>/login_shopee/progress.
-_LOGIN_PROGRESS = {}
-_LOGIN_PROGRESS_LOCK = threading.Lock()
+# Trang thai "dang lam gi" MOI NHAT cua tung dong dang chay 1 tac vu Popen+progress (Login
+# Shopee HOAC Get Cookie, xem _run_cdp_script()) - cho popup tien trinh o frontend POLL de hien
+# chi tiet tung buoc (yeu cau nguoi dung 2026-09-11: "muon chi tiet hon tung tai khoan", mo
+# rong 2026-09-12 sang ca Get Cookie khi thiet ke lai popup Cookie hang loat), KHONG chi biet
+# ket qua cuoi cung. Key = account_id, value = {"step", "detail", "ts"}. Ghi de MOI LAN co buoc
+# moi (khong can lich su), doc qua GET /api/mail_accounts/<id>/cdp_progress.
+_CDP_PROGRESS = {}
+_CDP_PROGRESS_LOCK = threading.Lock()
 
 
-def _set_login_progress(account_id, step, detail=""):
-    with _LOGIN_PROGRESS_LOCK:
-        _LOGIN_PROGRESS[account_id] = {"step": step, "detail": detail, "ts": time.time()}
+def _set_cdp_progress(account_id, step, detail=""):
+    with _CDP_PROGRESS_LOCK:
+        _CDP_PROGRESS[account_id] = {"step": step, "detail": detail, "ts": time.time()}
 
 
 def _persist_login_cookie(account_id, res):
@@ -2897,30 +2977,52 @@ def _persist_login_cookie(account_id, res):
         shopee_db.set_mail_account_cookie_status(DB_PATH, account_id, "alive")
 
 
-@app.route("/api/mail_accounts/<int:account_id>/login_shopee/progress", methods=["GET"])
-def mail_accounts_login_shopee_progress(account_id):
-    """Frontend POLL endpoint nay (moi 1-2s) trong luc cho ket qua POST .../login_shopee de
-    hien buoc hien tai (vd 'Đang điền form...', 'Đang chờ email xác thực...') - xem
-    _LOGIN_PROGRESS. step=None neu chua co gi (chua bat dau/da xong tu lau)."""
-    with _LOGIN_PROGRESS_LOCK:
-        p = _LOGIN_PROGRESS.get(account_id)
+@app.route("/api/mail_accounts/<int:account_id>/cdp_progress", methods=["GET"])
+def mail_accounts_cdp_progress(account_id):
+    """Frontend POLL endpoint nay (moi 1-2s) trong luc cho ket qua 1 request dang chay dung
+    Popen+progress (POST .../login_shopee HOAC POST .../get_cookie, xem _run_cdp_script()) de
+    hien buoc hien tai (vd 'Đang điền form...', 'Đang mở trang chủ...') - xem _CDP_PROGRESS.
+    step=None neu chua co gi (chua bat dau/da xong tu lau). Doi ten tu 'login_shopee/progress'
+    (2026-09-12, yeu cau nguoi dung thiet ke lai popup Cookie hang loat) vi _CDP_PROGRESS gio
+    dung CHUNG cho ca 2 flow, khong con rieng cho Login Shopee nua."""
+    with _CDP_PROGRESS_LOCK:
+        p = _CDP_PROGRESS.get(account_id)
     if not p:
         return jsonify({"ok": True, "step": None, "detail": "", "ts": None})
     return jsonify({"ok": True, "step": p["step"], "detail": p["detail"], "ts": p["ts"]})
 
 
-def _run_login_node(extra_args, timeout, account_id):
-    """Chay cdp_login_shopee.mjs qua Popen (KHONG dung subprocess.run) de doc duoc stdout
-    THEO THOI GIAN THUC tung dong mot - script in ra nhieu dong JSON tien trinh trong luc chay
-    (dang {"progress": true, "step", "detail"} - xem progress() trong cdp_login_shopee.mjs) roi
-    1 dong JSON KET QUA CUOI CUNG (khong co key 'progress'). Moi dong tien trinh doc duoc se
-    ghi ngay vao _LOGIN_PROGRESS cho frontend poll thay ngay lap tuc, khong phai doi ca request
-    xong moi biet dang lam gi (xem yeu cau nguoi dung 2026-09-11).
+def _cdp_helper_error_line(stderr_text):
+    """Trich dong loi THAT SU tu stderr cua 1 tien trinh Node bi crash (uncaught exception) -
+    BO QUA dong trailer co dinh 'Node.js vX.Y.Z' ma Node LUON in cuoi cung sau MOI crash khong
+    bat duoc (hoan toan khong mang thong tin gi ve nguyen nhan that), lay dong NGAY TRUOC no
+    (thuong la dong 'Error: ...'/'TypeError: ...' that su) - xac nhan qua dieu tra thuc te
+    2026-09-12 tren may SSH (loi ERR_MODULE_NOT_FOUND: dong cuoi cung CHI la 'Node.js
+    v24.20.0', dong loi that nam ngay phia truoc no ma logic cu (lay dong cuoi) bo lo hoan toan)."""
+    lines = [ln.strip() for ln in (stderr_text or "").strip().splitlines() if ln.strip()]
+    if not lines:
+        return ""
+    if len(lines) > 1 and re.match(r"^Node\.js v\d+\.\d+\.\d+$", lines[-1]):
+        return lines[-2]
+    return lines[-1]
+
+
+def _run_cdp_script(script_name, extra_args, timeout, account_id):
+    """Chay 1 script CDP dang '.mjs' (cdp_login_shopee.mjs HOAC cdp_get_cookie.mjs, xem 2 ham
+    wrapper _run_login_node()/_run_get_cookie_node() ben duoi) qua Popen (KHONG dung
+    subprocess.run) de doc duoc stdout THEO THOI GIAN THUC tung dong mot - script in ra nhieu
+    dong JSON tien trinh trong luc chay (dang {"progress": true, "step", "detail"} - xem
+    progress() trong file .mjs tuong ung) roi 1 dong JSON KET QUA CUOI CUNG (khong co key
+    'progress'). Moi dong tien trinh doc duoc se ghi ngay vao _CDP_PROGRESS cho frontend poll
+    thay ngay lap tuc, khong phai doi ca request xong moi biet dang lam gi (yeu cau nguoi dung
+    2026-09-11, mo rong 2026-09-12 sang ca Get Cookie khi thiet ke lai popup Cookie hang loat -
+    truoc do cdp_get_cookie.mjs chay qua subprocess.run() chan cung, khong co progress trung
+    gian).
     Dung 1 thread doc rieng + queue.Queue de co the ap dung timeout tong the mot cach an toan
     tren Windows (subprocess pipe KHONG ho tro select() nhu socket tren Windows, nen khong the
     dat timeout truc tiep tren proc.stdout.readline())."""
     node_exe = _find_node()
-    cmd = [node_exe, os.path.join(SCRIPTS_DIR, "cdp_login_shopee.mjs")] + extra_args
+    cmd = [node_exe, os.path.join(SCRIPTS_DIR, script_name)] + extra_args
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 text=True, encoding="utf-8", errors="replace")
@@ -2961,7 +3063,7 @@ def _run_login_node(extra_args, timeout, account_id):
         except Exception:
             continue
         if obj.get("progress"):
-            _set_login_progress(account_id, obj.get("step") or "", obj.get("detail") or "")
+            _set_cdp_progress(account_id, obj.get("step") or "", obj.get("detail") or "")
             continue
         last_result = obj
 
@@ -2977,11 +3079,124 @@ def _run_login_node(extra_args, timeout, account_id):
         return last_result
     stderr_tail = ""
     try:
-        err_lines = (proc.stderr.read() or "").strip().splitlines()
-        stderr_tail = err_lines[-1] if err_lines else ""
+        stderr_tail = _cdp_helper_error_line(proc.stderr.read())
     except Exception:
         pass
     return {"status": "error", "detail": f"Helper loi: {stderr_tail[:240]}"}
+
+
+def _run_login_node(extra_args, timeout, account_id):
+    return _run_cdp_script("cdp_login_shopee.mjs", extra_args, timeout, account_id)
+
+
+def _run_get_cookie_node(extra_args, timeout, account_id):
+    return _run_cdp_script("cdp_get_cookie.mjs", extra_args, timeout, account_id)
+
+
+def _close_gpm_gem_profile(engine, profile_id):
+    """Dong browser cua 1 profile GPM/GEM TRUC TIEP tu Python (GET .../stop hoac .../close,
+    KHONG can spawn them 1 tien trinh Node chi de dong) - y het logic closeProfile() trong
+    cdp_login_shopee.mjs/cdp_get_cookie.mjs. Best-effort (nuot loi hoan toan).
+
+    Dung khi PHAI dong 1 profile ma KHONG CON tien trinh Node nao dang giu no de tu dong - xac
+    nhan bug thuc te 2026-09-12 (yeu cau nguoi dung "Login Shopee ... Không tự đóng trình duyệt
+    khi chuyển trang tài khoản tiếp theo"): --step login voi ket qua 'verify_email_link' CO Y
+    de ngo profile MO (giao lai cho --step activate dong khi xong, xem _run_login_node() +
+    comment o mail_accounts_login_shopee()) - nhung neu vong lap doc mail o duoi THAT BAI HOAN
+    TOAN (loi Graph API, hoac khong tim thay link sau 6 lan thu) thi ham nay return SOM, KHONG
+    BAO GIO goi --step activate -> profile bi mo lai mai mai, khong tien trinh Node nao con
+    song de tu dong (da bi Popen tra ve tu lau). Day la nguyen nhan CON LAI (khac voi bug
+    --profile bi thieu o --step activate da sua truoc do)."""
+    if not profile_id:
+        return
+    base = GEM_BASE if engine == "gem" else GPM_BASE
+    path = f"/api/profiles/close/{profile_id}" if engine == "gem" else f"/api/v1/profiles/stop/{profile_id}"
+    try:
+        _requests.get(base + path, timeout=20)
+    except Exception:
+        pass
+    # Luoi an toan OS-level: xem _kill_gpm_chrome_by_profile() - GPM API 'stop'/'close' KHONG
+    # dang tin cay 100% (xac nhan thuc te 2026-09-12, xem chu thich ham do), goi THEM o day de
+    # bao dam profile THAT SU dong ke ca khi GPM tra "success" ma khong lam gi ca.
+    _kill_gpm_chrome_by_profile(profile_id)
+
+
+def _kill_gpm_chrome_by_profile(profile_id):
+    """Tim VA GIET TRUC TIEP (OS-level, khong qua GPM/GEM API) tien trinh Chrome CUA DUNG 1
+    profile - luoi an toan CUOI CUNG khi API dong cua GPM/GEM khong dang tin cay.
+
+    Xac nhan bug thuc te 2026-09-12 (yeu cau nguoi dung "2 profile [TH-00085/TH-00097] chạy
+    xong tôi không tắt được, bị treo rồi", sau do them TH-00072 cung trieu chung): CA 3 dong
+    deu dung o trang thai 'Bị captcha/traffic' (tuc la --step login DA CHAY XONG binh thuong va
+    DA TU goi closeProfile() dung code - khac han 2 bug profile-mo-mai da sua truoc do, ca 2
+    deu la truong hop closeProfile() CHUA BAO GIO duoc goi). O day, code DA goi dung GET
+    .../stop nhung GPM tra ve {"success":false,"message":"OK"} - tuc GPM TUONG NHAM la "khong
+    co gi de dung" - trong khi tien trinh chrome.exe THAT SU van con song (xac nhan qua
+    Get-CimInstance Win32_Process, process cha KHONG co "--type=" van con đó, la con cua chinh
+    tien trinh GPMLoginGlobal.exe). Nghi van: GPM danh mat theo doi tien trinh sau 1 phien co
+    NHIEU thao tac CDP tu dong hoa nang (mo phong keo chuot giai captcha, disable/enable lien
+    tuc domain Runtime - xem trySolveCaptcha() trong cdp_login_shopee.mjs) - KHONG the sua tu
+    phia code cua chung ta (GPM la phan mem dong goi), nen phai them luoi an toan nay.
+
+    Nhan dien qua chuoi profile_id (GUID) xuat hien trong '--user-data-dir=...<profile_id>' cua
+    command line - da xac nhan qua thuc nghiem la CACH DUY NHAT dang tin cay de biet 1 tien
+    trinh Chrome thuoc DUNG profile nao (GPM KHONG expose PID qua API 1 cach on dinh). CHI giet
+    tien trinh GOC (khong co '--type=' trong command line - day la process con thuc su, cac
+    tien trinh --type=gpu-process/renderer/utility/... la CON cua no) roi giet toan bo CAY con
+    cua no (children recursive) - tranh giet nham 1 child process rieng le ma bo sot process
+    cha van con song tao lai child moi.
+
+    Best-effort HOAN TOAN (nuot moi loi/AccessDenied) - day la luoi an toan PHU, khong duoc
+    phep lam crash luong chinh du gap bat ky truc trac gi khi liet ke/giet process."""
+    if not profile_id:
+        return False
+    killed = False
+    try:
+        candidates = list(psutil.process_iter(["pid", "name", "cmdline"]))
+    except Exception:
+        return False
+    for p in candidates:
+        try:
+            name = (p.info.get("name") or "").lower()
+            if "chrome" not in name:
+                continue
+            cmdline = " ".join(p.info.get("cmdline") or [])
+            if profile_id not in cmdline or "--type=" in cmdline:
+                continue
+            try:
+                children = p.children(recursive=True)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                children = []
+            for c in children:
+                try:
+                    c.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            p.kill()
+            killed = True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        except Exception:
+            continue
+    return killed
+
+
+def _grid_cli_args(body):
+    """Trich tham so luoi sap xep cua so (rows/cols/slot/screen w/h) tu request body thanh
+    danh sach CLI arg --grid-rows/--grid-cols/--grid-slot/--screen-width/--screen-height cho
+    cdp_login_shopee.mjs/cdp_get_cookie.mjs (xem positionWindow() trong 2 file do) - yeu cau
+    nguoi dung 2026-09-12 "thêm cấu hình sắp xếp profile hiển thị ... nhập số hàng và số cột".
+    KHONG bat buoc truyen du - moi gia tri thieu deu co default hop le o phia .mjs (1 hang x 1
+    cot = full man hinh)."""
+    args = []
+    for key, flag in (
+        ("grid_rows", "--grid-rows"), ("grid_cols", "--grid-cols"), ("grid_slot", "--grid-slot"),
+        ("screen_width", "--screen-width"), ("screen_height", "--screen-height"),
+    ):
+        val = body.get(key)
+        if val is not None:
+            args += [flag, str(val)]
+    return args
 
 
 @app.route("/api/mail_accounts/<int:account_id>/login_shopee", methods=["POST"])
@@ -2999,8 +3214,8 @@ def mail_accounts_login_shopee(account_id):
          giay sau khi bam nut. Sau do goi --step activate: mo link o TAB MOI (khong dieu huong
          tab dang cho), doi duoc duyet ("Sign-in attempt has been approved.") roi quay lai tab
          dang dang nhap (Page.bringToFront) va poll tiep ket qua dang nhap cuoi cung.
-    Trong suot qua trinh, ghi tung buoc vao _LOGIN_PROGRESS (xem _run_login_node/
-    _set_login_progress) de frontend poll hien chi tiet theo thoi gian thuc (yeu cau nguoi dung
+    Trong suot qua trinh, ghi tung buoc vao _CDP_PROGRESS (xem _run_login_node/
+    _set_cdp_progress) de frontend poll hien chi tiet theo thoi gian thuc (yeu cau nguoi dung
     2026-09-11), khong chi bao ket qua cuoi.
     Tra ve theo trang thai (giong cac nut Get ID/Get Cookie khac):
       ok                  -> da dang nhap Shopee thanh cong
@@ -3035,24 +3250,41 @@ def mail_accounts_login_shopee(account_id):
     node_timeout_ms = str(timeout_sec * 1000)
     subprocess_timeout = timeout_sec + 50  # +50s de xu ly startProfile/CDP connect/overhead
 
-    _set_login_progress(account_id, "Đang mở trình duyệt profile...")
+    # Moc thoi gian BAT DAU lan dang nhap nay (tru 5 phut lam bien an toan cho do lech dong ho
+    # + do tre thuc te giua luc bam dang nhap va luc Shopee THAT SU gui mail) - dung de loc
+    # since_iso khi doc mail o duoi (yeu cau nguoi dung 2026-09-12: "phải đảm bảo là chỉ lấy
+    # mail được gửi trong thời điểm chạy login", sau khi phat hien TH-00013/TH-00017 nham phai
+    # 1 link CU tu 3 NGAY TRUOC do van con nam trong hop thu - link kieu do gan nhu chac chan
+    # da het han, dung se that bai o buoc activate ma khong ro ly do that).
+    login_started_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    login_started_iso = login_started_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    _set_cdp_progress(account_id, "Đang mở trình duyệt profile...")
     res = _run_login_node([
         "--step", "login", "--engine", engine, "--profile", profile_id, "--url", profile_url,
         "--login-key", login_key, "--password", password,
         "--gpm-base", GPM_BASE, "--gem-base", GEM_BASE, "--timeout", node_timeout_ms,
-    ], timeout=subprocess_timeout, account_id=account_id)
+    ] + _grid_cli_args(body), timeout=subprocess_timeout, account_id=account_id)
 
     status = str(res.get("status") or "error")
     if status == "ok":
-        _set_login_progress(account_id, "Đăng nhập thành công.")
+        _set_cdp_progress(account_id, "Đăng nhập thành công.")
         shopee_db.set_mail_account_login_status(DB_PATH, account_id, "ok")
         _persist_login_cookie(account_id, res)
         return jsonify({"ok": True, "status": "ok", "detail": res.get("detail") or "Da dang nhap.",
                         "url": profile_url, "cookie_saved": bool((res.get("cookie") or "").strip())})
     if status != "verify_email_link":
-        _set_login_progress(account_id, "Đã xong.", res.get("detail") or "")
+        detail = _enrich_proxy_error(res.get("detail") or "", row.get("proxy"))
+        _set_cdp_progress(account_id, "Đã xong.", detail)
         shopee_db.set_mail_account_login_status(DB_PATH, account_id, status)
-        return jsonify({"ok": True, "status": status, "detail": res.get("detail") or "",
+        # Luoi an toan OS-level (yeu cau nguoi dung 2026-09-12: "chạy xong tôi không tắt được
+        # profile, bị treo rồi" - TH-00085/TH-00097/TH-00072, ca 3 deu dung o 'captcha'): du
+        # cdp_login_shopee.mjs DA tu goi closeProfile() dung code (khong phai bug thieu goi nhu
+        # 2 lan truoc), GPM API 'stop' van co the tra "thanh cong" ma KHONG thuc su dong duoc
+        # profile (xac nhan thuc te qua Get-CimInstance Win32_Process) - kiem tra/giet lai TRUC
+        # TIEP o day de dam bao chac chan, xem _kill_gpm_chrome_by_profile().
+        _kill_gpm_chrome_by_profile(profile_id)
+        return jsonify({"ok": True, "status": status, "detail": detail,
                         "url": profile_url, "user_handle": status in ("captcha",)})
 
     # Shopee bat xac thuc qua link email - doc mail (co retry, email co the den tre vai giay).
@@ -3061,39 +3293,57 @@ def mail_accounts_login_shopee(account_id):
     link = None
     fetch_note = ""
     for attempt in range(6):  # ~30s cho phep email den tre
-        _set_login_progress(account_id, f"Đang đọc email lấy link kích hoạt (lần {attempt + 1}/6)...")
+        _set_cdp_progress(account_id, f"Đang đọc email lấy link kích hoạt (lần {attempt + 1}/6)...")
         time.sleep(5)
         try:
             link, fetch_note, new_refresh_token = microsoft_mail_client.fetch_login_link(
-                row["refresh_token"], row["client_id"])
+                row["refresh_token"], row["client_id"], since_iso=login_started_iso)
             if new_refresh_token and new_refresh_token != row["refresh_token"]:
                 shopee_db.update_mail_account_refresh_token(DB_PATH, account_id, new_refresh_token)
         except microsoft_mail_client.MicrosoftMailError as e:
-            _set_login_progress(account_id, "Đã xong.", f"Loi doc mail: {e}")
+            _set_cdp_progress(account_id, "Đã xong.", f"Loi doc mail: {e}")
             shopee_db.set_mail_account_login_status(DB_PATH, account_id, "error")
+            # --step activate se KHONG BAO GIO duoc goi (bo cuoc ngay tai day) - profile van
+            # con MO tu --step login (verify_email_link co y de ngo cho activate dong ho) -
+            # PHAI tu dong lay, khong tien trinh Node nao con song de lam thay (xem
+            # _close_gpm_gem_profile(), yeu cau nguoi dung 2026-09-12).
+            _close_gpm_gem_profile(engine, profile_id)
             return jsonify({"ok": True, "status": "error", "detail": f"Loi doc mail: {e}",
                             "url": profile_url})
         if link:
             break
     if not link or not port or not tab_id:
         detail = f"Khong tim thay link kich hoat trong mail sau nhieu lan thu. {fetch_note}"
-        _set_login_progress(account_id, "Đã xong.", detail)
+        _set_cdp_progress(account_id, "Đã xong.", detail)
         shopee_db.set_mail_account_login_status(DB_PATH, account_id, "no_email_link")
+        # Cung ly do nhu tren: het 6 lan thu van khong co link -> bo cuoc, --step activate
+        # khong duoc goi -> phai tu dong profile lay tu Python (xem _close_gpm_gem_profile()).
+        _close_gpm_gem_profile(engine, profile_id)
         return jsonify({"ok": True, "status": "no_email_link", "detail": detail, "url": profile_url})
 
-    _set_login_progress(account_id, "Đã tìm thấy link kích hoạt, đang mở để xác thực...")
+    _set_cdp_progress(account_id, "Đã tìm thấy link kích hoạt, đang mở để xác thực...")
+    # --profile/--engine/--gpm-base/--gem-base (yeu cau nguoi dung 2026-09-12 "tool cứ mở liên
+    # tục không đóng profile lại"): buoc activate ban than KHONG dung toi cac tham so nay cho
+    # logic chinh, nhung PHAI truyen de closeProfile() trong cdp_login_shopee.mjs biet dong DUNG
+    # profile nay sau khi xong (thanh cong hay that bai) - truoc ban va, buoc nay khong nhan
+    # --profile nen khong bao gio dong duoc, la 1 trong 2 nguyen nhan profile bi mo mai khong dong.
     res2 = _run_login_node([
         "--step", "activate", "--port", str(port), "--tab0-id", str(tab_id), "--link", link,
         "--timeout", node_timeout_ms,
+        "--engine", engine, "--profile", profile_id, "--gpm-base", GPM_BASE, "--gem-base", GEM_BASE,
     ], timeout=subprocess_timeout, account_id=account_id)
     status2 = str(res2.get("status") or "error")
     detail2 = res2.get("detail") or ""
     if res2.get("approved") is False:
         detail2 = (detail2 + " (Chua thay xac nhan duyet o tab kich hoat)").strip()
-    _set_login_progress(account_id, "Đã xong.", detail2)
+    _set_cdp_progress(account_id, "Đã xong.", detail2)
     shopee_db.set_mail_account_login_status(DB_PATH, account_id, status2)
     if status2 == "ok":
         _persist_login_cookie(account_id, res2)
+    else:
+        # Luoi an toan OS-level - xem giai thich day du o nhanh loi cua --step login o tren
+        # (cung 1 bug, --step activate cung co the gap lai captcha qua handleCaptchaIfNeeded()).
+        _kill_gpm_chrome_by_profile(profile_id)
     return jsonify({"ok": True, "status": status2, "detail": detail2, "url": profile_url,
                     "user_handle": status2 in ("captcha",),
                     "cookie_saved": status2 == "ok" and bool((res2.get("cookie") or "").strip())})

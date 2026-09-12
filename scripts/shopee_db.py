@@ -3167,14 +3167,37 @@ def import_mail_accounts_from_rows(db_path, rows):
 
 
 def list_mail_accounts(db_path, market=None, slot=None, search=None, group_gpm=None, has_id_gpm=None,
-                        login_status=None, limit=500):
+                        login_status=None, cookie_status=None, limit=500):
     """has_id_gpm: None = khong loc; False = CHI cac dong CHUA co GPM ID (id_gpm rong/NULL -
     dung cho bo loc "Chưa có" tren UI, de tim nhanh dong can dien qua nut 'Import GPM ID');
     True = CHI cac dong DA CO GPM ID.
-    login_status (them 2026-09-11, xem cot 'shopee_login_status'): None = khong loc; 'ok' =
-    CHI dong da dang nhap Shopee thanh cong lan gan nhat; 'failed' = CHI dong DA TUNG chay nut
-    'Login Shopee' nhung KHONG thanh cong (sai mat khau/captcha/loi/...); 'unchecked' = CHI
-    dong CHUA TUNG chay nut nay lan nao (shopee_login_status con NULL)."""
+    login_status (them 2026-09-11, xem cot 'shopee_login_status'; mo rong 2026-09-12 yeu cau
+    nguoi dung "cập nhật thêm bộ lọc ... Bị captcha, Không đọc được mail tôi thấy không có
+    trong bộ lọc"): None = khong loc.
+      'ok'      -> da dang nhap Shopee thanh cong lan gan nhat.
+      'failed'  -> CHI dong DA TUNG chay nut 'Login Shopee' nhung KHONG thanh cong (BAT KY
+                   trang thai loi nao ben duoi) - bo loc "gop" nhanh, giu lai de tuong thich
+                   nguoc voi lua chon cu tren UI.
+      'invalid_credentials' -> sai Email/Shopee Password.
+      'captcha'              -> bi chan captcha/traffic.
+      'no_email_link'        -> Shopee yeu cau xac thuc qua mail nhung khong doc duoc link.
+      'timeout'               -> qua thoi gian cho ket qua.
+      'error'                 -> loi khac (vd loi doc mail, loi ket noi lai tab).
+      'unchecked' -> CHI dong CHUA TUNG chay nut nay lan nao (shopee_login_status con NULL).
+    LUU Y: 'no_credentials'/'no_id' (2 nhan co trong MAILACC_LOGIN_STATUS_BADGE phia frontend)
+    KHONG duoc liet o day vi 2 trang thai do CHUA BAO GIO duoc ghi vao cot shopee_login_status
+    (mail_accounts_login_shopee() return SOM truoc khi goi set_mail_account_login_status() cho
+    2 truong hop nay - xem affiliate_scrape_server.py) - dua vao filter sai se LUON tra ve
+    rong, gay hieu lam "khong co dong nao" thay vi "khong loc duoc theo tieu chi nay".
+    cookie_status (them 2026-09-12, yeu cau nguoi dung "làm thêm bộ lọc theo trạng thái của cột
+    cookie"): None = khong loc; 'live'/'dead'/'fail'/'empty' - PHAI khop CHINH XAC 4 trang thai
+    hien tren badge cot "Cookie" cua UI (xem mailAccCookieStatusBadge() trong templates/
+    index.html) de tranh 2 noi dinh nghia LIVE/DIE khac nhau gay nham lan:
+      'empty' -> cot cookie rong/NULL (badge "NULL")
+      'fail'  -> cookie = 'FAIL' (lan lay Cookie gan nhat that bai, badge "FAIL")
+      'live'  -> cookie hop le (khac rong/FAIL) VA cookie_status khac 'dead' (mac dinh lac
+                 quan khi chua tung check_cookie - khop dung mailAccCookieIsLive())
+      'dead'  -> cookie hop le NHUNG cookie_status = 'dead' (badge "DIE")."""
     conn = _connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
@@ -3199,6 +3222,17 @@ def list_mail_accounts(db_path, market=None, slot=None, search=None, group_gpm=N
             where.append("(shopee_login_status is not null and shopee_login_status != 'ok')")
         elif login_status == "unchecked":
             where.append("shopee_login_status is null")
+        elif login_status in ("invalid_credentials", "captcha", "no_email_link", "timeout", "error"):
+            where.append("shopee_login_status = ?")
+            params.append(login_status)
+        if cookie_status == "empty":
+            where.append("(cookie is null or trim(cookie) = '')")
+        elif cookie_status == "fail":
+            where.append("cookie = 'FAIL'")
+        elif cookie_status == "live":
+            where.append("(cookie is not null and trim(cookie) != '' and cookie != 'FAIL' and (cookie_status is null or cookie_status != 'dead'))")
+        elif cookie_status == "dead":
+            where.append("(cookie is not null and trim(cookie) != '' and cookie != 'FAIL' and cookie_status = 'dead')")
         if search:
             where.append("(email like ? or shopee_id like ? or device like ?)")
             like = f"%{search}%"

@@ -688,18 +688,28 @@
   <div class="modal-box" style="max-width:720px; width:92vw;">
     <div class="modal-icon" id="login-shopee-modal-icon">🔐</div>
     <div class="modal-message" id="login-shopee-modal-title">Đăng nhập Shopee</div>
-    <div id="login-shopee-setup" style="margin-top:14px; display:flex; gap:12px; flex-wrap:wrap;">
-      <label style="font-size:13px; font-weight:600; color:var(--ink); flex:1; min-width:160px;">Số luồng chạy song song
-        <input type="number" id="login-shopee-threads-input" min="1" value="2" style="width:100%; margin-top:4px; padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); box-sizing:border-box; font-size:13.5px;">
+    <!-- Setup GON (yeu cau nguoi dung 2026-09-13 "dành diện tích tối đa cho bảng danh sách"):
+         nhan+input CUNG 1 hang (khong con label rieng 1 dong phia tren nhu truoc), bo dong chu
+         thich dai (noi dung cu chuyen het vao title= de hover moi thay, khong chiem cho san). -->
+    <div id="login-shopee-setup" style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+      <label style="font-size:12.5px; font-weight:600; color:var(--ink); white-space:nowrap; display:flex; align-items:center; gap:5px;" title="Số tài khoản chạy song song cùng lúc">Luồng
+        <input type="number" id="login-shopee-threads-input" min="1" value="2" oninput="_updateGridWarning('login-shopee')" style="width:52px; padding:5px 6px; border:1px solid var(--border); border-radius:var(--radius-sm); box-sizing:border-box; font-size:13px;">
       </label>
-      <label style="font-size:13px; font-weight:600; color:var(--ink); flex:1; min-width:160px;" title="Mỗi tài khoản dùng 1 proxy tốc độ mạng khác nhau - proxy chậm cần timeout dài hơn để không bị báo lỗi/quá hạn oan">Timeout mỗi bước (giây)
-        <input type="number" id="login-shopee-timeout-input" min="20" max="600" value="90" style="width:100%; margin-top:4px; padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); box-sizing:border-box; font-size:13.5px;">
+      <label style="font-size:12.5px; font-weight:600; color:var(--ink); white-space:nowrap; display:flex; align-items:center; gap:5px;" title="Timeout mỗi bước chờ trang tải/phản hồi, giây (không tính thời gian đọc email) - mỗi tài khoản dùng 1 proxy tốc độ khác nhau, proxy chậm nên tăng lên">Timeout(s)
+        <input type="number" id="login-shopee-timeout-input" min="20" max="600" value="90" style="width:60px; padding:5px 6px; border:1px solid var(--border); border-radius:var(--radius-sm); box-sizing:border-box; font-size:13px;">
       </label>
-      <div class="muted" style="font-size:12px; margin-top:6px; width:100%;">Trong lúc chạy popup này sẽ luôn hiện để bạn theo dõi tiến trình từng tài khoản - có thể bấm "Dừng" bất cứ lúc nào (các tài khoản đang chạy dở sẽ hoàn tất, chỉ các tài khoản chưa bắt đầu mới bị bỏ qua). "Timeout mỗi bước" áp dụng cho từng bước chờ trang tải/phản hồi (không tính thời gian đọc email) - proxy mạng chậm nên tăng lên.</div>
+      <label style="font-size:12.5px; font-weight:600; color:var(--ink); white-space:nowrap; display:flex; align-items:center; gap:5px;" title="Số hàng cửa sổ trên màn hình (1920x1080 mặc định) - 1 hàng x 1 cột = phóng to toàn màn hình mỗi cửa sổ. Mỗi luồng luôn dùng đúng 1 ô cố định, tự nhớ lựa chọn lần sau.">Hàng
+        <input type="number" id="login-shopee-grid-rows-input" min="1" value="1" oninput="_updateGridWarning('login-shopee')" style="width:46px; padding:5px 6px; border:1px solid var(--border); border-radius:var(--radius-sm); box-sizing:border-box; font-size:13px;">
+      </label>
+      <label style="font-size:12.5px; font-weight:600; color:var(--ink); white-space:nowrap; display:flex; align-items:center; gap:5px;" title="Số cột cửa sổ trên màn hình - chia đều màn hình cho các cửa sổ chạy song song">Cột
+        <input type="number" id="login-shopee-grid-cols-input" min="1" value="2" oninput="_updateGridWarning('login-shopee')" style="width:46px; padding:5px 6px; border:1px solid var(--border); border-radius:var(--radius-sm); box-sizing:border-box; font-size:13px;">
+      </label>
+      <div class="muted" style="font-size:12px; margin-top:6px; width:100%;" hidden>Trong lúc chạy popup này sẽ luôn hiện để bạn theo dõi tiến trình từng tài khoản - có thể bấm "Dừng" bất cứ lúc nào (các tài khoản đang chạy dở sẽ hoàn tất, chỉ các tài khoản chưa bắt đầu mới bị bỏ qua). "Timeout mỗi bước" áp dụng cho từng bước chờ trang tải/phản hồi (không tính thời gian đọc email) - proxy mạng chậm nên tăng lên. "Số hàng"/"Số cột" chia đều màn hình cho các cửa sổ đang chạy song song (mỗi luồng luôn dùng đúng 1 ô cố định), tự nhớ lựa chọn lần sau.</div>
+      <div class="muted" id="login-shopee-grid-warning" style="font-size:12px; width:100%; color:var(--danger-text, #b91c1c); display:none;"></div>
     </div>
-    <div id="login-shopee-progress" style="margin-top:14px; text-align:left;">
-      <div class="muted" id="login-shopee-summary" style="margin-bottom:8px;"></div>
-      <div style="max-height:220px; overflow:auto; border:1px solid var(--border); border-radius:var(--radius-sm);">
+    <div id="login-shopee-progress" style="margin-top:10px; text-align:left;">
+      <div class="muted" id="login-shopee-summary" style="margin-bottom:6px;"></div>
+      <div style="max-height:min(58vh, 520px); overflow:auto; border:1px solid var(--border); border-radius:var(--radius-sm);">
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
           <thead style="position:sticky; top:0; background:var(--surface, #f7f7f7);">
             <tr>
@@ -711,14 +721,75 @@
           <tbody id="login-shopee-account-tbody"></tbody>
         </table>
       </div>
-      <div class="muted" style="font-size:12px; margin-top:10px; margin-bottom:4px;">Nhật ký:</div>
-      <pre id="login-shopee-log" style="max-height:150px; overflow:auto; margin:0; padding:8px; background:var(--surface-alt, #f2f2f2); border:1px solid var(--border); border-radius:var(--radius-sm); font-family:var(--font-mono); font-size:12px; white-space:pre-wrap;"></pre>
+      <!-- Nhat ky an (yeu cau nguoi dung 2026-09-13: da co cot "Chi tiết" theo dõi tung dong,
+           khong can lap lai) - GIU element trong DOM (chi hidden) de log() khong can sua, tranh
+           dung cham hang chuc call site dang goi ham do khap noi. -->
+      <div class="muted" style="font-size:12px; margin-top:10px; margin-bottom:4px;" hidden>Nhật ký:</div>
+      <pre id="login-shopee-log" style="max-height:150px; overflow:auto; margin:0; padding:8px; background:var(--surface-alt, #f2f2f2); border:1px solid var(--border); border-radius:var(--radius-sm); font-family:var(--font-mono); font-size:12px; white-space:pre-wrap;" hidden></pre>
     </div>
     <div class="modal-actions">
       <button class="secondary" id="login-shopee-cancel-btn">Hủy</button>
       <button id="login-shopee-start-btn">Bắt đầu</button>
       <button class="secondary" id="login-shopee-stop-btn" style="display:none;">Dừng</button>
       <button id="login-shopee-close-btn" style="display:none;">Đóng</button>
+    </div>
+  </div>
+</div>
+
+<!-- Popup "Shopee Cookie" hang loat - thay the nut toolbar "Get Cookie" rieng le cu, GOP 3 hanh
+     dong (Get/Check/Del Cookie) tren CUNG 1 danh sach da nap (yeu cau nguoi dung 2026-09-12
+     "thiết kế lại các chức năng liên quan tới shopee cookie"). Kien truc "bang dieu khien tien
+     trinh" giong Login Shopee (xem _showLoginShopeeRunner()) nhung khac o 2 diem: (1) co the
+     bam NHIEU LUOT hanh dong khac nhau tren CUNG 1 lan mo popup (khong tu dong resolve/dong
+     sau 1 luot chay nhu Login Shopee), (2) co checkbox tung dong (cot dau bang, mac dinh tich
+     het) de gioi han 1 luot chay CHI tac dong len 1 PHAN danh sach da nap - vd bam "Check
+     Cookie" cho ca danh sach truoc, thay dong nao DIE thi bo tich cac dong con lai roi bam
+     "Get Cookie" CHI cho cac dong DIE do. ----
+     3 trang thai giong Login Shopee: chua chay (co the bam 1 trong 3 nut hanh dong) -> dang
+     chay 1 hanh dong (chi Dung, khoa Escape/click ra ngoai) -> vua xong 1 luot (lai co the bam
+     tiep 1 hanh dong KHAC, hoac Dong). -->
+<div id="shopee-cookie-modal-overlay" class="modal-overlay">
+  <div class="modal-box" style="max-width:760px; width:92vw;">
+    <div class="modal-icon" id="shopee-cookie-modal-icon">🍪</div>
+    <div class="modal-message" id="shopee-cookie-modal-title">Shopee Cookie</div>
+    <div id="shopee-cookie-setup" style="margin-top:14px; display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+      <label style="font-size:13px; font-weight:600; color:var(--ink); flex:1; min-width:200px;" title="Get Cookie/Del Cookie xử lý qua trình duyệt thật hoặc DB - giữ mức thấp (2-6) cho Get Cookie vì mở browser thật; Check Cookie chỉ gọi 1 request HTTP nhẹ (không mở browser) nên có thể tăng cao hơn nhiều (tới 30).">Số luồng chạy song song
+        <input type="number" id="shopee-cookie-threads-input" min="1" value="2" oninput="_updateGridWarning('shopee-cookie')" style="width:100%; margin-top:4px; padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); box-sizing:border-box; font-size:13.5px;">
+      </label>
+      <label style="font-size:13px; font-weight:600; color:var(--ink); flex:1; min-width:90px;" title="Số hàng cửa sổ trên màn hình (1920x1080 mặc định) - CHỈ áp dụng cho Get Cookie (Check/Del không mở browser nên không có cửa sổ để sắp xếp)">Số hàng
+        <input type="number" id="shopee-cookie-grid-rows-input" min="1" value="1" oninput="_updateGridWarning('shopee-cookie')" style="width:100%; margin-top:4px; padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); box-sizing:border-box; font-size:13.5px;">
+      </label>
+      <label style="font-size:13px; font-weight:600; color:var(--ink); flex:1; min-width:90px;" title="Số cột cửa sổ trên màn hình - 1 hàng x 1 cột = phóng to toàn màn hình cho mỗi cửa sổ">Số cột
+        <input type="number" id="shopee-cookie-grid-cols-input" min="1" value="2" oninput="_updateGridWarning('shopee-cookie')" style="width:100%; margin-top:4px; padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); box-sizing:border-box; font-size:13.5px;">
+      </label>
+      <div class="muted" style="font-size:12px; width:100%;">Tích chọn dòng ở cột đầu bảng bên dưới để giới hạn nút bấm CHỈ chạy trên các dòng đó (mặc định tích sẵn hết danh sách) - có thể bấm nhiều nút ở các lượt khác nhau, popup không tự đóng sau mỗi lượt. "Số hàng"/"Số cột" (chỉ áp dụng khi bấm Get Cookie) chia đều màn hình cho các cửa sổ chạy song song, tự nhớ lựa chọn lần sau.</div>
+      <div class="muted" id="shopee-cookie-grid-warning" style="font-size:12px; width:100%; color:var(--danger-text, #b91c1c); display:none;"></div>
+    </div>
+    <div id="shopee-cookie-progress" style="margin-top:14px; text-align:left;">
+      <div class="muted" id="shopee-cookie-summary" style="margin-bottom:8px;"></div>
+      <div style="max-height:260px; overflow:auto; border:1px solid var(--border); border-radius:var(--radius-sm);">
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+          <thead style="position:sticky; top:0; background:var(--surface, #f7f7f7);">
+            <tr>
+              <th style="width:32px; padding:6px 8px;"><input type="checkbox" id="shopee-cookie-sel-all" checked title="Chọn/bỏ chọn tất cả dòng"></th>
+              <th style="text-align:left; padding:6px 8px;">Tài khoản</th>
+              <th style="text-align:left; padding:6px 8px;">Trạng thái</th>
+              <th style="text-align:left; padding:6px 8px;">Chi tiết</th>
+            </tr>
+          </thead>
+          <tbody id="shopee-cookie-account-tbody"></tbody>
+        </table>
+      </div>
+      <div class="muted" style="font-size:12px; margin-top:10px; margin-bottom:4px;">Nhật ký:</div>
+      <pre id="shopee-cookie-log" style="max-height:150px; overflow:auto; margin:0; padding:8px; background:var(--surface-alt, #f2f2f2); border:1px solid var(--border); border-radius:var(--radius-sm); font-family:var(--font-mono); font-size:12px; white-space:pre-wrap;"></pre>
+    </div>
+    <div class="modal-actions" style="flex-wrap:wrap;">
+      <button class="secondary" id="shopee-cookie-cancel-btn">Hủy</button>
+      <button id="shopee-cookie-get-btn" title="Mở trình duyệt profile thật, truy cập trang chủ Shopee, lấy cookie mới - LUÔN ghi đè nếu dòng đã có cookie cũ">📥 Get Cookie</button>
+      <button class="secondary" id="shopee-cookie-check-btn" title="Gọi 1 request HTTP nhẹ (KHÔNG mở trình duyệt) để kiểm tra cookie hiện có còn đăng nhập được không">🔍 Check Cookie</button>
+      <button class="secondary" id="shopee-cookie-del-btn" title="Xoá sạch cookie đã lưu trong database của các dòng đang tích - CHỈ xoá bản ghi DB, KHÔNG mở trình duyệt, tức thời">🗑 Del Cookie</button>
+      <button class="secondary" id="shopee-cookie-stop-btn" style="display:none;">Dừng</button>
+      <button id="shopee-cookie-close-btn" style="display:none;">Đóng</button>
     </div>
   </div>
 </div>
@@ -1162,8 +1233,20 @@
       <select id="mailacc-filter-login-status" onchange="loadMailAccounts()" style="max-width:190px;" title="Lọc theo trạng thái lần chạy 'Login Shopee' gần nhất">
         <option value="">-- Đăng nhập Shopee: Tất cả --</option>
         <option value="ok">Đã đăng nhập</option>
-        <option value="failed">Đăng nhập thất bại</option>
+        <option value="failed">Thất bại (bất kỳ)</option>
+        <option value="invalid_credentials">Sai mật khẩu</option>
+        <option value="captcha">Bị captcha</option>
+        <option value="no_email_link">Không đọc được mail</option>
+        <option value="timeout">Quá thời gian</option>
+        <option value="error">Lỗi</option>
         <option value="unchecked">Chưa kiểm tra</option>
+      </select>
+      <select id="mailacc-filter-cookie-status" onchange="loadMailAccounts()" style="max-width:160px;" title="Lọc theo trạng thái badge cột 'Cookie' (LIVE/DIE/FAIL/NULL)">
+        <option value="">-- Cookie: Tất cả --</option>
+        <option value="live">LIVE</option>
+        <option value="dead">DIE</option>
+        <option value="fail">FAIL</option>
+        <option value="empty">NULL (chưa có)</option>
       </select>
       <input type="text" id="mailacc-filter-search" placeholder="Tìm theo email / shopee_id / device..." onkeydown="if(event.key==='Enter') loadMailAccounts()">
       <button class="secondary" onclick="loadMailAccounts()">Lọc</button>
@@ -1189,7 +1272,7 @@
       <button class="secondary" onclick="bulkSetProxy(this)" title="Dán nhiều Proxy dạng host:port:user:pass (mỗi dòng 1 proxy) - gán LẦN LƯỢT từ trên xuống cho các dòng đang tích chọn theo đúng thứ tự hiển thị, gọi lên GPM/GEM cập nhật trực tiếp trên profile trước khi đồng bộ xuống. Popup cũng có nút xoá proxy hàng loạt">Set-proxy</button>
       <button class="secondary" onclick="assignDeviceFingerprintSelected(this)" title="Gán NGẪU NHIÊN 1 mẫu Device Fingerprint (Model/OS version - dữ liệu thiết bị Android thật) cho từng dòng đang tích chọn, lấy từ pool scripts/device_fingerprints.json">🎲 Fingerprint</button>
       <button class="secondary" onclick="getShopeeIdsSelected(this)" title="Với từng dòng đang tích: mở trang hồ sơ Shopee theo market, lấy Username (Shopee ID) ghi vào cột Shopee ID; chưa login/captcha thì mở sẵn cửa sổ để xử lý">Get ID</button>
-      <button class="secondary" onclick="getCookiesSelected(this)" title="Với từng dòng đang tích: mở trang chủ Shopee theo market, lấy toàn bộ cookie đăng nhập ghi vào cột Cookie; luôn đóng trình duyệt lại sau khi xong (thành công hoặc thất bại)">Get Cookie</button>
+      <button class="secondary" onclick="openShopeeCookieModal(this)" title="Mở popup quản lý Cookie hàng loạt cho các dòng đang tích: Get Cookie (mở trình duyệt lấy mới) / Check Cookie (kiểm tra còn sống) / Del Cookie (xoá cookie trong DB) - theo dõi real-time từng dòng">🍪 Shopee Cookie</button>
       <button class="secondary" onclick="loginShopeeSelected(this)" title="Với từng dòng đang tích: tự động đăng nhập Shopee bằng Email + Shopee Password (tự xử lý luôn bước xác thực qua link email nếu Shopee yêu cầu)">Login Shopee</button>
       <button class="secondary" onclick="bulkSetShopeePassword(this)" title="Mở popup nhập password - ghi ĐÈ vào cột 'Shopee Password' của TẤT CẢ dòng đang tích chọn">🔑 Đặt pass</button>
       <button class="secondary" onclick="bulkSetRateLimitVideo(this)" title="Mở popup nhập Rate limit video/ngày - ghi ĐÈ vào cột này của TẤT CẢ dòng đang tích chọn (để trống = không giới hạn)">Add rate-limit</button>
@@ -3115,12 +3198,14 @@ async function loadMailAccounts() {
   const groupGpm = document.getElementById('mailacc-filter-group-gpm').value;
   const hasIdGpm = document.getElementById('mailacc-filter-has-id-gpm').value;
   const loginStatus = document.getElementById('mailacc-filter-login-status').value;
+  const cookieStatus = document.getElementById('mailacc-filter-cookie-status').value;
   const search = document.getElementById('mailacc-filter-search').value.trim();
   if (market) params.set('market', market);
   if (slot) params.set('slot', slot);
   if (groupGpm) params.set('group_gpm', groupGpm);
   if (hasIdGpm) params.set('has_id_gpm', hasIdGpm);
   if (loginStatus) params.set('login_status', loginStatus);
+  if (cookieStatus) params.set('cookie_status', cookieStatus);
   if (search) params.set('search', search);
   params.set('limit', '300');
   const { accounts } = await api('GET', '/api/mail_accounts/list?' + params.toString());
@@ -3702,8 +3787,8 @@ async function openGpmProfilesSelected(btn) {
   if (threads === null) return; // bam Huy
   await withBusy(btn, async () => {
     // Chay N luong song song (goi route DUNG 1 dong /gpm/open, KHONG dung route bulk tuan
-    // tu cu) - xem yeu cau nguoi dung 2026-09-10, cung mo hinh voi getShopeeIdsSelected()/
-    // getCookiesSelected() ben duoi.
+    // tu cu) - xem yeu cau nguoi dung 2026-09-10, cung mo hinh voi getShopeeIdsSelected()
+    // ben duoi.
     const results = [];
     let cursor = 0;
     const next = () => { const i = cursor++; return i < ids.length ? ids[i] : undefined; };
@@ -3752,6 +3837,53 @@ async function assignDeviceFingerprintSelected(btn) {
       await customAlert('Lỗi tạo device fingerprint hàng loạt: ' + e.message, { danger: true });
     }
   });
+}
+
+// ---- Luoi sap xep cua so tren man hinh (hang x cot) - DUNG CHUNG cho popup "Login Shopee" +
+// "Shopee Cookie" (yeu cau nguoi dung 2026-09-12 "thêm cấu hình sắp xếp profile hiển thị ...
+// nhập số hàng và số cột"). "prefix" la id-prefix cua tung popup (vd 'login-shopee' ->
+// #login-shopee-grid-rows-input) - 2 input rieng theo TUNG popup (khong dung chung 1 cap input
+// DOM), nhung LUU CHUNG 1 gia tri localStorage (nguoi dung set 1 lan, ap dung ca 2 noi, vi cung
+// 1 man hinh vat ly). rows*cols=1 (mac dinh 1x1) = "hiển thị full màn hình" (yeu cau nguoi dung
+// muc 1) - xem positionWindow() trong cdp_login_shopee.mjs/cdp_get_cookie.mjs. Neu so luong
+// (threads) VUOT so o (rows*cols), nguoi dung 2026-09-12 XAC NHAN chap nhan cua so DE LEN NHAU
+// (khong ep threads giam) - CHI hien 1 dong canh bao nhe, khong chan chay. ----
+const CDP_WINDOW_GRID_STORAGE_KEY = 'cdp_window_grid_v1';
+function _loadWindowGrid() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CDP_WINDOW_GRID_STORAGE_KEY));
+    if (raw && Number.isInteger(raw.rows) && Number.isInteger(raw.cols) && raw.rows > 0 && raw.cols > 0) return raw;
+  } catch (e) {}
+  return { rows: 1, cols: 2 };
+}
+function _saveWindowGrid(rows, cols) {
+  try { localStorage.setItem(CDP_WINDOW_GRID_STORAGE_KEY, JSON.stringify({ rows, cols })); } catch (e) {}
+}
+// Doc + kep gia tri hang/cot hien dang nhap trong popup "prefix", luu lai vao localStorage
+// (dung o MOI lan bat dau chay VA moi lan nguoi dung sua o nhap - xem oninput trong HTML).
+function _readWindowGridInputs(prefix) {
+  const rowsInput = document.getElementById(prefix + '-grid-rows-input');
+  const colsInput = document.getElementById(prefix + '-grid-cols-input');
+  const rows = Math.max(1, parseInt(rowsInput.value, 10) || 1);
+  const cols = Math.max(1, parseInt(colsInput.value, 10) || 1);
+  _saveWindowGrid(rows, cols);
+  return { rows, cols };
+}
+// Hien/an dong canh bao "N luồng nhưng chỉ M ô" ngay khi nguoi dung go (xem oninput tren cac o
+// Số luồng/Số hàng/Số cột trong HTML) - CHI canh bao, khong chan.
+function _updateGridWarning(prefix) {
+  const warnEl = document.getElementById(prefix + '-grid-warning');
+  if (!warnEl) return;
+  const threadsInput = document.getElementById(prefix + '-threads-input');
+  const threads = Math.max(1, parseInt(threadsInput.value, 10) || 1);
+  const { rows, cols } = _readWindowGridInputs(prefix);
+  const cells = rows * cols;
+  if (threads > cells) {
+    warnEl.textContent = `⚠ ${threads} luồng nhưng chỉ ${cells} ô (${rows}x${cols}) - sẽ có cửa sổ đè lên nhau.`;
+    warnEl.style.display = '';
+  } else {
+    warnEl.style.display = 'none';
+  }
 }
 
 // ---- Popup DUNG CHUNG "Số luồng" cho "Get ID"/"Get Cookie"/"Mở profile" (xem yeu cau nguoi
@@ -5810,86 +5942,274 @@ async function getShopeeIdsSelected(btn) {
   });
 }
 
-// ---- Get Cookie (hang loat): lay toan bo cookie dang nhap (qua CDP Network.getCookies) cua tung dong ----
-async function getCookiesSelected(btn) {
+// ---- "Shopee Cookie" (hang loat) - popup GOP 3 hanh dong Get/Check/Del Cookie tren CUNG 1
+// danh sach da nap, thay the ham getCookiesSelected() rieng le cu (yeu cau nguoi dung
+// 2026-09-12 "thiết kế lại các chức năng liên quan tới shopee cookie"). Xem #shopee-cookie-
+// modal-overlay trong HTML de biet cau truc popup. KHONG con loc/bo qua dong thieu GPM ID
+// ngay tu dau nhu ham cu - ca 3 route backend (get/check/del_cookie) DA TU xu ly gracefully
+// truong hop thieu du lieu can thiet (vd get_cookie tra status 'no_id' neu thieu id_gpm,
+// check_cookie tra 'no_cookie' neu chua co cookie) nen KHONG can loc truoc o day, danh sach
+// hien thi dung y nguoi dung da tich tren bang chinh. ----
+
+const SHOPEE_COOKIE_STATUS_LABEL = {
+  ok: 'Đã lấy Cookie',
+  no_login: 'Chưa đăng nhập',
+  captcha: 'Bị captcha/traffic',
+  timeout: 'Quá thời gian',
+  error: 'Lỗi',
+  no_id: 'Chưa có GPM/GEM ID',
+  alive: 'Còn sống (LIVE)',
+  dead: 'Đã chết (DIE)',
+  no_cookie: 'Chưa có cookie',
+};
+
+// Cau hinh rieng cho tung hanh dong: route API + timeout client + co poll _CDP_PROGRESS hay
+// khong (CHI Get Cookie can - Check/Del la 1 request nhanh <1s, khong mo browser nen khong co
+// buoc trung gian nao de bao) + tran luong toi da cho phep (Get/Del giu thap vi Get mo browser
+// that con Del la ghi DB - van gioi han nhe cho gon; Check duoc phep cao hon nhieu vi chi la 1
+// request HTTP thuan, khong tranh chap tai nguyen GPM/GEM voi cac tac vu khac).
+const SHOPEE_COOKIE_ACTIONS = {
+  get: { route: 'get_cookie', timeoutMs: 135000, poll: true, verb: 'Get Cookie', threadsMax: 6 },
+  check: { route: 'check_cookie', timeoutMs: 20000, poll: false, verb: 'Check Cookie', threadsMax: 30 },
+  del: { route: 'del_cookie', timeoutMs: 10000, poll: false, verb: 'Del Cookie', threadsMax: 10 },
+};
+
+// Poll tien trinh: xem _pollCdpProgress() (dung CHUNG voi Login Shopee, dinh nghia phia duoi
+// gan _showLoginShopeeRunner() vi ham do co truoc) - CHI dung cho hanh dong 'get' (co mo
+// browser that, co cac buoc trung gian dang bao qua _CDP_PROGRESS phia server).
+
+function _showShopeeCookieRunner(accounts) {
+  return new Promise(resolve => {
+    const overlay = document.getElementById('shopee-cookie-modal-overlay');
+    const titleEl = document.getElementById('shopee-cookie-modal-title');
+    const threadsInput = document.getElementById('shopee-cookie-threads-input');
+    const summaryEl = document.getElementById('shopee-cookie-summary');
+    const tbody = document.getElementById('shopee-cookie-account-tbody');
+    const logEl = document.getElementById('shopee-cookie-log');
+    const selAllCb = document.getElementById('shopee-cookie-sel-all');
+    const cancelBtn = document.getElementById('shopee-cookie-cancel-btn');
+    const getBtn = document.getElementById('shopee-cookie-get-btn');
+    const checkBtn = document.getElementById('shopee-cookie-check-btn');
+    const delBtn = document.getElementById('shopee-cookie-del-btn');
+    const stopBtn = document.getElementById('shopee-cookie-stop-btn');
+    const closeBtn = document.getElementById('shopee-cookie-close-btn');
+    const actionBtns = [getBtn, checkBtn, delBtn];
+
+    titleEl.textContent = `Shopee Cookie cho ${accounts.length} dòng đang tích chọn`;
+    threadsInput.value = 2;
+    threadsInput.disabled = false;
+    const savedGrid = _loadWindowGrid();
+    document.getElementById('shopee-cookie-grid-rows-input').value = savedGrid.rows;
+    document.getElementById('shopee-cookie-grid-cols-input').value = savedGrid.cols;
+    document.getElementById('shopee-cookie-grid-rows-input').disabled = false;
+    document.getElementById('shopee-cookie-grid-cols-input').disabled = false;
+    _updateGridWarning('shopee-cookie');
+    cancelBtn.style.display = '';
+    actionBtns.forEach(b => { b.style.display = ''; b.disabled = false; });
+    stopBtn.style.display = 'none';
+    closeBtn.style.display = 'none';
+    summaryEl.textContent = `${accounts.length} tài khoản đã nạp.`;
+    logEl.textContent = '';
+    selAllCb.checked = true;
+    selAllCb.disabled = false;
+
+    tbody.innerHTML = '';
+    const rowEls = new Map();
+    const checkedIds = new Set(accounts.map(a => a.id)); // mac dinh tich het danh sach
+    accounts.forEach(a => {
+      const tr = document.createElement('tr');
+      const tdSel = document.createElement('td');
+      tdSel.style.cssText = 'padding:5px 8px; border-top:1px solid var(--border);';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = true;
+      cb.onchange = () => {
+        if (cb.checked) checkedIds.add(a.id); else checkedIds.delete(a.id);
+        selAllCb.checked = checkedIds.size === accounts.length;
+      };
+      tdSel.appendChild(cb);
+      const tdLabel = document.createElement('td');
+      tdLabel.textContent = a.label;
+      tdLabel.style.cssText = 'padding:5px 8px; border-top:1px solid var(--border);';
+      const tdStatus = document.createElement('td');
+      tdStatus.className = 'status';
+      tdStatus.textContent = 'Đang chờ';
+      tdStatus.style.cssText = 'padding:5px 8px; border-top:1px solid var(--border); white-space:nowrap;';
+      const tdDetail = document.createElement('td');
+      tdDetail.className = 'detail';
+      tdDetail.style.cssText = 'padding:5px 8px; border-top:1px solid var(--border); font-size:12px; color:var(--ink-muted, #777);';
+      tr.appendChild(tdSel); tr.appendChild(tdLabel); tr.appendChild(tdStatus); tr.appendChild(tdDetail);
+      tbody.appendChild(tr);
+      rowEls.set(a.id, { tr, checkbox: cb });
+    });
+    selAllCb.onchange = () => {
+      rowEls.forEach((row, id) => {
+        row.checkbox.checked = selAllCb.checked;
+        if (selAllCb.checked) checkedIds.add(id); else checkedIds.delete(id);
+      });
+    };
+
+    function log(msg) {
+      const t = new Date().toLocaleTimeString('vi-VN', { hour12: false });
+      logEl.textContent += `[${t}] ${msg}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    function setRowStatus(id, status, detail) {
+      const row = rowEls.get(id);
+      if (!row) return;
+      row.tr.querySelector('.status').textContent = status;
+      row.tr.querySelector('.detail').textContent = detail || '';
+    }
+
+    let stopRequested = false;
+    let escHandler = null;
+    const enableDismiss = () => {
+      escHandler = (e) => { if (e.key === 'Escape') doClose(); };
+      document.addEventListener('keydown', escHandler);
+      overlay.onclick = (e) => { if (e.target === overlay) doClose(); };
+    };
+    const disableDismiss = () => {
+      if (escHandler) { document.removeEventListener('keydown', escHandler); escHandler = null; }
+      overlay.onclick = null;
+    };
+    let allResults = [];
+    const doClose = () => {
+      disableDismiss();
+      overlay.classList.remove('show');
+      resolve(allResults);
+    };
+    cancelBtn.onclick = doClose; // chi hien khi dang o trang thai ranh (chua chay/vua xong 1 luot)
+    closeBtn.onclick = doClose;
+
+    // Chay 1 hanh dong (get/check/del) tren cac dong DANG TICH trong bang - co the goi lai
+    // NHIEU LAN (1 lan/nut bam) trong cung 1 lan mo popup, khac Login Shopee la popup 1 lan dung.
+    async function runAction(actionKey) {
+      const cfg = SHOPEE_COOKIE_ACTIONS[actionKey];
+      const targetIds = accounts.map(a => a.id).filter(id => checkedIds.has(id));
+      if (!targetIds.length) {
+        await customAlert('Chưa tích chọn dòng nào trong danh sách để chạy.', { danger: true });
+        return;
+      }
+      const threads = _clampThreads(threadsInput.value, Math.min(targetIds.length, cfg.threadsMax));
+      // Luoi cua so CHI thuc su can cho 'get' (Get Cookie mo browser that) - van doc/luu de
+      // nguoi dung sua 1 lan dung cho ca Login Shopee (cung 1 localStorage key, xem
+      // _readWindowGridInputs()), nhung CHI dinh kem vao body request khi actionKey==='get'.
+      const { rows: gridRows, cols: gridCols } = _readWindowGridInputs('shopee-cookie');
+      threadsInput.disabled = true;
+      document.getElementById('shopee-cookie-grid-rows-input').disabled = true;
+      document.getElementById('shopee-cookie-grid-cols-input').disabled = true;
+      selAllCb.disabled = true;
+      rowEls.forEach(row => { row.checkbox.disabled = true; });
+      cancelBtn.style.display = 'none';
+      actionBtns.forEach(b => b.style.display = 'none');
+      stopBtn.style.display = '';
+      stopBtn.disabled = false;
+      stopBtn.textContent = 'Dừng';
+      disableDismiss();
+
+      log(`Bắt đầu ${cfg.verb} với ${threads} luồng song song${actionKey === 'get' ? `, lưới cửa sổ ${gridRows}x${gridCols}` : ''}, cho ${targetIds.length} tài khoản đang tích.`);
+      targetIds.forEach(id => setRowStatus(id, 'Đang chờ', ''));
+
+      let cursor = 0;
+      const next = () => {
+        if (stopRequested) return undefined;
+        const i = cursor++;
+        return i < targetIds.length ? targetIds[i] : undefined;
+      };
+      const results = [];
+      // workerIdx = vi tri o luoi man hinh CO DINH cho luong nay trong suot luot chay (xem
+      // positionWindow() trong cdp_get_cookie.mjs) - chi co y nghia voi 'get', bo qua o
+      // check/del (khong mo browser nen server khong doc toi cac field grid_*).
+      const worker = async (workerIdx) => {
+        for (let id; (id = next()) !== undefined;) {
+          const acc = accounts.find(a => a.id === id);
+          setRowStatus(id, 'Đang chạy', 'đang bắt đầu...');
+          log(`${acc.label}: bắt đầu ${cfg.verb}...`);
+          const stopProgressPoll = cfg.poll
+            ? _pollCdpProgress(id, (step, detail) => {
+                setRowStatus(id, 'Đang chạy', step);
+                log(`${acc.label}: ${step}${detail ? ' — ' + detail : ''}`);
+              })
+            : () => {};
+          try {
+            const body = actionKey === 'get' ? { grid_rows: gridRows, grid_cols: gridCols, grid_slot: workerIdx } : undefined;
+            const r = await api('POST', `/api/mail_accounts/${id}/${cfg.route}`, body, cfg.timeoutMs);
+            results.push({ id, ...r });
+            const label = SHOPEE_COOKIE_STATUS_LABEL[r.status] || r.status;
+            setRowStatus(id, label, r.detail || '');
+            log(`${acc.label}: ${label}${r.detail ? ' — ' + r.detail : ''}`);
+          } catch (e) {
+            results.push({ id, status: 'error', detail: e.message || 'Lỗi không rõ' });
+            setRowStatus(id, 'Lỗi', e.message || '');
+            log(`${acc.label}: Lỗi — ${e.message || 'không rõ'}`);
+          } finally {
+            stopProgressPoll();
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: threads }, (_, workerIdx) => worker(workerIdx)));
+      allResults = allResults.concat(results);
+
+      const counts = {};
+      results.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
+      const summaryParts = Object.keys(counts).map(k => `${SHOPEE_COOKIE_STATUS_LABEL[k] || k}: ${counts[k]}`);
+      summaryEl.textContent = `Đã xong ${cfg.verb}: ${results.length}/${targetIds.length}` + (summaryParts.length ? ' — ' + summaryParts.join(', ') : '');
+
+      if (stopRequested) {
+        log('Đã dừng theo yêu cầu — các tài khoản chưa chạy trong lượt này đã bị bỏ qua.');
+      } else {
+        log(`Đã chạy xong ${cfg.verb}.`);
+      }
+      stopRequested = false;
+      stopBtn.style.display = 'none';
+      threadsInput.disabled = false;
+      document.getElementById('shopee-cookie-grid-rows-input').disabled = false;
+      document.getElementById('shopee-cookie-grid-cols-input').disabled = false;
+      selAllCb.disabled = false;
+      rowEls.forEach(row => { row.checkbox.disabled = false; });
+      cancelBtn.style.display = '';
+      actionBtns.forEach(b => { b.style.display = ''; b.disabled = false; });
+      closeBtn.style.display = '';
+      // Cap nhat lai badge Cookie tren bang chinh NGAY (khong doi nguoi dung tu bam Đóng) - 1
+      // luot chay vua doi cookie/cookie_status cua nhieu dong cung luc.
+      await loadMailAccounts();
+    }
+
+    getBtn.onclick = () => runAction('get');
+    checkBtn.onclick = () => runAction('check');
+    delBtn.onclick = async () => {
+      const targetCount = accounts.map(a => a.id).filter(id => checkedIds.has(id)).length;
+      if (!targetCount) { await customAlert('Chưa tích chọn dòng nào.', { danger: true }); return; }
+      const ok = await customConfirm(`Xoá cookie đã lưu trong database của ${targetCount} dòng đang tích?\n\nChỉ xoá bản ghi trong database (cookie -> NULL) - KHÔNG mở trình duyệt, không đăng xuất phiên thật trên profile.`, { danger: true });
+      if (!ok) return;
+      await runAction('del');
+    };
+
+    stopBtn.onclick = () => {
+      stopRequested = true;
+      stopBtn.disabled = true;
+      stopBtn.textContent = 'Đang dừng... (chờ tài khoản dở xong)';
+      log('Yêu cầu dừng — không nhận thêm tài khoản mới trong lượt này.');
+    };
+
+    enableDismiss(); // Escape/click ra ngoai = Huy/Dong (chi hoat dong khi dang ranh, disableDismiss() khi dang chay)
+    overlay.classList.add('show');
+  });
+}
+
+async function openShopeeCookieModal(btn) {
   const ids = mailAccSelectedIds();
   if (!ids.length) {
-    await customAlert('Chưa chọn dòng nào — hãy tích chọn các dòng cần lấy Cookie trước.', { danger: true });
+    await customAlert('Chưa chọn dòng nào — hãy tích chọn các dòng cần thao tác Cookie trước.', { danger: true });
     return;
   }
   const rowById = new Map(lastMailAccountsList.map(a => [a.id, a]));
-  const valid = ids.filter(id => {
+  const accounts = ids.map(id => {
     const a = rowById.get(id);
-    return a && String(a.id_gpm || '').trim() !== '';
+    return { id, label: (a && (a.profile || a.email || a.shopee_id)) || ('#' + id) };
   });
-  const skipped = ids.length - valid.length;
-  if (!valid.length) {
-    await customAlert('Không có dòng nào đang tích có GPM/GEM ID — hãy tạo profile trước.', { danger: true });
-    return;
-  }
-  const skipNote = skipped ? `- ${skipped} dòng chưa có ID profile sẽ bỏ qua.\n` : '';
-  const threads = await _showThreadsModal(
-    `Lấy Cookie cho ${valid.length} dòng đang tích chọn:\n\n` +
-    `- Dòng ĐÃ CÓ Cookie: kiểm tra còn đăng nhập được không TRƯỚC (không cần mở browser, chỉ 1 request nhanh) - còn sống thì BỎ QUA, không lấy lại.\n` +
-    `- Dòng chưa có Cookie (hoặc cookie đã hết hạn/FAIL): mở trang chủ Shopee theo market, lấy toàn bộ cookie đăng nhập rồi ghi vào cột Cookie.\n` +
-    `- Dòng chưa đăng nhập / bị captcha / lỗi sẽ ghi 'FAIL' vào cột Cookie - trình duyệt luôn được đóng lại sau khi xong.\n` +
-    skipNote +
-    `- Quá trình mỗi dòng có thể mất 30-60s, cửa sổ sẽ mở ra trong lúc chạy.`,
-    2, 6
-  );
-  if (threads === null) return; // bam Huy
   await withBusy(btn, async () => {
-    const results = [];
-    let cursor = 0;
-    const next = () => { const i = cursor++; return i < valid.length ? valid[i] : undefined; };
-    const worker = async () => {
-      for (let id; (id = next()) !== undefined;) {
-        try {
-          const row = rowById.get(id);
-          // Dong DA CO cookie dung duoc: check con song truoc (KHONG mo browser) - con song
-          // thi bo qua, khong lay lai lam gi (xem yeu cau nguoi dung 2026-09-11: "kiểm tra
-          // cookie còn sống hay không trước khi Get Cookie đối với những tài khoản đã có
-          // cookie trước rồi" - CHINH XAC la nut nay, khong phai 'Mở profile').
-          if (mailAccHasUsableCookie(row)) {
-            const chk = await api('POST', `/api/mail_accounts/${id}/check_cookie`, undefined, 20000);
-            if (chk.status === 'alive') {
-              results.push({ id, status: 'skipped_alive', detail: chk.detail || 'Cookie còn sống.' });
-              continue;
-            }
-          }
-          const r = await api('POST', `/api/mail_accounts/${id}/get_cookie`, undefined, 135000);
-          results.push({ id, ...r });
-        } catch (e) {
-          results.push({ id, status: 'error', detail: e.message || 'Lỗi không rõ' });
-        }
-      }
-    };
-    await Promise.all(Array.from({ length: threads }, () => worker()));
-    const okWrote = results.filter(r => r.status === 'ok').length;
-    const skippedAlive = results.filter(r => r.status === 'skipped_alive').length;
-    const noLoginRows = results.filter(r => r.status === 'no_login');
-    const captchaRows = results.filter(r => r.status === 'captcha');
-    const errs = results.filter(r => ['timeout', 'error', 'no_id'].includes(r.status));
-    const noIdCount = results.filter(r => r.status === 'no_id').length;
-    const parts = [`Lấy được Cookie và ghi: ${okWrote}/${results.length} dòng.`];
-    const extra = [];
-    if (skippedAlive) extra.push(`Bỏ qua (Cookie cũ vẫn còn đăng nhập được): ${skippedAlive}`);
-    if (noLoginRows.length) {
-      extra.push(`Chưa đăng nhập (ghi 'FAIL'): ${noLoginRows.length}`);
-      parts.push('Chi tiết "chưa đăng nhập" (kiểm tra lại nếu bạn chắc profile đã login):');
-      noLoginRows.slice(0, 6).forEach(r => parts.push(`- #${r.id}: ${r.detail || ''}`));
-      if (noLoginRows.length > 6) parts.push(`... và ${noLoginRows.length - 6} dòng khác.`);
-    }
-    if (captchaRows.length) extra.push(`Bị captcha/traffic (ghi 'FAIL'): ${captchaRows.length}`);
-    if (noIdCount) extra.push(`Không có ID profile: ${noIdCount}`);
-    if (errs.length) {
-      extra.push(`Lỗi/timeout (ghi 'FAIL'): ${errs.length}`);
-      parts.push('Chi tiết lỗi:');
-      errs.slice(0, 6).forEach(e => parts.push(`- #${e.id}: ${e.detail || e.status || 'lỗi'}`));
-      if (errs.length > 6) parts.push(`... và ${errs.length - 6} lỗi khác.`);
-    }
-    if (extra.length) parts.push(extra.join(' — '));
-    await customAlert(parts.join('\n'), { danger: errs.length > 0 || noLoginRows.length > 0 });
+    await _showShopeeCookieRunner(accounts);
     await loadMailAccounts();
   });
 }
@@ -5918,17 +6238,21 @@ const LOGIN_SHOPEE_STATUS_LABEL = {
 // Hien 1 popup "bang dieu khien tien trinh" cho danh sach accounts=[{id,label}], tra ve mang
 // ket qua khi nguoi dung bam "Đóng" (sau khi da chay xong/da dung) hoac "Hủy" (truoc khi bam
 // Bắt đầu - tra ve null).
-// Poll /login_shopee/progress cho 1 tai khoan MOI 1.3s trong luc request POST .../login_shopee
-// cua no dang chay (server ghi step moi nhat vao _LOGIN_PROGRESS ngay khi cdp_login_shopee.mjs
-// in ra - xem affiliate_scrape_server.py). Goi onUpdate(step, detail) MOI KHI step DOI (tranh
-// spam log lap lai cung 1 dong). Tra ve ham stop() de goi trong finally khi request xong.
-function _pollLoginShopeeProgress(accountId, onUpdate) {
+// Poll /cdp_progress cho 1 tai khoan MOI 1.3s trong luc 1 request Popen+progress dang chay
+// (POST .../login_shopee HOAC POST .../get_cookie, server ghi step moi nhat vao _CDP_PROGRESS
+// ngay khi file .mjs tuong ung in ra - xem _run_cdp_script() trong affiliate_scrape_server.py).
+// Doi ten tu _pollLoginShopeeProgress() (2026-09-12, yeu cau nguoi dung thiet ke lai popup
+// Cookie hang loat) vi ham nay gio dung CHUNG cho ca 2 flow, khong con rieng Login Shopee nua -
+// xem call site o _showShopeeCookieRunner() (hanh dong 'get'). Goi onUpdate(step, detail) MOI
+// KHI step DOI (tranh spam log lap lai cung 1 dong). Tra ve ham stop() de goi trong finally
+// khi request xong.
+function _pollCdpProgress(accountId, onUpdate) {
   let lastStep = null;
   let stopped = false;
   const tick = async () => {
     if (stopped) return;
     try {
-      const r = await api('GET', `/api/mail_accounts/${accountId}/login_shopee/progress`, undefined, 8000);
+      const r = await api('GET', `/api/mail_accounts/${accountId}/cdp_progress`, undefined, 8000);
       if (r && r.step && r.step !== lastStep) {
         lastStep = r.step;
         onUpdate(r.step, r.detail || '');
@@ -5969,7 +6293,19 @@ function _showLoginShopeeRunner(accounts, skipped) {
     threadsInput.disabled = false;
     timeoutInput.value = 90;
     timeoutInput.disabled = false;
-    setupEl.style.display = '';
+    const savedGrid = _loadWindowGrid();
+    document.getElementById('login-shopee-grid-rows-input').value = savedGrid.rows;
+    document.getElementById('login-shopee-grid-cols-input').value = savedGrid.cols;
+    document.getElementById('login-shopee-grid-rows-input').disabled = false;
+    document.getElementById('login-shopee-grid-cols-input').disabled = false;
+    _updateGridWarning('login-shopee');
+    // '' chi XOA thuoc tinh display khoi inline style (khong "khoi phuc" ve display:flex ban
+    // dau tu HTML) - fallback ve display:block MAC DINH cua <div>, pha vo bo cuc hang ngang
+    // (yeu cau nguoi dung 2026-09-13 "4 ô cấu hình ... tôi chưa thấy nằm chung hàng"). Bug co
+    // tu truoc (an di vi cac <label> cu KHONG co display:flex rieng nen van "tinh co" xep
+    // ngang theo kieu inline mac dinh) - chi lo ro sau khi doi <label> sang flex de gon label+
+    // input tren 1 dong, phai dat lai DUNG 'flex' o day thay vi xoa trang.
+    setupEl.style.display = 'flex';
     cancelBtn.style.display = '';
     startBtn.style.display = '';
     stopBtn.style.display = 'none';
@@ -6045,8 +6381,11 @@ function _showLoginShopeeRunner(accounts, skipped) {
       // buoc login+activate, moi buoc toi da ~timeoutSec+50s, cong them ~30s doc mail) - tranh
       // bao loi "Server không phản hồi" oan trong khi server van dang chay binh thuong.
       const clientTimeoutMs = (timeoutSec * 2 + 150) * 1000;
+      const { rows: gridRows, cols: gridCols } = _readWindowGridInputs('login-shopee');
       threadsInput.disabled = true;
       timeoutInput.disabled = true;
+      document.getElementById('login-shopee-grid-rows-input').disabled = true;
+      document.getElementById('login-shopee-grid-cols-input').disabled = true;
       cancelBtn.style.display = 'none';
       startBtn.style.display = 'none';
       stopBtn.style.display = '';
@@ -6055,7 +6394,7 @@ function _showLoginShopeeRunner(accounts, skipped) {
       disableDismiss(); // "trong qua trinh chay popup se khong bi tat di" - khoa Escape/click ra ngoai
 
       if (skipped) log(`Bỏ qua ${skipped} dòng thiếu ID profile / Email / Shopee Password.`);
-      log(`Bắt đầu với ${threads} luồng song song, timeout ${timeoutSec}s/bước, cho ${accounts.length} tài khoản.`);
+      log(`Bắt đầu với ${threads} luồng song song, timeout ${timeoutSec}s/bước, lưới cửa sổ ${gridRows}x${gridCols}, cho ${accounts.length} tài khoản.`);
 
       let cursor = 0;
       const next = () => {
@@ -6063,18 +6402,22 @@ function _showLoginShopeeRunner(accounts, skipped) {
         const i = cursor++;
         return i < accounts.length ? accounts[i] : undefined;
       };
-      const worker = async () => {
+      // workerIdx (0-based, CO DINH cho DUNG 1 luong trong suot ca phien) = vi tri o luoi man
+      // hinh cho luong do - xem positionWindow() trong cdp_login_shopee.mjs: MOI tai khoan luong
+      // nay mo tiep theo deu vao DUNG o cu, khong bao gio dam vao o cua luong khac dang chay.
+      const worker = async (workerIdx) => {
         for (let acc; (acc = next()) !== undefined;) {
           setRowStatus(acc.id, 'Đang chạy', 'đang bắt đầu...');
           log(`${acc.label}: bắt đầu đăng nhập...`);
           // Poll chi tiet tung buoc (yeu cau nguoi dung 2026-09-11: "muon chi tiet hon tung tai
           // khoan") - moi khi step doi, ghi vao cot Chi tiet cua dong VA vao Nhat ky.
-          const stopProgressPoll = _pollLoginShopeeProgress(acc.id, (step, detail) => {
+          const stopProgressPoll = _pollCdpProgress(acc.id, (step, detail) => {
             setRowStatus(acc.id, 'Đang chạy', step);
             log(`${acc.label}: ${step}${detail ? ' — ' + detail : ''}`);
           });
           try {
-            const r = await api('POST', `/api/mail_accounts/${acc.id}/login_shopee`, { timeout_sec: timeoutSec }, clientTimeoutMs);
+            const r = await api('POST', `/api/mail_accounts/${acc.id}/login_shopee`,
+              { timeout_sec: timeoutSec, grid_rows: gridRows, grid_cols: gridCols, grid_slot: workerIdx }, clientTimeoutMs);
             results.push({ id: acc.id, ...r });
             const label = LOGIN_SHOPEE_STATUS_LABEL[r.status] || r.status;
             // Dang nhap OK: lay luon cookie ngay trong cung phien (xem yeu cau nguoi dung
@@ -6096,7 +6439,7 @@ function _showLoginShopeeRunner(accounts, skipped) {
           updateSummary(results.length);
         }
       };
-      await Promise.all(Array.from({ length: threads }, () => worker()));
+      await Promise.all(Array.from({ length: threads }, (_, workerIdx) => worker(workerIdx)));
 
       if (stopRequested) {
         accounts.forEach(a => {
@@ -6109,6 +6452,8 @@ function _showLoginShopeeRunner(accounts, skipped) {
       } else {
         log('Đã chạy xong tất cả.');
       }
+      document.getElementById('login-shopee-grid-rows-input').disabled = false;
+      document.getElementById('login-shopee-grid-cols-input').disabled = false;
       stopBtn.style.display = 'none';
       closeBtn.style.display = '';
     };

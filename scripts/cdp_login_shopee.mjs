@@ -46,6 +46,16 @@ const GPM_BASE = arg('--gpm-base', 'http://127.0.0.1:9495');
 const GEM_BASE = arg('--gem-base', 'http://127.0.0.1:1010');
 const TIMEOUT = parseInt(arg('--timeout', '90000'), 10) || 90000;
 const POLL = parseInt(arg('--poll', '900'), 10) || 900;
+// Sap xep vi tri cua so tren man hinh theo luoi hang x cot (yeu cau nguoi dung 2026-09-12:
+// "cấu hình sắp xếp profile hiển thị ... cho phép người dùng nhập số hàng và số cột") - xem
+// positionWindow() ben duoi. GRID_SLOT la vi tri 0-based CUA LUONG dang chay tab nay trong
+// pool (KHONG PHAI theo tai khoan - 1 luong xu ly nhieu tai khoan lan luot, moi tai khoan mo
+// sau deu vao DUNG o cu cua luong do, khong bao gio doi cho giua chung 1 phien).
+const GRID_ROWS = Math.max(1, parseInt(arg('--grid-rows', '1'), 10) || 1);
+const GRID_COLS = Math.max(1, parseInt(arg('--grid-cols', '1'), 10) || 1);
+const GRID_SLOT = Math.max(0, parseInt(arg('--grid-slot', '0'), 10) || 0);
+const SCREEN_WIDTH = parseInt(arg('--screen-width', '1920'), 10) || 1920;
+const SCREEN_HEIGHT = parseInt(arg('--screen-height', '1080'), 10) || 1080;
 
 // Suffix co dinh giong extension mau (popup.js: additionalCookies) - KHONG phai cookie thuc,
 // chi la thong tin app dinh kem theo dinh dang yeu cau - COPY nguyen tu cdp_get_cookie.mjs de
@@ -120,7 +130,7 @@ async function startProfile() {
     const r = await ft(base + path, { ms: 20000 });
     const t = await r.text();
     let j = null; try { j = JSON.parse(t); } catch (e) {}
-    if (!r.ok || !(j && j.success)) return { ok: false, raw: t };
+    if (!r.ok || !(j && j.success)) return { ok: false, raw: t, message: j && j.message };
     return { ok: true, data: (j && j.data) || {} };
   };
   let res = await doStart();
@@ -132,7 +142,16 @@ async function startProfile() {
     await sleep(2500);
     res = await doStart();
   }
-  if (!res.ok) throw new Error((ENGINE === 'gem' ? 'GemLogin' : 'GPM') + ' start fail: ' + res.raw.slice(0, 240));
+  // Dat 'message' (vd GPM tra 'ProxyCheckFailed') NGAY DAU chuoi loi, TRUOC ban dump 'raw' cat
+  // ngan - yeu cau nguoi dung 2026-09-12 "check proxy ... thông báo chi tiết do proxy die" phat
+  // hien bug thuc te: 'raw' qua dai (nhieu field rong nhu profile_id/driver_path/... di TRUOC),
+  // 240 ky tu cat ngan (o day VA lan nua o Python _run_cdp_script(), xem affiliate_scrape_server.py)
+  // LUON cat DUNG NGAY TRUOC field 'message' -> Python khong bao gio thay duoc tu khoa 'proxy'
+  // de nhan biet day la loi proxy. Dat message len dau dam bao SONG SOT qua ca 2 lan cat ngan.
+  if (!res.ok) {
+    const msgPart = res.message ? ` message=${res.message}` : '';
+    throw new Error(`${ENGINE === 'gem' ? 'GemLogin' : 'GPM'} start fail:${msgPart} raw=${res.raw.slice(0, 180)}`);
+  }
   const d = res.data;
   if (ENGINE === 'gem') {
     const addr = String(d.remote_debugging_address || '');
@@ -143,6 +162,27 @@ async function startProfile() {
   const port = d.remote_debugging_port;
   if (!port) throw new Error('GPM start khong tra remote_debugging_port');
   return { port: parseInt(port, 10) };
+}
+
+// Dong browser (GPM stop / GEM close) - THANH CONG hay THAT BAI deu dong, KE CA khi loi fatal
+// xay ra truoc khi kip dang nhap xong (xem moi call site ben duoi + catch tong o cuoi file) -
+// yeu cau nguoi dung 2026-09-12: "chạy 100 profile 4 luồng, tool cứ mở liên tục không đóng
+// profile lại khi xử lý xong hoặc gặp lỗi không thể tiếp tục". Truoc ban vá nay, file nay LA
+// NGOAI LE DUY NHAT trong so cac helper CDP cung nhom (cdp_get_cookie.mjs/cdp_get_shopee_id.mjs
+// deu co closeProfile() o moi nhanh thoat) - khong dong profile o BAT KY nhanh nao (kem
+// verify_email_link, MOI dong o buoc --step activate ke tiep vi can giu browser mo cho buoc
+// do). Dung PROFILE id (khong can port) nen goi duoc AN TOAN o MOI diem thoat, ke ca truoc khi
+// startProfile() thanh cong (best-effort, GPM/GEM tu bo qua neu profile chua/khong chay).
+// CHI --step activate can --profile/--engine/--gpm-base/--gem-base duoc TRUYEN THEM tu Python
+// (xem mail_accounts_login_shopee() trong affiliate_scrape_server.py) vi buoc do von khong
+// dung toi cac tham so nay cho logic chinh, chi de closeProfile() biet dong dung profile nao.
+async function closeProfile() {
+  if (!PROFILE) return; // --step activate truoc ban vá nay khong truyen --profile - tranh goi API voi id rong
+  try {
+    const base = ENGINE === 'gem' ? GEM_BASE : GPM_BASE;
+    const path = ENGINE === 'gem' ? `/api/profiles/close/${PROFILE}` : `/api/v1/profiles/stop/${PROFILE}`;
+    await ft(base + path, { ms: 20000 });
+  } catch (e) {}
 }
 
 async function waitCdpUp(port, tries = 60) {
@@ -202,6 +242,86 @@ async function closeTab(port, tabId) {
     } catch (e) {}
   }
   return false;
+}
+
+// Dat vi tri/kich thuoc cua so browser theo luoi hang x cot tren man hinh (yeu cau nguoi dung
+// 2026-09-12 "thêm cấu hình sắp xếp profile hiển thị ... nhập số hàng và số cột") - dung Chrome
+// DevTools Protocol domain 'Browser' (Browser.getWindowForTarget/setWindowBounds), KHAC HAN cac
+// lenh CDP khac trong file nay (Page/Runtime/Network) O CHO no chi hoat dong qua 1 KET NOI WS
+// RIENG toi endpoint CAP TRINH DUYET (/devtools/browser/<id>, tu /json/version), KHONG PHAI qua
+// ket noi cap-tab (/devtools/page/<id>) dang dung cho tu dong hoa - da xac nhan qua test THAT
+// 2026-09-12 tren 1 profile GPM that.
+//
+// PHAT HIEN QUAN TRONG tu test that: goi 1 LAN DUY NHAT setWindowBounds voi CA windowState:
+// 'normal' LAN toa do/kich thuoc cu the (khi cua so dang o trang thai maximized) se bi Chrome
+// LANG LE BO QUA phan toa do/kich thuoc yeu cau (chi ap dung state, tra ve 1 kich thuoc "restore"
+// mac dinh khac hoan toan). PHAI tach lam 2 LUOT GOI RIENG: (1) ep ve 'normal' TRUOC (khong kem
+// bounds), doi 1 nhip ngan, (2) MOI goi tiep dat toa do/kich thuoc cu the - lam dung thu tu nay
+// moi ap dung chinh xac (da kiem chung bang Browser.getWindowBounds() sau do khop 100% yeu cau).
+//
+// Best-effort HOAN TOAN (nuot moi loi) - day la tinh nang PHU TRO hien thi, KHONG duoc phep lam
+// hong/lam cham luong dang nhap/lay cookie chinh du gap loi gi (vd profile chi co 1 man hinh,
+// GEM chua ho tro domain Browser, hoac rows*cols < so luong dang chay khien nhieu cua so cung
+// vao 1 o - nguoi dung da xac nhan CHAP NHAN truong hop nay, chi can KHONG crash).
+async function positionWindow(port) {
+  if (GRID_ROWS <= 1 && GRID_COLS <= 1) {
+    // 1 hang x 1 cot = "hiển thị full màn hình" (yeu cau nguoi dung, muc 1) - maximize THANG,
+    // don gian/chac chan hon tinh toan 1 o rong bang ca man hinh.
+    return positionWindowRaw(port, null);
+  }
+  const cellW = Math.floor(SCREEN_WIDTH / GRID_COLS);
+  const cellH = Math.floor(SCREEN_HEIGHT / GRID_ROWS);
+  const cellsPerScreen = GRID_ROWS * GRID_COLS;
+  const idx = GRID_SLOT % cellsPerScreen; // luong > so o: CHO DE (da xac nhan nguoi dung), khong crash
+  const col = idx % GRID_COLS;
+  const row = Math.floor(idx / GRID_COLS);
+  return positionWindowRaw(port, { left: col * cellW, top: row * cellH, width: cellW, height: cellH });
+}
+
+async function positionWindowRaw(port, bounds) {
+  let ws = null;
+  try {
+    const v = await (await ft(`http://127.0.0.1:${port}/json/version`, { ms: 6000 })).json();
+    const browserWsUrl = v && v.webSocketDebuggerUrl;
+    if (!browserWsUrl) return;
+    ws = new WebSocket(browserWsUrl);
+    await new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('ws timeout')), 6000);
+      ws.onopen = () => { clearTimeout(t); resolve(); };
+      ws.onerror = () => { clearTimeout(t); reject(new Error('ws error')); };
+    });
+    let msgId = 0;
+    const pending = new Map();
+    ws.onmessage = (ev) => {
+      let msg = null; try { msg = JSON.parse(String(ev.data)); } catch (e) {}
+      if (!msg || msg.id === undefined) return;
+      const p = pending.get(msg.id);
+      if (p) { pending.delete(msg.id); msg.error ? p.reject(new Error(JSON.stringify(msg.error))) : p.resolve(msg.result); }
+    };
+    const send = (method, params = {}) => {
+      const id = ++msgId;
+      return new Promise((resolve, reject) => {
+        pending.set(id, { resolve, reject });
+        ws.send(JSON.stringify({ id, method, params }));
+      });
+    };
+    const targets = await send('Target.getTargets');
+    const pageTarget = (targets.targetInfos || []).find((t) => t.type === 'page');
+    if (!pageTarget) return;
+    const win = await send('Browser.getWindowForTarget', { targetId: pageTarget.targetId });
+    const windowId = win.windowId;
+    if (!bounds) {
+      await send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'maximized' } });
+      return;
+    }
+    await send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } });
+    await sleep(300);
+    await send('Browser.setWindowBounds', { windowId, bounds });
+  } catch (e) {
+    dbg('positionWindow loi (bo qua, khong anh huong luong chinh):', e.message);
+  } finally {
+    try { ws && ws.close(); } catch (e) {}
+  }
 }
 
 class Cdp {
@@ -563,13 +683,14 @@ async function runLogin() {
   progress('Đang mở trình duyệt profile (GPM/GEM)...');
   let st;
   try { st = await startProfile(); }
-  catch (e) { process.stderr.write('START_ERR: ' + e.message + '\n'); process.exit(3); }
-  if (!(await waitCdpUp(st.port))) { process.stderr.write('CDP khong len port ' + st.port + '\n'); process.exit(4); }
+  catch (e) { process.stderr.write('START_ERR: ' + e.message + '\n'); await closeProfile(); process.exit(3); }
+  if (!(await waitCdpUp(st.port))) { process.stderr.write('CDP khong len port ' + st.port + '\n'); await closeProfile(); process.exit(4); }
+  await positionWindow(st.port); // best-effort, xem ghi chu dau ham
   const tab = await pickTab(st.port, 'about:blank');
-  if (!tab) { process.stderr.write('Mo tab that bai\n'); process.exit(5); }
+  if (!tab) { process.stderr.write('Mo tab that bai\n'); await closeProfile(); process.exit(5); }
   dbg('port=', st.port, 'picked tab id=', tab.id, 'url(before nav)=', tab.url);
   const cdp = new Cdp(tab.webSocketDebuggerUrl);
-  try { await cdp.connect(); } catch (e) { process.stderr.write('WS loi: ' + e.message + '\n'); process.exit(6); }
+  try { await cdp.connect(); } catch (e) { process.stderr.write('WS loi: ' + e.message + '\n'); await closeProfile(); process.exit(6); }
   await cdp.send('Page.enable').catch(() => {});
   await cdp.send('Runtime.enable').catch(() => {});
   progress('Đang tải trang đăng nhập...');
@@ -583,7 +704,7 @@ async function runLogin() {
   // huong", KHONG phai "da tai xong tai lieu moi". Doc SUCCESS_JS qua som se an nham vao NOI
   // DUNG CU do. Cho load event that su (hoac toi da 20s) truoc khi tin bat ky gia tri nao.
   const loadEventPromise = cdp.waitForEvent('Page.loadEventFired', Math.min(TIMEOUT, 20000));
-  try { await cdp.send('Page.navigate', { url: URL }); } catch (e) { process.stderr.write('NAV loi: ' + (e && e.message) + '\n'); process.exit(7); }
+  try { await cdp.send('Page.navigate', { url: URL }); } catch (e) { process.stderr.write('NAV loi: ' + (e && e.message) + '\n'); await closeProfile(); process.exit(7); }
   const loaded = await loadEventPromise;
   dbg('Page.loadEventFired nhan duoc trong han:', loaded);
   // Du da co load event that su, van giu 1 khoang settle nho SAU DO (SPA con can hydrate/tu
@@ -594,26 +715,31 @@ async function runLogin() {
 
   const { res, cdp: liveCdp } = await handleCaptchaIfNeeded(cdp, st.port, tab.id, Date.now() + TIMEOUT, true);
   if (res.status === 'verify_email_link') {
+    // KHONG dong profile o day - --step activate ke tiep (goi tu Python) can browser nay VAN
+    // MO de mo link kich hoat tren CUNG profile (xem closeProfile() se duoc goi o CUOI
+    // runActivate() thay vi o day).
     out({ status: res.status, detail: res.detail, url: URL, port: st.port, tab_id: tab.id });
   } else if (res.status === 'ok') {
     await showOverlay(liveCdp, 'Login thành công', true);
     await sleep(1500); // giu overlay hien du lau de nguoi dung kip nhin thay truoc khi dieu huong di
     const cookie = await navigateHomeAndExtractCookie(liveCdp);
+    await closeProfile();
     out({ status: res.status, detail: res.detail, url: URL, cookie });
   } else {
     await showOverlay(liveCdp, 'Login thất bại', false);
+    await closeProfile();
     out({ status: res.status, detail: res.detail, url: URL });
   }
   process.exit(0);
 }
 
 async function runActivate() {
-  if (!PORT || !TAB0_ID || !LINK) { process.stderr.write('thieu --port/--tab0-id/--link\n'); process.exit(2); }
-  if (!(await waitCdpUp(PORT, 20))) { process.stderr.write('CDP khong len port ' + PORT + '\n'); process.exit(4); }
+  if (!PORT || !TAB0_ID || !LINK) { process.stderr.write('thieu --port/--tab0-id/--link\n'); await closeProfile(); process.exit(2); }
+  if (!(await waitCdpUp(PORT, 20))) { process.stderr.write('CDP khong len port ' + PORT + '\n'); await closeProfile(); process.exit(4); }
 
   progress('Đang mở link xác thực từ email...');
   const tab1 = await openTab(PORT, LINK);
-  if (!tab1) { process.stderr.write('Mo tab kich hoat that bai\n'); process.exit(5); }
+  if (!tab1) { process.stderr.write('Mo tab kich hoat that bai\n'); await closeProfile(); process.exit(5); }
   const cdp1 = new Cdp(tab1.webSocketDebuggerUrl);
   let approved = false;
   try {
@@ -642,7 +768,7 @@ async function runActivate() {
   // dinh qua cac lan navigate, khong doi khi chi doi state tren cung 1 tab).
   const cdp0 = new Cdp(`ws://127.0.0.1:${PORT}/devtools/page/${TAB0_ID}`);
   try { await cdp0.connect(); }
-  catch (e) { process.stderr.write('Ket noi lai tab 0 loi: ' + e.message + '\n'); fail('error', 'Khong ket noi lai duoc tab dang nhap (tab 0): ' + e.message, { approved }); return; }
+  catch (e) { process.stderr.write('Ket noi lai tab 0 loi: ' + e.message + '\n'); await closeProfile(); fail('error', 'Khong ket noi lai duoc tab dang nhap (tab 0): ' + e.message, { approved }); return; }
   await cdp0.send('Page.enable').catch(() => {});
   await cdp0.send('Runtime.enable').catch(() => {});
   try { await cdp0.send('Page.bringToFront'); } catch (e) {}
@@ -652,9 +778,11 @@ async function runActivate() {
     await showOverlay(liveCdp, 'Login thành công', true);
     await sleep(1500); // giu overlay hien du lau de nguoi dung kip nhin thay truoc khi dieu huong di
     const cookie = await navigateHomeAndExtractCookie(liveCdp);
+    await closeProfile();
     out({ status: res.status, detail: res.detail, url: URL, approved, cookie });
   } else {
     await showOverlay(liveCdp, 'Login thất bại', false);
+    await closeProfile();
     out({ status: res.status, detail: res.detail, url: URL, approved });
   }
   process.exit(0);
@@ -665,4 +793,14 @@ async function main() {
   return runLogin();
 }
 
-main().then(() => process.exit(0)).catch((e) => { process.stderr.write('FATAL: ' + (e && e.message) + '\n'); process.exit(1); });
+// Luoi an toan CUOI CUNG: BAT KY exception nao khong duoc cac try/catch cuc bo ben tren bat
+// (vd loi CDP bat ngo giua chung, network hiccup...) deu roi vao day - PHAI dong profile o day
+// (an toan cho ca 2 step, ke ca --step login dang o giua verify_email_link vi flow do da hong
+// hoan toan, KHONG con --step activate nao se duoc goi tiep de dong thay) truoc khi thoat, neu
+// khong day chinh la nguyen nhan "mở liên tục không đóng lại khi gặp lỗi không thể tiếp tục"
+// (yeu cau nguoi dung 2026-09-12).
+main().then(() => process.exit(0)).catch(async (e) => {
+  process.stderr.write('FATAL: ' + (e && e.message) + '\n');
+  await closeProfile();
+  process.exit(1);
+});
